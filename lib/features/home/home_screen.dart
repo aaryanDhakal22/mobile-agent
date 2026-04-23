@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../drivers/driver_fab.dart';
+import '../drivers/drivers_pane.dart';
+import '../history/history_pane.dart';
 import '../order_detail/order_detail_screen.dart';
+import '../printer/printer_pane.dart';
 import '../settings/settings_screen.dart';
+import 'quicc_nav_rail.dart';
+
+const int _settingsIndex = 4;
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -20,58 +28,92 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Do NOT shrink the body when the on-screen keyboard opens â€” otherwise
+      // the left rail's evenly-spread items get squashed below their minimum
+      // size and the icons overflow. TextFields in descendant Scrollables
+      // (ListView in Settings etc.) still auto-scroll into view on focus via
+      // Flutter's built-in `scrollPadding` behaviour.
+      resizeToAvoidBottomInset: false,
       body: Row(
         children: [
-          NavigationRail(
+          QuiccNavRail(
             selectedIndex: _index,
             onDestinationSelected: (i) => setState(() => _index = i),
-            labelType: NavigationRailLabelType.all,
-            leading: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: QuiccColors.brand400,
-                  borderRadius: BorderRadius.circular(QuiccRadius.md),
-                ),
-                alignment: Alignment.center,
-                child: const Text(
-                  'q',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: QuiccColors.brand900,
-                    height: 1,
-                  ),
-                ),
-              ),
+            header: _ThemeToggleLogo(
+              onTap: () {
+                final m = ref.read(themeModeProvider);
+                ref.read(themeModeProvider.notifier).state =
+                    m == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+              },
             ),
             destinations: const [
-              NavigationRailDestination(
-                icon: Icon(Icons.notifications_active_outlined),
-                selectedIcon: Icon(Icons.notifications_active),
-                label: Text('Arrived'),
+              QuiccNavDestination(
+                icon: Icons.notifications_active_outlined,
+                selectedIcon: Icons.notifications_active,
+                label: 'Arrived',
               ),
-              NavigationRailDestination(
-                icon: Icon(Icons.receipt_long_outlined),
-                selectedIcon: Icon(Icons.receipt_long),
-                label: Text('History'),
+              QuiccNavDestination(
+                icon: Icons.receipt_long_outlined,
+                selectedIcon: Icons.receipt_long,
+                label: 'History',
               ),
-              NavigationRailDestination(
-                icon: Icon(Icons.print_outlined),
-                selectedIcon: Icon(Icons.print),
-                label: Text('Printer'),
+              QuiccNavDestination(
+                icon: Icons.print_outlined,
+                selectedIcon: Icons.print,
+                label: 'Printer',
               ),
-              NavigationRailDestination(
-                icon: Icon(Icons.settings_outlined),
-                selectedIcon: Icon(Icons.settings),
-                label: Text('Settings'),
+              QuiccNavDestination(
+                icon: Icons.local_shipping_outlined,
+                selectedIcon: Icons.local_shipping,
+                label: 'Drivers',
+              ),
+              QuiccNavDestination(
+                icon: Icons.settings_outlined,
+                selectedIcon: Icons.settings,
+                label: 'Settings',
               ),
             ],
           ),
           const VerticalDivider(width: 1),
-          Expanded(child: _buildSection(_index)),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 260),
+                    reverseDuration: const Duration(milliseconds: 140),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    layoutBuilder: (current, previous) => Stack(
+                      fit: StackFit.expand,
+                      alignment: Alignment.center,
+                      children: [
+                        ...previous,
+                        ?current,
+                      ],
+                    ),
+                    transitionBuilder: (child, anim) => FadeTransition(
+                      opacity: anim,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, 0.015),
+                          end: Offset.zero,
+                        ).animate(anim),
+                        child: child,
+                      ),
+                    ),
+                    child: KeyedSubtree(
+                      key: ValueKey<int>(_index),
+                      child: _buildSection(_index),
+                    ),
+                  ),
+                ),
+                // FAB rides on top of every pane except Settings.
+                if (_index != _settingsIndex)
+                  const Positioned.fill(child: DriverFab()),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -80,14 +122,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildSection(int i) {
     return switch (i) {
       0 => const _ArrivedPane(),
-      1 => const _PlaceholderPane(
-          title: 'History',
-          body: 'Recent orders will live here once the history pane lands.',
-        ),
-      2 => const _PlaceholderPane(
-          title: 'Printer',
-          body: 'Printer health polls arrive once the agent exposes the status endpoint.',
-        ),
+      1 => const HistoryPane(),
+      2 => const PrinterPane(),
+      3 => const DriversPane(),
       _ => const SettingsScreen(),
     };
   }
@@ -129,7 +166,7 @@ class _ArrivedPane extends ConsumerWidget {
                       ),
                       Text(
                         '${orders.length} waiting',
-                        style: const TextStyle(color: QuiccColors.textSecondary),
+                        style: TextStyle(color: context.palette.textSecondary),
                       ),
                     ],
                   ),
@@ -184,8 +221,8 @@ class _ArrivedRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${req.serviceType} · ${req.items.length} item${req.items.length == 1 ? '' : 's'}',
-                      style: const TextStyle(color: QuiccColors.textSecondary),
+                      '${req.serviceType} Â· ${req.items.length} item${req.items.length == 1 ? '' : 's'}',
+                      style: TextStyle(color: context.palette.textSecondary),
                     ),
                   ],
                 ),
@@ -195,7 +232,7 @@ class _ArrivedRow extends StatelessWidget {
                 style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
               ),
               const SizedBox(width: 12),
-              const Icon(Icons.chevron_right, color: QuiccColors.textMuted),
+              Icon(Icons.chevron_right, color: context.palette.textMuted),
             ],
           ),
         ),
@@ -211,19 +248,19 @@ class _EmptyState extends StatelessWidget {
       padding: const EdgeInsets.all(48),
       children: [
         const SizedBox(height: 120),
-        const Icon(Icons.inbox_outlined, size: 96, color: QuiccColors.textMuted),
+        Icon(Icons.inbox_outlined, size: 96, color: context.palette.textMuted),
         const SizedBox(height: 24),
-        const Center(
+        Center(
           child: Text(
             'No orders waiting',
-            style: TextStyle(fontSize: 22, color: QuiccColors.textSecondary),
+            style: TextStyle(fontSize: 22, color: context.palette.textSecondary),
           ),
         ),
         const SizedBox(height: 8),
-        const Center(
+        Center(
           child: Text(
             "You'll see new orders here the moment they land.",
-            style: TextStyle(color: QuiccColors.textMuted),
+            style: TextStyle(color: context.palette.textMuted),
           ),
         ),
       ],
@@ -255,7 +292,7 @@ class _ConnectionError extends StatelessWidget {
           child: Text(
             error,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: QuiccColors.textMuted),
+            style: TextStyle(color: context.palette.textMuted),
           ),
         ),
         const SizedBox(height: 24),
@@ -267,10 +304,10 @@ class _ConnectionError extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        const Center(
+        Center(
           child: Text(
             'Check the URL in Settings if this keeps failing.',
-            style: TextStyle(color: QuiccColors.textMuted, fontSize: 13),
+            style: TextStyle(color: context.palette.textMuted, fontSize: 13),
           ),
         ),
       ],
@@ -278,23 +315,84 @@ class _ConnectionError extends StatelessWidget {
   }
 }
 
-class _PlaceholderPane extends StatelessWidget {
-  final String title;
-  final String body;
-  const _PlaceholderPane({required this.title, required this.body});
+/// The `q` logo tile that doubles as the theme toggle. Tap to flip between
+/// dark and light. A subtle scale-down while pressed + haptic tick makes the
+/// tap feel alive; the underlying tile stays on brand (lavender anchor).
+class _ThemeToggleLogo extends StatefulWidget {
+  final VoidCallback onTap;
+  const _ThemeToggleLogo({required this.onTap});
+
+  @override
+  State<_ThemeToggleLogo> createState() => _ThemeToggleLogoState();
+}
+
+class _ThemeToggleLogoState extends State<_ThemeToggleLogo>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _press;
+
+  @override
+  void initState() {
+    super.initState();
+    _press = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 130),
+      reverseDuration: const Duration(milliseconds: 200),
+      lowerBound: 0,
+      upperBound: 1,
+    );
+  }
+
+  @override
+  void dispose() {
+    _press.dispose();
+    super.dispose();
+  }
+
+  void _fire() {
+    HapticFeedback.selectionClick();
+    widget.onTap();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(48),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 12),
-          Text(body, style: const TextStyle(color: QuiccColors.textSecondary)),
-        ],
+    return Semantics(
+      button: true,
+      label: 'Toggle theme',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => _press.forward(),
+        onTapUp: (_) {
+          _press.reverse();
+          _fire();
+        },
+        onTapCancel: () => _press.reverse(),
+        child: AnimatedBuilder(
+          animation: _press,
+          builder: (_, child) {
+            final scale = 1.0 - (_press.value * 0.08);
+            return Transform.scale(scale: scale, child: child);
+          },
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: QuiccColors.brand400,
+              borderRadius: BorderRadius.circular(QuiccRadius.md),
+            ),
+            alignment: Alignment.center,
+            child: const Text(
+              'q',
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w700,
+                color: QuiccColors.brand900,
+                height: 1,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
 }
+

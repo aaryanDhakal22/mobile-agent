@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'models.dart';
+import 'printer_models.dart';
 
 class AgentException implements Exception {
   final int? statusCode;
@@ -35,6 +36,40 @@ class AgentClient {
         .whereType<Map<String, dynamic>>()
         .map(StoredOrder.fromJson)
         .toList(growable: false);
+  }
+
+  Future<List<StoredOrder>> listOrders({int offset = 0, int limit = 50}) async {
+    final resp = await _client
+        .get(_uri('/api/orders?offset=$offset&limit=$limit'))
+        .timeout(timeout);
+    _throwIfBad(resp);
+    final list = jsonDecode(resp.body) as List<dynamic>;
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(StoredOrder.fromJson)
+        .toList(growable: false);
+  }
+
+  Future<List<PrinterStatus>> listPrinters() async {
+    final resp = await _client.get(_uri('/api/printers')).timeout(timeout);
+    _throwIfBad(resp);
+    final list = jsonDecode(resp.body) as List<dynamic>;
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(PrinterStatus.fromJson)
+        .toList(growable: false);
+  }
+
+  Future<PrinterStatus> setPrinterIP(String name, String ip) async {
+    final resp = await _client
+        .put(
+          _uri('/api/printers/$name/ip'),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({'ip': ip}),
+        )
+        .timeout(timeout);
+    _throwIfBad(resp);
+    return PrinterStatus.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
   Future<StoredOrder> accept(int id) async {

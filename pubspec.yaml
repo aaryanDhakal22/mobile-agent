@@ -24,4 +24,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/sounds/alert.mp3
+    - assets/sounds/default.mp3
+    - assets/sounds/ddlg.mp3
+    - assets/sounds/dhoom.mp3
+    - assets/sounds/indian.mp3
+    - assets/sounds/nokia.mp3

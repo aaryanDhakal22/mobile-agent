@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/providers.dart';
 import 'features/alert/new_order_alert_screen.dart';
+import 'features/drivers/driver_announcer.dart';
 import 'features/home/home_screen.dart';
 import 'theme/quicc_theme.dart';
 
@@ -28,18 +29,30 @@ class MobileAgentApp extends ConsumerWidget {
             fullscreenDialog: true,
           ),
         );
-        // New arrival → the `/api/orders/arrived` list is stale. Invalidate so
-        // the home pane reflects the queue as soon as the alert is dismissed.
-        ref.invalidate(arrivedOrdersProvider);
+        // Optimistically prepend to the arrived queue so the list is already
+        // up-to-date the moment the cashier dismisses the alert — no fetch
+        // latency visible.
+        ref.read(arrivedOrdersProvider.notifier).prepend(order);
       });
     });
 
+    final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
       title: 'quiccpos',
       navigatorKey: rootNavKey,
       debugShowCheckedModeBanner: false,
-      theme: QuiccTheme.dark(),
+      theme: QuiccTheme.light(),
+      darkTheme: QuiccTheme.dark(),
+      themeMode: themeMode,
       home: const HomeScreen(),
+      // Driver-name blink rides above every route at the MaterialApp level so
+      // it covers both the Home pane and any pushed route (order detail etc).
+      builder: (context, child) => Stack(
+        children: [
+          child ?? const SizedBox.shrink(),
+          const Positioned.fill(child: DriverAnnouncer()),
+        ],
+      ),
     );
   }
 }

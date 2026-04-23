@@ -1,23 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/alert_player.dart';
 import '../../core/models.dart';
+import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../order_detail/order_detail_screen.dart';
 
 /// Full-screen DoorDash-style new-order alarm. Shown when the agent broadcasts
 /// `order.arrived` over SSE. One tap anywhere stops the alarm and transitions
 /// into the order detail where the cashier can confirm the print.
-class NewOrderAlertScreen extends StatefulWidget {
+class NewOrderAlertScreen extends ConsumerStatefulWidget {
   final StoredOrder order;
   const NewOrderAlertScreen({super.key, required this.order});
 
   @override
-  State<NewOrderAlertScreen> createState() => _NewOrderAlertScreenState();
+  ConsumerState<NewOrderAlertScreen> createState() => _NewOrderAlertScreenState();
 }
 
-class _NewOrderAlertScreenState extends State<NewOrderAlertScreen>
+class _NewOrderAlertScreenState extends ConsumerState<NewOrderAlertScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
   bool _dismissed = false;
@@ -29,7 +31,9 @@ class _NewOrderAlertScreenState extends State<NewOrderAlertScreen>
       vsync: this,
       duration: const Duration(milliseconds: 650),
     )..repeat(reverse: true);
-    AlertPlayer.start();
+    // Snapshot the selected sound when the alert fires — changing it in
+    // Settings mid-alarm shouldn't swap the chime out from under the cashier.
+    AlertPlayer.start(ref.read(alertSoundProvider));
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
