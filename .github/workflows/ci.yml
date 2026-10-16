@@ -1,0 +1,21 @@
+name: Analyze + test
+
+# Counter-tablet app CI: static analysis + the unit/widget tests on every push.
+# (Release APKs are built and signed locally for now.)
+
+on:
+  push:
+    branches: ["**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test

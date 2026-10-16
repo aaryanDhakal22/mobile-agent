@@ -2,126 +2,453 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
-import 'agent_client.dart';
-import 'agent_config.dart';
+import 'alarm.dart';
 import 'alert_player.dart';
+import 'api_client.dart';
+import 'floor_state.dart';
 import 'models.dart';
 import 'printer_models.dart';
-import 'sse_client.dart';
+import 'sse.dart';
+import 'storage.dart';
 
-/// Theme mode — toggled by the `q` logo on the nav rail. No persistence in
-/// v1; resets to dark on each launch.
-final themeModeProvider = StateProvider<ThemeMode>((_) => ThemeMode.dark);
+// =============================================================================
+// Storage + pairing
+// =============================================================================
 
-/// Which chime plays on order arrival. Cashier picks from the Settings
-/// dropdown. No persistence in v1 — resets to `default` each launch.
-final alertSoundProvider =
-    StateProvider<AlertSound>((_) => AlertSound.defaultSound);
+/// Overridden in main() with the loaded instance.
+final sharedPrefsProvider = Provider<SharedPreferences>(
+  (_) => throw UnimplementedError('sharedPrefsProvider must be overridden'),
+);
 
-/// Session-local base URL. Edits live until the app is killed (no persistence
-/// in v1 — see CLAUDE.md).
-final agentBaseUrlProvider = StateProvider<String>((_) => AgentConfig.defaultBaseUrl);
+final storageProvider = Provider<AppStorage>((ref) => AppStorage(ref.watch(sharedPrefsProvider)));
 
-final agentClientProvider = Provider<AgentClient>((ref) {
-  final base = ref.watch(agentBaseUrlProvider);
-  final client = AgentClient(base);
+/// The stored pairing, or null → show the pairing screen.
+class PairingNotifier extends Notifier<Pairing?> {
+  /// Why we were last sent back to pairing (shown on the pairing screen).
+  String? lastUnpairReason;
+
+  @override
+  Pairing? build() => ref.watch(storageProvider).readPairing();
+
+  /// `POST /api/pair` then persist the key.
+  Future<void> pair({required String address, required String code, required String name}) async {
+    final base = normalizeAgentAddress(address);
+    final r = await AgentClient.pair(address: base, code: code, name: name);
+    final p = Pairing(
+      address: base,
+      deviceKey: r.key,
+      deviceName: r.name.isEmpty ? name.trim() : r.name,
+      deviceId: r.deviceId,
+    );
+    await ref.read(storageProvider).writePairing(p);
+    lastUnpairReason = null;
+    state = p;
+  }
+
+  /// Point the existing key at a new agent address (the Pi changed IP).
+  Future<void> setAddress(String address) async {
+    final p = state;
+    final base = normalizeAgentAddress(address);
+    if (p == null || base.isEmpty) return;
+    final next = p.copyWith(address: base);
+    await ref.read(storageProvider).writePairing(next);
+    state = next;
+  }
+
+  Future<void> unpair({String? reason}) async {
+    if (state == null) return;
+    lastUnpairReason = reason;
+    await ref.read(storageProvider).clearKey();
+    state = null;
+  }
+}
+
+final pairingProvider = NotifierProvider<PairingNotifier, Pairing?>(PairingNotifier.new);
+
+/// Called by any 401 `device_required`: wipe the key, back to pairing.
+void _deviceRevoked(Ref ref) {
+  // Deferred: this can fire from inside another provider's work.
+  scheduleMicrotask(() {
+    try {
+      ref
+          .read(pairingProvider.notifier)
+          .unpair(reason: 'This tablet was unpaired by the agent. Pair it again with a new code.');
+    } catch (_) {
+      // Already unpaired (this ref was disposed by an earlier 401).
+    }
+  });
+}
+
+/// HTTP client for the paired agent (null while unpaired).
+final agentClientProvider = Provider<AgentClient?>((ref) {
+  final p = ref.watch(pairingProvider);
+  if (p == null) return null;
+  final client = AgentClient(baseUrl: p.address, deviceKey: p.deviceKey, onDeviceRevoked: () => _deviceRevoked(ref));
   ref.onDispose(client.dispose);
   return client;
 });
 
-/// Arrived queue notifier — fetches from the agent but also exposes
-/// optimistic [remove] and [prepend] so the UI can react without waiting for
-/// a round-trip. Used on accept (remove instantly) and on SSE arrival
-/// (prepend instantly).
-class ArrivedOrdersNotifier extends AsyncNotifier<List<StoredOrder>> {
-  @override
-  Future<List<StoredOrder>> build() async {
-    final client = ref.watch(agentClientProvider);
-    return client.listArrived();
-  }
-
-  void remove(int orderId) {
-    final current = state.valueOrNull;
-    if (current == null) return;
-    state = AsyncValue.data(
-      current.where((o) => o.order.orderId != orderId).toList(growable: false),
-    );
-  }
-
-  void prepend(StoredOrder order) {
-    final current = state.valueOrNull ?? const [];
-    if (current.any((o) => o.order.orderId == order.order.orderId)) return;
-    state = AsyncValue.data([order, ...current]);
-  }
-
-  Future<void> refresh() async {
-    state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() async {
-      return ref.read(agentClientProvider).listArrived();
-    });
-  }
+AgentClient _requireClient(Ref ref) {
+  final c = ref.read(agentClientProvider);
+  if (c == null) throw const AgentException('This tablet is not paired');
+  return c;
 }
 
-final arrivedOrdersProvider =
-    AsyncNotifierProvider<ArrivedOrdersNotifier, List<StoredOrder>>(
-  ArrivedOrdersNotifier.new,
-);
+// =============================================================================
+// Live floor state: SSE + refetch + 20 s poll
+// =============================================================================
 
-final autoAcceptProvider = FutureProvider<bool>((ref) async {
-  final client = ref.watch(agentClientProvider);
-  return client.getAutoAccept();
-});
+const Duration kPollInterval = Duration(seconds: 20);
 
-/// SSE stream of freshly-arrived orders. Reconnects forever — the stream
-/// itself never errors out. Watched at the app root so it's active for the
-/// lifetime of the process.
-final arrivedEventStreamProvider = StreamProvider<StoredOrder>((ref) {
-  final base = ref.watch(agentBaseUrlProvider);
-  return arrivedEventStream(base);
-});
+/// HTTP client per SSE connection attempt — overridden in tests.
+final sseClientFactoryProvider = Provider<http.Client Function()>((_) => http.Client.new);
 
-/// First-page order history. History tab invalidates this provider when it
-/// wants fresh data (e.g. pull-to-refresh).
-final orderHistoryProvider = FutureProvider<List<StoredOrder>>((ref) async {
-  final client = ref.watch(agentClientProvider);
-  return client.listOrders(limit: 50);
-});
+/// SSE reconnect backoff — overridden in tests.
+final sseBackoffProvider = Provider<Duration Function(int attempt)>((_) => sseBackoff);
 
-/// Polls `GET /api/printers` every 5 s. Errors are surfaced as AsyncValue
-/// errors but do NOT terminate the stream — the next tick tries again and
-/// transitions back to data on success. Auto-disposes when the Printer pane
-/// is not mounted, so we aren't pinging the agent from hidden tabs.
-final printerStatusStreamProvider =
-    StreamProvider.autoDispose<List<PrinterStatus>>((ref) {
-  final client = ref.watch(agentClientProvider);
-  late StreamController<List<PrinterStatus>> controller;
-  Timer? timer;
+class FloorController extends Notifier<FloorState> {
+  AgentEventStream? _sse;
+  Timer? _poll;
+  bool _disposed = false;
 
-  Future<void> tick() async {
+  /// Bumped on every (re)build; callbacks from an older build's SSE stream or
+  /// refresh are dropped.
+  int _gen = 0;
+  bool _refreshing = false;
+  bool _refreshAgain = false;
+  List<SseEvent>? _bufferedDuringRefresh;
+
+  @override
+  FloorState build() {
+    final pairing = ref.watch(pairingProvider);
+    ref.watch(agentClientProvider);
+    _disposed = false;
+    final gen = ++_gen;
+    ref.onDispose(() {
+      _disposed = true;
+      _sse?.stop();
+      _sse = null;
+      _poll?.cancel();
+      _poll = null;
+    });
+    if (pairing == null) return const FloorState(connection: SseStatus.disconnected);
+
+    _sse = AgentEventStream(
+      baseUrl: pairing.address,
+      deviceKey: pairing.deviceKey,
+      onEvent: (ev) {
+        if (gen == _gen) _onEvent(ev);
+      },
+      onStatus: (st) {
+        if (gen == _gen) _set(state.copyWith(connection: st));
+      },
+      onConnected: () {
+        if (gen == _gen) unawaited(refresh());
+      },
+      onDeviceRevoked: () {
+        if (gen == _gen) _deviceRevoked(ref);
+      },
+      clientFactory: ref.read(sseClientFactoryProvider),
+      backoff: ref.read(sseBackoffProvider),
+    )..start();
+    _poll = Timer.periodic(kPollInterval, (_) => unawaited(refresh()));
+    // The SSE connect triggers the first refresh; this covers an agent whose
+    // SSE is down but whose REST still answers.
+    scheduleMicrotask(() => unawaited(refresh()));
+    return const FloorState();
+  }
+
+  void _set(FloorState s) {
+    if (_disposed) return;
+    state = s;
+  }
+
+  void _onEvent(SseEvent ev) {
+    if (_disposed) return;
+    _bufferedDuringRefresh?.add(ev);
+    final up = applySseEvent(state, ev);
+    _set(up.state);
+    if (up.refetch) unawaited(refresh());
+  }
+
+  /// Refetches floor, current batch, arrived queue and drivers. Frames that
+  /// arrive mid-fetch are replayed on top so a slow fetch can't roll them back.
+  Future<void> refresh() async {
+    final client = ref.read(agentClientProvider);
+    if (client == null || _disposed) return;
+    if (_refreshing) {
+      _refreshAgain = true;
+      return;
+    }
+    _refreshing = true;
+    final gen = _gen;
+    _bufferedDuringRefresh = [];
     try {
-      final snap = await client.listPrinters();
-      if (!controller.isClosed) controller.add(snap);
-    } catch (e, st) {
-      if (!controller.isClosed) controller.addError(e, st);
+      final results = await Future.wait([
+        client.getFloor(),
+        client.listAllOrders(batch: 'current'),
+        client.listArrived(),
+        client.listDrivers(),
+      ]);
+      if (_disposed || gen != _gen) return;
+      var next = state.withSnapshot(
+        floor: results[0] as Floor,
+        current: results[1] as List<StoredOrder>,
+        arrived: results[2] as List<StoredOrder>,
+        drivers: results[3] as List<Driver>,
+        at: DateTime.now(),
+      );
+      for (final ev in _bufferedDuringRefresh ?? const <SseEvent>[]) {
+        next = applySseEvent(next, ev).state;
+      }
+      _set(next);
+    } catch (e) {
+      if (gen == _gen) _set(state.copyWith(error: e.toString()));
+    } finally {
+      _bufferedDuringRefresh = null;
+      _refreshing = false;
+      if (_refreshAgain && !_disposed) {
+        _refreshAgain = false;
+        unawaited(refresh());
+      }
     }
   }
 
-  controller = StreamController<List<PrinterStatus>>(
-    onListen: () {
-      tick();
-      timer = Timer.periodic(const Duration(seconds: 5), (_) => tick());
-    },
-    onCancel: () {
-      timer?.cancel();
-      return controller.close();
-    },
+  /// App came back to the foreground: reconnect + refetch now.
+  void resume() {
+    _sse?.reconnectNow();
+    unawaited(refresh());
+  }
+
+  void _upsert(Iterable<StoredOrder> list) => _set(state.withOrders(list));
+
+  // --- actions (errors propagate to the UI) ----------------------------------
+
+  Future<StoredOrder> accept(String id, int? prepMinutes) async {
+    try {
+      final o = await _requireClient(ref).accept(id, prepMinutes: prepMinutes);
+      _upsert([o]);
+      return o;
+    } on AgentException catch (e) {
+      // 409 taken elsewhere / 502 reverted / 404 gone: resync the truth.
+      if (!e.isNetwork) unawaited(refresh());
+      rethrow;
+    }
+  }
+
+  Future<void> ready(String id) async {
+    try {
+      _upsert([await _requireClient(ref).ready(id)]);
+    } on AgentException catch (e) {
+      if (e.isConflict || e.isNotFound) unawaited(refresh());
+      rethrow;
+    }
+  }
+
+  Future<void> reprint(String id) => _requireClient(ref).reprint(id);
+
+  Future<void> assign(String driverId, List<String> orderIds) async {
+    try {
+      final out = await _requireClient(ref).assignDelivery(driverId: driverId, orderIds: orderIds);
+      _upsert(out);
+      // Flash the name now; the agent's `drivers.dispatched` echo of the same
+      // send-out is recognised and doesn't flash again (and still flashes if
+      // this tablet's SSE happens to be down).
+      final driver = state.drivers.where((d) => d.id == driverId).firstOrNull;
+      if (driver != null && out.isNotEmpty) {
+        _set(state.withDispatch(DriverDispatch(driver: driver, orders: out), updateRoster: false));
+      }
+      unawaited(_reloadDrivers());
+    } on AgentException catch (e) {
+      if (!e.isNetwork) unawaited(refresh());
+      rethrow;
+    }
+  }
+
+  /// 409 `invalid_state` = the driver isn't out (already returned
+  /// elsewhere): resync before the error reaches the UI.
+  Future<void> driverReturned(String driverId) async {
+    try {
+      _upsert(await _requireClient(ref).driverReturned(driverId));
+      unawaited(_reloadDrivers());
+    } on AgentException catch (e) {
+      if (e.isConflict || e.isNotFound) unawaited(refresh());
+      rethrow;
+    }
+  }
+
+  /// After an accept whose answer never came back (timeout / dropped
+  /// connection) the agent may still have claimed the order: read it back.
+  /// Returns the order as the agent has it, or null if that failed too.
+  Future<StoredOrder?> recheck(String id) async {
+    try {
+      final o = await _requireClient(ref).getOrder(id);
+      if (o.id.isNotEmpty) _upsert([o]);
+      return o;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> createDriver(String name) async {
+    await _requireClient(ref).createDriver(name);
+    await _reloadDrivers();
+  }
+
+  Future<void> renameDriver(String id, String name) async {
+    await _requireClient(ref).renameDriver(id, name);
+    await _reloadDrivers();
+  }
+
+  /// 409 `driver_not_available` = they're out on a run (can't be removed).
+  Future<void> removeDriver(String id) async {
+    try {
+      await _requireClient(ref).removeDriver(id);
+    } finally {
+      unawaited(_reloadDrivers());
+    }
+  }
+
+  /// Clock in: joins the back of the queue. On a 409 (already clocked in
+  /// elsewhere) the roster is reloaded before the error reaches the UI.
+  Future<Driver> clockIn(String id) => _clock(id, (c) => c.clockIn(id));
+
+  /// Clock out (only while available). 409 `driver_not_available` = out on a
+  /// run (or already off).
+  Future<Driver> clockOut(String id) => _clock(id, (c) => c.clockOut(id));
+
+  Future<Driver> _clock(String id, Future<Driver> Function(AgentClient) op) async {
+    try {
+      final d = await op(_requireClient(ref));
+      final i = state.drivers.indexWhere((x) => x.id == id);
+      if (i >= 0 && d.id == id) _set(state.copyWith(drivers: [...state.drivers]..[i] = d));
+      return d;
+    } finally {
+      // The queue position changes on clock-in; resync either way.
+      unawaited(_reloadDrivers());
+    }
+  }
+
+  /// Optimistic: the list reorders at once, then the agent confirms.
+  Future<void> reorderDrivers(List<Driver> ordered) async {
+    final before = state.drivers;
+    _set(state.copyWith(drivers: ordered));
+    try {
+      await _requireClient(ref).reorderDrivers(ordered.map((d) => d.id).toList());
+    } catch (_) {
+      _set(state.copyWith(drivers: before));
+      rethrow;
+    } finally {
+      unawaited(_reloadDrivers());
+    }
+  }
+
+  /// Throws [BatchLeftoversException] unless [force].
+  Future<CloseBatchResult> closeBatch({required bool force}) async {
+    final r = await _requireClient(ref).closeBatch(force: force);
+    await refresh();
+    return r;
+  }
+
+  Future<void> _reloadDrivers() async {
+    try {
+      final ds = await _requireClient(ref).listDrivers();
+      _set(state.copyWith(drivers: ds));
+    } catch (_) {
+      // The next SSE frame / poll will catch up.
+    }
+  }
+}
+
+final floorProvider = NotifierProvider<FloorController, FloorState>(FloorController.new);
+
+// =============================================================================
+// Alarm
+// =============================================================================
+
+/// Derives the alarm from the floor state (see AlarmRule). The sound itself is
+/// driven by AlarmHost at the app root.
+class AlarmNotifier extends Notifier<AlarmState> {
+  @override
+  AlarmState build() {
+    final initial = ref.read(floorProvider);
+    ref.listen<FloorState>(floorProvider, (prev, next) {
+      var s = AlarmRule.onArrived(state, next.arrived.map((o) => o.id));
+      if (prev != null && next.escalations > prev.escalations) s = AlarmRule.onEscalated(s);
+      state = s;
+    });
+    return AlarmRule.onArrived(AlarmState.silent, initial.arrived.map((o) => o.id));
+  }
+
+  void hide() => state = AlarmRule.onHide(state);
+  void show() => state = AlarmRule.onShow(state);
+}
+
+final alarmProvider = NotifierProvider<AlarmNotifier, AlarmState>(AlarmNotifier.new);
+
+// =============================================================================
+// Preferences
+// =============================================================================
+
+/// Theme mode — toggled by the `q` logo on the nav rail.
+final themeModeProvider = StateProvider<ThemeMode>((_) => ThemeMode.dark);
+
+class AlertSoundNotifier extends Notifier<AlertSound> {
+  @override
+  AlertSound build() => AlertSound.byName(ref.watch(storageProvider).alertSound);
+
+  void set(AlertSound s) {
+    state = s;
+    unawaited(ref.read(storageProvider).setAlertSound(s.name));
+  }
+}
+
+final alertSoundProvider = NotifierProvider<AlertSoundNotifier, AlertSound>(AlertSoundNotifier.new);
+
+// =============================================================================
+// Read-only fetches for secondary screens
+// =============================================================================
+
+/// Polls `GET /api/printers` every 5 s while the Printers pane is mounted.
+final printerStatusProvider = StreamProvider.autoDispose<List<PrinterStatus>>((ref) async* {
+  final client = ref.watch(agentClientProvider);
+  if (client == null) return;
+  while (true) {
+    try {
+      yield await client.listPrinters();
+    } catch (e, st) {
+      yield* Stream<List<PrinterStatus>>.error(e, st);
+    }
+    await Future<void>.delayed(const Duration(seconds: 5));
+  }
+});
+
+/// `GET /api/batches` — open + kept closed batches, newest first.
+final batchesProvider = FutureProvider.autoDispose<List<Batch>>((ref) async {
+  final client = ref.watch(agentClientProvider);
+  if (client == null) return const [];
+  // Re-read when the open batch changes (a close).
+  ref.watch(floorProvider.select((s) => s.currentBatchId));
+  return client.listBatches();
+});
+
+/// `GET /api/drivers/shifts?days=7` — shift records, newest first. Re-read
+/// whenever the roster changes (clock in / out, daily reset).
+final driverShiftsProvider = FutureProvider.autoDispose<List<Shift>>((ref) async {
+  final client = ref.watch(agentClientProvider);
+  if (client == null) return const [];
+  ref.watch(
+    floorProvider.select((s) => s.drivers.map((d) => '${d.id}:${d.status.wire}:${d.clockedInAt}').join(',')),
   );
+  return client.listShifts(days: 7);
+});
 
-  ref.onDispose(() {
-    timer?.cancel();
-    if (!controller.isClosed) controller.close();
-  });
-
-  return controller.stream;
+/// Orders of a past batch (`?batch=<id>`), newest first.
+final batchOrdersProvider = FutureProvider.autoDispose.family<List<StoredOrder>, int>((ref, batchId) async {
+  final client = ref.watch(agentClientProvider);
+  if (client == null) return const [];
+  return client.listAllOrders(batch: '$batchId');
 });

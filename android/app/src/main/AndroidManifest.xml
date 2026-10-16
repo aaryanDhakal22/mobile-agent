@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- AlertPlayer sets stayAwake: true (MediaPlayer.setWakeMode), which
+         throws a SecurityException without this — the alarm would not play. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
         android:label="mobile_agent"
         android:name="${applicationName}"
