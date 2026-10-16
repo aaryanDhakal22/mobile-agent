@@ -288,26 +288,64 @@ Future<String?> textDialog(
   String confirm = 'SAVE',
   int maxLength = 40,
 }) {
-  final ctrl = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text(title),
+    builder: (ctx) => _TextDialog(
+      title: title,
+      initial: initial,
+      hint: hint,
+      confirm: confirm,
+      maxLength: maxLength,
+    ),
+  );
+}
+
+// Owns its controller: disposing it when showDialog's future completes is too
+// early — the TextField still builds during the exit animation.
+class _TextDialog extends StatefulWidget {
+  const _TextDialog({
+    required this.title,
+    required this.initial,
+    required this.hint,
+    required this.confirm,
+    required this.maxLength,
+  });
+
+  final String title, initial, hint, confirm;
+  final int maxLength;
+
+  @override
+  State<_TextDialog> createState() => _TextDialogState();
+}
+
+class _TextDialogState extends State<_TextDialog> {
+  late final TextEditingController _ctrl = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
       content: SizedBox(
         width: 420,
         child: TextField(
-          controller: ctrl,
+          controller: _ctrl,
           autofocus: true,
-          maxLength: maxLength,
+          maxLength: widget.maxLength,
           textCapitalization: TextCapitalization.words,
-          decoration: InputDecoration(hintText: hint),
-          onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+          decoration: InputDecoration(hintText: widget.hint),
+          onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('CANCEL')),
-        FilledButton(onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()), child: Text(confirm)),
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('CANCEL')),
+        FilledButton(onPressed: () => Navigator.of(context).pop(_ctrl.text.trim()), child: Text(widget.confirm)),
       ],
-    ),
-  ).whenComplete(ctrl.dispose);
+    );
+  }
 }
