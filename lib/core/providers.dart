@@ -48,6 +48,28 @@ class PairingNotifier extends Notifier<Pairing?> {
     state = p;
   }
 
+  /// A new Pi: link it with the store manager login (the agent pairs this
+  /// tablet in the same call) and persist the key.
+  Future<LinkResult> link({
+    required String address,
+    required String username,
+    required String password,
+    required String name,
+  }) async {
+    final base = normalizeAgentAddress(address);
+    final r = await AgentClient.link(address: base, username: username, password: password, tabletName: name);
+    final p = Pairing(
+      address: base,
+      deviceKey: r.key,
+      deviceName: r.name.isEmpty ? name.trim() : r.name,
+      deviceId: r.deviceId,
+    );
+    await ref.read(storageProvider).writePairing(p);
+    lastUnpairReason = null;
+    state = p;
+    return r;
+  }
+
   /// Point the existing key at a new agent address (the Pi changed IP).
   Future<void> setAddress(String address) async {
     final p = state;
@@ -466,9 +488,7 @@ final batchesProvider = FutureProvider.autoDispose<List<Batch>>((ref) async {
 final driverShiftsProvider = FutureProvider.autoDispose<List<Shift>>((ref) async {
   final client = ref.watch(agentClientProvider);
   if (client == null) return const [];
-  ref.watch(
-    floorProvider.select((s) => s.drivers.map((d) => '${d.id}:${d.status.wire}:${d.clockedInAt}').join(',')),
-  );
+  ref.watch(floorProvider.select((s) => s.drivers.map((d) => '${d.id}:${d.status.wire}:${d.clockedInAt}').join(',')));
   return client.listShifts(days: 7);
 });
 

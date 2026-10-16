@@ -13,6 +13,7 @@ import '../history/history_pane.dart';
 import '../kitchen/kitchen_pane.dart';
 import '../printers/printers_pane.dart';
 import '../settings/settings_screen.dart';
+import 'pi_unreachable_banner.dart';
 import 'quicc_nav_rail.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -82,21 +83,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           const VerticalDivider(width: 1),
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 260),
-              reverseDuration: const Duration(milliseconds: 140),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              layoutBuilder: (current, previous) =>
-                  Stack(fit: StackFit.expand, alignment: Alignment.center, children: [...previous, ?current]),
-              transitionBuilder: (child, anim) => FadeTransition(
-                opacity: anim,
-                child: SlideTransition(
-                  position: Tween<Offset>(begin: const Offset(0, 0.015), end: Offset.zero).animate(anim),
-                  child: child,
+            child: Column(
+              children: [
+                const PiUnreachableBanner(),
+                Expanded(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 260),
+                    reverseDuration: const Duration(milliseconds: 140),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    layoutBuilder: (current, previous) =>
+                        Stack(fit: StackFit.expand, alignment: Alignment.center, children: [...previous, ?current]),
+                    transitionBuilder: (child, anim) => FadeTransition(
+                      opacity: anim,
+                      child: SlideTransition(
+                        position: Tween<Offset>(begin: const Offset(0, 0.015), end: Offset.zero).animate(anim),
+                        child: child,
+                      ),
+                    ),
+                    child: KeyedSubtree(key: ValueKey<HomeSection>(_section), child: _buildSection(_section)),
+                  ),
                 ),
-              ),
-              child: KeyedSubtree(key: ValueKey<HomeSection>(_section), child: _buildSection(_section)),
+              ],
             ),
           ),
         ],
@@ -116,7 +124,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     };
     if (s == HomeSection.settings) return pane;
     // The driver button floats bottom-right over every pane but Settings.
-    return Stack(children: [Positioned.fill(child: pane), const Positioned.fill(child: DriverFab())]);
+    return Stack(
+      children: [
+        Positioned.fill(child: pane),
+        const Positioned.fill(child: DriverFab()),
+      ],
+    );
   }
 }
 

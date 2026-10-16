@@ -635,6 +635,56 @@ class PairResult {
       PairResult(deviceId: jStr(json['device_id']), name: jStr(json['name']), key: jStr(json['key']));
 }
 
+/// `GET /api/session` on an agent, as far as pairing cares.
+class AgentProbe {
+  /// unconfigured | needs_password | locked | ready
+  final String state;
+  final bool linkAvailable;
+  const AgentProbe({required this.state, required this.linkAvailable});
+
+  /// A new (or wiped) Pi waiting to be linked with the manager login.
+  bool get isNew => state == 'unconfigured' && linkAvailable;
+
+  factory AgentProbe.fromJson(Map<String, dynamic> json) =>
+      AgentProbe(state: jStr(json['state']), linkAvailable: json['link_available'] == true);
+}
+
+/// What `POST /api/setup/link` restored on the new Pi.
+class LinkResult {
+  final String tenant;
+  final String deviceId;
+  final String name;
+  final String key;
+  final int restoredOrders;
+  final int waiting;
+  final int drivers;
+  final int? kitchenNext;
+  const LinkResult({
+    required this.tenant,
+    required this.deviceId,
+    required this.name,
+    required this.key,
+    this.restoredOrders = 0,
+    this.waiting = 0,
+    this.drivers = 0,
+    this.kitchenNext,
+  });
+
+  factory LinkResult.fromJson(Map<String, dynamic> json) {
+    final r = json['restored'] is Map ? jMap(json['restored']) : const <String, dynamic>{};
+    return LinkResult(
+      tenant: jStr(json['tenant']),
+      deviceId: jStr(json['device_id']),
+      name: jStr(json['device_name']),
+      key: jStr(json['device_key']),
+      restoredOrders: jInt(r['orders']),
+      waiting: jInt(r['waiting']),
+      drivers: jInt(r['drivers']),
+      kitchenNext: r['kitchen_next'] == null ? null : jInt(r['kitchen_next']),
+    );
+  }
+}
+
 /// One delivery on a driver report.
 class DriverReportLine {
   final String orderId;

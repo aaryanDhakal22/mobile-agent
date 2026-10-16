@@ -117,6 +117,59 @@ class AgentClient {
     }
   }
 
+  /// `GET /api/session` (open) — is the Pi at [address] new (unconfigured)?
+  static Future<AgentProbe> probe({
+    required String address,
+    http.Client? client,
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    final c = client ?? http.Client();
+    try {
+      final resp = await c.get(Uri.parse('${normalizeAgentAddress(address)}/api/session')).timeout(timeout);
+      _check(resp);
+      return AgentProbe.fromJson(jMap(jsonDecode(resp.body)));
+    } on AgentException {
+      rethrow;
+    } catch (e) {
+      throw AgentException(_networkMessage(e));
+    } finally {
+      if (client == null) c.close();
+    }
+  }
+
+  /// `POST /api/setup/link {username, password, tablet_name}` — links a new
+  /// Pi with the store manager login; the agent restores the open batch from
+  /// main and pairs this tablet in the same call.
+  static Future<LinkResult> link({
+    required String address,
+    required String username,
+    required String password,
+    required String tabletName,
+    http.Client? client,
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    final c = client ?? http.Client();
+    try {
+      final resp = await c
+          .post(
+            Uri.parse('${normalizeAgentAddress(address)}/api/setup/link'),
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({'username': username.trim(), 'password': password, 'tablet_name': tabletName.trim()}),
+          )
+          .timeout(timeout);
+      _check(resp);
+      final r = LinkResult.fromJson(jMap(jsonDecode(resp.body)));
+      if (r.key.isEmpty) throw const AgentException('The Pi linked but did not pair this tablet — pair it with a code');
+      return r;
+    } on AgentException {
+      rethrow;
+    } catch (e) {
+      throw AgentException(_networkMessage(e));
+    } finally {
+      if (client == null) c.close();
+    }
+  }
+
   // --- floor -----------------------------------------------------------------
 
   Future<Floor> getFloor() async => Floor.fromJson(jMap(await _get('/api/floor')));
@@ -195,9 +248,15 @@ class AgentClient {
 
   /// `POST /api/batches/{id}/driver-reports/print` → how many slips printed
   /// (502 nothing_printed throws).
-  Future<ReportPrintResult> printDriverReports(int batchId) async => ReportPrintResult.fromJson(jMap(
-    await _send('POST', '/api/batches/${batchId <= 0 ? 'current' : batchId}/driver-reports/print', timeout: printTimeout),
-  ));
+  Future<ReportPrintResult> printDriverReports(int batchId) async => ReportPrintResult.fromJson(
+    jMap(
+      await _send(
+        'POST',
+        '/api/batches/${batchId <= 0 ? 'current' : batchId}/driver-reports/print',
+        timeout: printTimeout,
+      ),
+    ),
+  );
 
   // --- app updates -------------------------------------------------------------
 
