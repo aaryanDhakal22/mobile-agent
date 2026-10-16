@@ -218,7 +218,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
                           width: 48,
                           height: 44,
                           child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+                            style: OutlinedButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(48, 44)),
                             onPressed: _reprinting ? null : _reprint,
                             child: _reprinting
                                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -230,10 +230,14 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
                           child: SizedBox(
                             height: 44,
                             child: FilledButton.icon(
+                              // The theme's big-button padding would clip the
+                              // label inside a 44 px ticket button.
                               style: FilledButton.styleFrom(
                                 backgroundColor: QuiccColors.statusPaid,
                                 foregroundColor: QuiccColors.brand900,
-                                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                minimumSize: const Size(0, 44),
+                                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1),
                               ),
                               onPressed: _busy ? null : _ready,
                               icon: const Icon(Icons.check_circle_outline, size: 20),
