@@ -171,6 +171,21 @@ class FloorState {
     return list;
   }
 
+  /// In the kitchen, most urgent first: the earliest promised ready time
+  /// (late ones first), then kitchen number. Orders without an estimate go last.
+  List<StoredOrder> get kitchenByUrgency {
+    final list = orders.values.where((o) => o.state == OrderState.accepted).toList();
+    list.sort((a, b) {
+      final ea = a.status.estimatedReadyAt, eb = b.status.estimatedReadyAt;
+      if (ea != null && eb != null && ea != eb) return ea.compareTo(eb);
+      if ((ea == null) != (eb == null)) return ea == null ? 1 : -1;
+      final ka = a.status.kitchenNumber, kb = b.status.kitchenNumber;
+      if (ka != null && kb != null && ka != kb) return ka.compareTo(kb);
+      return _cmpDate(a.status.acceptedAt, b.status.acceptedAt);
+    });
+    return list;
+  }
+
   /// Ready delivery orders waiting for a driver, oldest-ready first.
   List<StoredOrder> get readyDeliveries =>
       _sorted(orders.values.where((o) => o.state == OrderState.ready && o.isDelivery), (o) => o.status.readyAt);
@@ -269,6 +284,8 @@ FloorUpdate applySseEvent(FloorState s, SseEvent ev) {
       final d = DriverDispatch.fromJson(jMap(payload));
       if (d.driver.id.isEmpty && d.driver.name.isEmpty) return FloorUpdate(s);
       return FloorUpdate(s.withDispatch(d));
+    case 'floor.updated': // settings changed in the agent web UI
+      return FloorUpdate(s, refetch: true);
     case 'batch.closed':
       if (payload is! Map) return FloorUpdate(s, refetch: true);
       final e = BatchClosedEvent.fromJson(jMap(payload));

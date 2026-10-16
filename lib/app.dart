@@ -6,6 +6,7 @@ import 'core/providers.dart';
 import 'features/alert/new_order_alert.dart';
 import 'features/home/home_screen.dart';
 import 'features/pairing/pairing_screen.dart';
+import 'features/update/update_gate.dart';
 import 'theme/quicc_theme.dart';
 
 class MobileAgentApp extends ConsumerStatefulWidget {
@@ -47,7 +48,7 @@ class _MobileAgentAppState extends ConsumerState<MobileAgentApp> {
     final paired = ref.watch(pairingProvider.select((p) => p != null));
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
-      title: 'quiccpos',
+      title: 'Quibase',
       debugShowCheckedModeBanner: false,
       theme: QuiccTheme.light(),
       darkTheme: QuiccTheme.dark(),
@@ -55,8 +56,11 @@ class _MobileAgentAppState extends ConsumerState<MobileAgentApp> {
       home: paired ? const HomeScreen() : const PairingScreen(),
       // The alarm (full-screen alert + "still ringing" banner) rides above
       // every route, so it shows over order detail screens and dialogs too.
-      builder: (context, child) =>
-          paired ? AlarmHost(child: child ?? const SizedBox.shrink()) : (child ?? const SizedBox.shrink()),
+      // A newer Quibase on the agent locks everything above it until
+      // installed (UpdateGate).
+      builder: (context, child) => paired
+          ? UpdateGate(child: AlarmHost(child: child ?? const SizedBox.shrink()))
+          : (child ?? const SizedBox.shrink()),
     );
   }
 }

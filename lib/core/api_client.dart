@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 import 'json.dart';
@@ -178,6 +180,69 @@ class AgentClient {
   Future<List<StoredOrder>> driverReturned(String driverId) async {
     final body = await _send('POST', '/api/drivers/${Uri.encodeComponent(driverId)}/returned');
     return jList(body, StoredOrder.fromJson);
+  }
+
+  /// `POST /api/drivers/{id}/undo-return` — the latest return (≤10 min) is
+  /// undone: the driver is out again. 409 invalid_state otherwise.
+  Future<Driver> undoReturn(String driverId) async =>
+      Driver.fromJson(jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(driverId)}/undo-return')));
+
+  // --- driver reports ----------------------------------------------------------
+
+  /// `GET /api/batches/{id}/driver-reports` (id 0 = the open batch).
+  Future<List<DriverReport>> driverReports(int batchId) async =>
+      jList(await _get('/api/batches/${batchId <= 0 ? 'current' : batchId}/driver-reports'), DriverReport.fromJson);
+
+  /// `POST /api/batches/{id}/driver-reports/print` → how many slips printed
+  /// (502 nothing_printed throws).
+  Future<ReportPrintResult> printDriverReports(int batchId) async => ReportPrintResult.fromJson(jMap(
+    await _send('POST', '/api/batches/${batchId <= 0 ? 'current' : batchId}/driver-reports/print', timeout: printTimeout),
+  ));
+
+  // --- app updates -------------------------------------------------------------
+
+  /// `GET /api/app/latest` — the Quibase release the agent has cached, or
+  /// null (204, or an agent without the route).
+  Future<AppRelease?> appLatest() async {
+    try {
+      final body = await _get('/api/app/latest');
+      if (body is! Map) return null;
+      final r = AppRelease.fromJson(jMap(body));
+      return r.versionCode > 0 ? r : null;
+    } on AgentException catch (e) {
+      if (e.isNotFound) return null;
+      rethrow;
+    }
+  }
+
+  /// Streams `GET /api/app/apk` into [file]; returns the sha256 (hex) of what
+  /// was written. [onProgress] gets (received, total).
+  Future<String> downloadApk(File file, {void Function(int received, int total)? onProgress}) async {
+    final req = http.Request('GET', uri('/api/app/apk'))..headers.addAll(_headers);
+    final http.StreamedResponse resp;
+    try {
+      resp = await _client.send(req).timeout(const Duration(seconds: 30));
+    } catch (e) {
+      throw AgentException(_networkMessage(e));
+    }
+    if (resp.statusCode != 200) {
+      throw exceptionFromResponse(resp.statusCode, await resp.stream.bytesToString());
+    }
+    final total = resp.contentLength ?? 0;
+    final sink = file.openWrite();
+    var received = 0;
+    try {
+      await for (final chunk in resp.stream.timeout(const Duration(seconds: 60))) {
+        sink.add(chunk);
+        received += chunk.length;
+        onProgress?.call(received, total);
+      }
+    } catch (e) {
+      throw AgentException('Download interrupted: ${_networkMessage(e)}');
+    } finally {
+      await sink.close();
+    }
+    return (await sha256.bind(file.openRead()).first).toString();
   }
 
   // --- drivers ---------------------------------------------------------------

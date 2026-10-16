@@ -83,13 +83,15 @@ String itemTitle(LineItem i) {
 }
 
 /// Small helper for showing a snackbar from anywhere with a context.
-void toast(BuildContext context, String message, {bool error = false}) {
+/// [rightInset] keeps it clear of the bottom-right driver button.
+void toast(BuildContext context, String message, {bool error = false, double rightInset = 0}) {
   final m = ScaffoldMessenger.maybeOf(context);
   if (m == null) return;
   m.hideCurrentSnackBar();
   m.showSnackBar(
     SnackBar(
       behavior: SnackBarBehavior.floating,
+      margin: rightInset > 0 ? EdgeInsets.fromLTRB(24, 0, rightInset, 24) : null,
       backgroundColor: error ? QuiccColors.statusVoided : null,
       content: Text(message),
     ),

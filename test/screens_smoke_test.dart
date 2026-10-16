@@ -11,6 +11,7 @@ import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/alert/new_order_alert.dart';
 import 'package:mobile_agent/features/drivers/dispatch_flash.dart';
+import 'package:mobile_agent/features/drivers/driver_fab.dart';
 import 'package:mobile_agent/features/home/home_screen.dart';
 import 'package:mobile_agent/features/order_detail/order_detail_screen.dart';
 import 'package:mobile_agent/theme/quicc_colors.dart';
@@ -94,14 +95,20 @@ void main() {
         ),
       );
       await tester.pump(const Duration(milliseconds: 500));
-      expect(tester.takeException(), isNull, reason: 'Arrived (initial)');
-      expect(find.text('Erik Davis'), findsWidgets);
+      expect(tester.takeException(), isNull, reason: 'Kitchen (initial)');
+      expect(find.text('Erik Davis'), findsWidgets, reason: 'Kitchen is the start screen');
+      expect(find.text('Arrived'), findsNothing, reason: 'no Arrived tab — new orders ring full-screen');
+      expect(find.byType(DriverFab), findsOneWidget);
 
-      for (final label in ['Kitchen', 'Deliveries', 'Drivers', 'History', 'Batch', 'Printers', 'Settings', 'Arrived']) {
+      for (final label in ['Deliveries', 'Drivers', 'History', 'Batch', 'Printers', 'Settings', 'Kitchen']) {
         await tester.tap(find.text(label).last);
         await tester.pump(const Duration(milliseconds: 600));
         expect(tester.takeException(), isNull, reason: '$label at $size');
       }
+
+      await tester.tap(find.text('Settings').last);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.byType(DriverFab), findsNothing, reason: 'no driver button on Settings');
 
       await tester.pumpWidget(const SizedBox());
     });

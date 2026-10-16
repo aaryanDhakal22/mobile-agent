@@ -273,10 +273,23 @@ class FloorController extends Notifier<FloorState> {
   Future<void> driverReturned(String driverId) async {
     try {
       _upsert(await _requireClient(ref).driverReturned(driverId));
+      ref.read(lastReturnProvider.notifier).state = LastReturn(driverId, DateTime.now());
       unawaited(_reloadDrivers());
     } on AgentException catch (e) {
       if (e.isConflict || e.isNotFound) unawaited(refresh());
       rethrow;
+    }
+  }
+
+  /// Undo the latest "returned" (the driver is out again). Clears the undo
+  /// slot either way.
+  Future<Driver> undoReturn(String driverId) async {
+    ref.read(lastReturnProvider.notifier).state = null;
+    try {
+      final d = await _requireClient(ref).undoReturn(driverId);
+      return d;
+    } finally {
+      unawaited(_reloadDrivers());
     }
   }
 
@@ -364,6 +377,19 @@ class FloorController extends Notifier<FloorState> {
 }
 
 final floorProvider = NotifierProvider<FloorController, FloorState>(FloorController.new);
+
+/// The latest driver return made on this tablet — the driver button's
+/// hold-to-undo target (the agent allows it for 10 minutes).
+class LastReturn {
+  final String driverId;
+  final DateTime at;
+  const LastReturn(this.driverId, this.at);
+
+  static const window = Duration(minutes: 10);
+  bool get undoable => DateTime.now().difference(at) < window;
+}
+
+final lastReturnProvider = StateProvider<LastReturn?>((_) => null);
 
 // =============================================================================
 // Alarm

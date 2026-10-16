@@ -524,6 +524,9 @@ class Batch {
   );
 }
 
+/// Ticket lateness default (minutes green) when the agent doesn't say.
+const int kDefaultGreenTillMinutes = 20;
+
 /// Fallback quick picks if the agent sends none.
 const List<int> kDefaultPrepChoices = [10, 15, 20, 30, 45, 60];
 
@@ -538,6 +541,13 @@ class Floor {
   /// Null from an agent that predates clock-in.
   final String? driverResetTime;
 
+  /// Kitchen tickets stay green this long after the order arrived, then shade
+  /// to fully red at twice it (agent web UI setting, default 20).
+  final int greenTillMinutes;
+
+  /// Taken off drivers' tips on the driver report (percent).
+  final double tipTaxPercent;
+
   const Floor({
     required this.batch,
     this.kitchenNext = 0,
@@ -545,6 +555,8 @@ class Floor {
     this.prepChoices = kDefaultPrepChoices,
     this.unsyncedEvents = 0,
     this.driverResetTime,
+    this.greenTillMinutes = kDefaultGreenTillMinutes,
+    this.tipTaxPercent = 6,
   });
 
   factory Floor.fromJson(Map<String, dynamic> json) {
@@ -559,6 +571,10 @@ class Floor {
       prepChoices: choices.isEmpty ? kDefaultPrepChoices : choices,
       unsyncedEvents: jInt(json['unsynced_events']),
       driverResetTime: jStrOrNull(jStr(json['driver_reset_time']).trim()),
+      greenTillMinutes: (jIntOrNull(json['green_till_minutes']) ?? 0) > 0
+          ? jInt(json['green_till_minutes'])
+          : kDefaultGreenTillMinutes,
+      tipTaxPercent: (json['tip_tax_percent'] is num) ? (json['tip_tax_percent'] as num).toDouble() : 6,
     );
   }
 
@@ -569,6 +585,8 @@ class Floor {
     prepChoices: prepChoices,
     unsyncedEvents: unsyncedEvents,
     driverResetTime: driverResetTime,
+    greenTillMinutes: greenTillMinutes,
+    tipTaxPercent: tipTaxPercent,
   );
 
   /// The prep time to preselect at accept: last used, if it is one of the
@@ -615,4 +633,106 @@ class PairResult {
 
   factory PairResult.fromJson(Map<String, dynamic> json) =>
       PairResult(deviceId: jStr(json['device_id']), name: jStr(json['name']), key: jStr(json['key']));
+}
+
+/// One delivery on a driver report.
+class DriverReportLine {
+  final String orderId;
+  final int? kitchenNumber;
+  final String customer; // "Erik D."
+  final String address;
+  final int tipCents;
+  final bool cash;
+  final int cashCents;
+  final int totalCents;
+
+  const DriverReportLine({
+    required this.orderId,
+    this.kitchenNumber,
+    this.customer = '',
+    this.address = '',
+    this.tipCents = 0,
+    this.cash = false,
+    this.cashCents = 0,
+    this.totalCents = 0,
+  });
+
+  factory DriverReportLine.fromJson(Map<String, dynamic> json) => DriverReportLine(
+    orderId: jStr(json['order_id']),
+    kitchenNumber: jIntOrNull(json['kitchen_number']),
+    customer: jStr(json['customer']),
+    address: jStr(json['address']),
+    tipCents: jInt(json['tip_cents']),
+    cash: json['cash'] == true,
+    cashCents: jInt(json['cash_cents']),
+    totalCents: jInt(json['total_cents']),
+  );
+}
+
+/// A driver's slip for a batch: what they collected in cash, their tips after
+/// tip tax and what they owe the store (negative = the store owes them).
+class DriverReport {
+  final int batchId;
+  final String driverId;
+  final String driverName;
+  final List<DriverReportLine> lines;
+  final int deliveries;
+  final int cashCents;
+  final int tipCents;
+  final int tipAfterTaxCents;
+  final int owedCents;
+
+  const DriverReport({
+    required this.batchId,
+    required this.driverId,
+    required this.driverName,
+    this.lines = const [],
+    this.deliveries = 0,
+    this.cashCents = 0,
+    this.tipCents = 0,
+    this.tipAfterTaxCents = 0,
+    this.owedCents = 0,
+  });
+
+  factory DriverReport.fromJson(Map<String, dynamic> json) => DriverReport(
+    batchId: jInt(json['batch_id']),
+    driverId: jStr(json['driver_id']),
+    driverName: jStr(json['driver_name']),
+    lines: jList(json['lines'], DriverReportLine.fromJson),
+    deliveries: jInt(json['deliveries']),
+    cashCents: jInt(json['cash_cents']),
+    tipCents: jInt(json['tip_cents']),
+    tipAfterTaxCents: jInt(json['tip_after_tax_cents']),
+    owedCents: jInt(json['owed_cents']),
+  );
+}
+
+/// `POST /api/batches/{id}/driver-reports/print` → `{printed, failed}`.
+class ReportPrintResult {
+  final List<String> printed;
+  final List<String> failed;
+  const ReportPrintResult({this.printed = const [], this.failed = const []});
+
+  factory ReportPrintResult.fromJson(Map<String, dynamic> json) {
+    List<String> names(Object? raw) =>
+        raw is List ? raw.map((e) => e is Map ? jStr(jMap(e)['driver_name']) : '').toList(growable: false) : const [];
+    return ReportPrintResult(printed: names(json['printed']), failed: names(json['failed']));
+  }
+}
+
+/// A Quibase release the agent has cached for its tablets.
+class AppRelease {
+  final int versionCode;
+  final String versionName;
+  final String sha256;
+  final int size;
+
+  const AppRelease({required this.versionCode, this.versionName = '', this.sha256 = '', this.size = 0});
+
+  factory AppRelease.fromJson(Map<String, dynamic> json) => AppRelease(
+    versionCode: jInt(json['version_code']),
+    versionName: jStr(json['version_name']),
+    sha256: jStr(json['sha256']).toLowerCase(),
+    size: jInt(json['size']),
+  );
 }

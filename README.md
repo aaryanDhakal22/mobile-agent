@@ -1,11 +1,8 @@
-# mobile-agent — Quicc counter tablet
+# Quibase — the QuiccPOS counter tablet app
 
-> **TODO — not yet tested on a device or emulator.** Only `flutter analyze` and
-> the widget/unit tests have run. Next: install the Android SDK, start a tablet
-> emulator, `flutter run`, pair to a dev agent at `10.0.2.2:8080` (web UI →
-> Settings → Pair tablet), and run the floor flow: ring until accepted, prep
-> pick, ready, clock a driver in, send out (name flash), returned, clock out,
-> close batch, unpair.
+(This folder / repo is still called `mobile-agent` and the Dart package
+`mobile_agent`; the app itself is **Quibase**, Android id `com.quiccpos.quibase`.)
+Tested on the staging tablet (`192.168.1.217`) against the staging Pi.
 
 Flutter app for the restaurant's counter tablet (Android, landscape, always
 on). It talks **only** to the restaurant **agent** on the LAN (the Go binary on
@@ -16,12 +13,11 @@ the Pi) — never to `main/` or `online/`. The agent's API is specified in
 
 | Tab | What staff do there |
 |---|---|
-| **Arrived** | Orders waiting to be accepted, oldest first. Pick a prep time (quick picks from the agent, last-used preselected) → **Accept** prints the kitchen tickets + receipt and assigns the kitchen number. |
-| **Kitchen** | Accepted orders by kitchen number, with time in kitchen vs. the estimated ready time (turns red when late). **Ready** and **Reprint**. |
+| **Kitchen** (start screen) | Compact tickets in masonry columns, **most urgent first** (earliest promised ready time): kitchen #, type, time since the order arrived, the customer's name, **every item** (small font), **Ready** and **Reprint**. Each ticket is tinted by lateness: **green** until *green till* minutes after it arrived (agent web UI setting, default 20), then amber, **fully red at twice that**. New orders don't have a tab — they ring full-screen (below) and are accepted there. |
 | **Deliveries** | Ready delivery orders (multi-select) → pick a driver → **Send out**. The picker offers only **clocked-in, available** drivers in queue order (first = preselected); with nobody clocked in it says so and points to the Drivers tab. Below: drivers out with their orders and a live run timer, and **I have returned** per driver. |
 | **Drivers** | Driver roster in queue order: add, rename, remove, drag to reorder. Each driver shows **off** (clocked out) / **available** (in the queue) / **out** (on a run), the clock-in time and runs this batch. **Clock in** puts a driver at the back of the queue; **Clock out** works while they're available (out on a run → "tap I have returned first"). Shows the daily auto clock-out time ("Everyone is clocked out daily at 10:00 AM" — set in the agent web UI). **Shifts** lists the last 7 days of clock-in/out records (for reports, not wages). |
 | **History** | Current batch (live) or any kept closed batch; tap an order for full detail (items with size / modifiers / notes, customer, address, kitchen #, timeline). |
-| **Batch** | The open batch and **Close batch**. If orders are unfinished the agent lists them; confirm to close anyway (they're auto-finished). Kitchen numbers restart at 1100. |
+| **Batch** | The open batch and **Close batch**. If orders are unfinished the agent lists them; confirm to close anyway (they're auto-finished). Kitchen numbers restart at 1100. Closing prints **one driver report per driver** on the receipt printer. Below: **Driver reports** for the open or any kept batch (deliveries, cash owed, tips after tip tax, owed to store) and **Print driver reports** to reprint. |
 | **Printers** | Read-only printer reachability. Printers are configured in the Quicc web app (main), not here. |
 | **Settings** | Agent address, this tablet's name, **Unpair**, alarm sound, connection + sync backlog. |
 
@@ -33,6 +29,21 @@ than 2 minutes the agent sends `order.escalated`: the alert comes back, louder,
 and the sound is restarted. If the player fails to start (logged), it is
 retried on the next escalation / refresh. The manifest holds `WAKE_LOCK`, which
 the alarm stream's `stayAwake` needs.
+
+**Driver button** (bottom-right on every tab but Settings — the old app's
+queue button). Collapsed: a truck with a badge = drivers out on a run. Tap it:
+a pill per driver who is **out**; tap a pill when they walk in = **I have
+returned** (their run is delivered, they go to the back of the queue). The big
+button shows who is **NEXT**. **Hold it 2 s** to undo the last return (the
+agent allows it for 10 minutes; the driver is out again, their orders stay
+delivered). Tap outside to close.
+
+**Updates (forced).** The console's **Release Quibase** uploads a signed APK
+to main; the agent caches it and the tablet (checking on start, resume,
+reconnect and every 10 min) locks behind **Updating Quibase**, downloads it
+from the agent, checks its sha256 and opens Android's installer — one tap on
+**Install**. The first time, Android asks to allow installs from Quibase
+(**Allow installs** → switch on → back). Releases are pushed after close.
 
 **Driver name flash.** When a driver is sent out (from this tablet or anywhere
 else — SSE `drivers.dispatched`) the driver's name fills the screen with the
@@ -78,8 +89,16 @@ flutter pub get
 flutter analyze
 flutter test                      # unit tests + screen smoke tests (offline)
 flutter run -d <android-device>   # debug on a connected tablet
-flutter build apk --release       # build/app/outputs/flutter-apk/app-release.apk
+flutter build apk --release --target-platform android-arm64   # signed with ~/.quibase
 ```
+
+**Release signing.** The release key is `~/.quibase/quibase-release.jks` +
+`~/.quibase/key.properties` (outside the repo; override with
+`QUIBASE_KEY_PROPERTIES`). **Back up `~/.quibase`** — a tablet only accepts
+updates signed with the key it was installed with; losing it means
+uninstalling + re-pairing every tablet. Without it Gradle falls back to the
+debug key (CI, tests). Releases go through the console (`Q` — Release
+Quibase); version code = Unix seconds, version name = pubspec's x.y.z.
 
 Cleartext HTTP to the LAN agent is allowed (`usesCleartextTraffic` in the
 Android manifest).
@@ -101,10 +120,12 @@ lib/
     providers.dart           Riverpod wiring (pairing, client, floor, alarm, …)
     alert_player.dart        looping alarm sound (audioplayers)
     format.dart, json.dart   formatting + defensive JSON readers
-  features/<screen>/          arrived, kitchen, deliveries, drivers (+ the
-                              dispatch name flash), history, batch, printers,
-                              settings, pairing, order_detail, alert, home
-                              (nav rail), common (shared widgets)
+  features/<screen>/          kitchen, deliveries, drivers (+ the dispatch
+                              name flash + the driver button), history, batch
+                              (+ driver reports), printers, settings, pairing,
+                              order_detail, alert (+ accept controls), update
+                              (forced self-update gate), home (nav rail),
+                              common (shared widgets)
   theme/                     QuiccColors / QuiccPalette / QuiccTheme
 test/                        model parsing, SSE parsing + reducer (incl.
                              drivers.dispatched), driver filter, alarm rule,

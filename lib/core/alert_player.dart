@@ -12,7 +12,10 @@ enum AlertSound {
   ddlg(label: 'DDLG', asset: 'sounds/ddlg.mp3'),
   dhoom(label: 'Dhoom', asset: 'sounds/dhoom.mp3'),
   indian(label: 'Indian', asset: 'sounds/indian.mp3'),
-  nokia(label: 'Nokia', asset: 'sounds/nokia.mp3');
+  nokia(label: 'Nokia', asset: 'sounds/nokia.mp3'),
+  forbidden(label: 'Forbidden', asset: 'sounds/forbidden.mp3'),
+  meow(label: 'Meow', asset: 'sounds/meow.mp3'),
+  polka(label: 'Polka', asset: 'sounds/polka.mp3');
 
   final String label;
   final String asset;

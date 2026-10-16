@@ -136,7 +136,8 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
                       'Batch #${_last!.closed.id} closed'
                       '${_last!.closed.orderCount > 0 ? ' with ${_last!.closed.orderCount} orders' : ''}'
                       '${_last!.autoFinished.isEmpty ? '' : ' · ${_last!.autoFinished.length} auto-finished'}.'
-                      ' New batch ${floor == null ? '' : '#${floor.batch.id} '}is open — kitchen numbers restart at 1100.',
+                      ' New batch ${floor == null ? '' : '#${floor.batch.id} '}is open — kitchen numbers restart at 1100.'
+                      ' Driver reports are printing on the receipt printer.',
                       style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -194,10 +195,168 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
         ),
         const SizedBox(height: 12),
         Text(
-          'Close the batch at the end of a shift. Unfinished orders are listed for confirmation first.',
+          'Close the batch at the end of a shift. Unfinished orders are listed for confirmation first. '
+          'Each driver\'s report prints when the batch closes.',
           style: TextStyle(color: context.palette.textMuted),
         ),
+        const SizedBox(height: 28),
+        _DriverReportsCard(key: ValueKey(_last?.closed.id ?? 0), initialBatch: _last?.closed.id),
       ],
+    );
+  }
+}
+
+/// Per-driver reports for a batch (open or a kept closed one): deliveries,
+/// cash owed, tips after tip tax, owed to the store — and a reprint button.
+class _DriverReportsCard extends ConsumerStatefulWidget {
+  final int? initialBatch;
+  const _DriverReportsCard({super.key, this.initialBatch});
+
+  @override
+  ConsumerState<_DriverReportsCard> createState() => _DriverReportsCardState();
+}
+
+class _DriverReportsCardState extends ConsumerState<_DriverReportsCard> {
+  List<Batch> _batches = const [];
+  int _batch = 0; // 0 = open batch
+  Future<List<DriverReport>>? _reports;
+  bool _printing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _batch = widget.initialBatch ?? 0;
+    _load();
+  }
+
+  void _load() {
+    final c = ref.read(agentClientProvider);
+    if (c == null) return;
+    c.listBatches().then((b) {
+      if (mounted) setState(() => _batches = b);
+    }).catchError((Object _) {});
+    setState(() => _reports = c.driverReports(_batch));
+  }
+
+  Future<void> _print() async {
+    final c = ref.read(agentClientProvider);
+    if (c == null) return;
+    setState(() => _printing = true);
+    try {
+      final r = await c.printDriverReports(_batch);
+      if (!mounted) return;
+      if (r.printed.isEmpty && r.failed.isEmpty) {
+        toast(context, 'No drivers in this batch');
+      } else {
+        toast(
+          context,
+          'Printed ${r.printed.length} report${r.printed.length == 1 ? '' : 's'}'
+          '${r.failed.isEmpty ? '' : ' — NOT printed: ${r.failed.join(', ')}'}',
+          error: r.failed.isNotEmpty,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        toast(context, e is AgentException && e.isPrinterFailure ? 'Printer problem — nothing printed.' : 'Not printed: $e', error: true);
+      }
+    } finally {
+      if (mounted) setState(() => _printing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Eyebrow('Driver reports'),
+                const Spacer(),
+                IconButton(tooltip: 'Refresh', onPressed: _load, icon: const Icon(Icons.refresh)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final b in _batches)
+                  ChoiceChip(
+                    label: Text(b.closedAt == null ? 'Batch #${b.id} (open)' : 'Batch #${b.id}'),
+                    selected: _batch == b.id || (_batch == 0 && b.closedAt == null),
+                    onSelected: (_) {
+                      _batch = b.closedAt == null ? 0 : b.id;
+                      _load();
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            FutureBuilder<List<DriverReport>>(
+              future: _reports,
+              builder: (context, snap) {
+                if (snap.connectionState != ConnectionState.done) return const Text('Loading…');
+                if (snap.hasError) return InlineError('Reports not loaded: ${snap.error}', onRetry: _load);
+                final reps = snap.data ?? const [];
+                if (reps.isEmpty) {
+                  return Text('No drivers worked this batch.', style: TextStyle(color: p.textMuted));
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [for (final r in reps) _ReportRow(r)],
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                height: 56,
+                child: OutlinedButton.icon(
+                  onPressed: _printing ? null : _print,
+                  icon: _printing
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.print_outlined),
+                  label: const Text('PRINT DRIVER REPORTS'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReportRow extends StatelessWidget {
+  final DriverReport r;
+  const _ReportRow(this.r);
+
+  @override
+  Widget build(BuildContext context) {
+    final owes = r.owedCents >= 0;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Text(r.driverName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          ),
+          Expanded(flex: 2, child: _Stat('Deliveries', '${r.deliveries}')),
+          Expanded(flex: 2, child: _Stat('Cash owed', money(r.cashCents))),
+          Expanded(flex: 2, child: _Stat('Tips (A/T)', money(r.tipAfterTaxCents))),
+          Expanded(
+            flex: 3,
+            child: _Stat(owes ? 'Owed to store' : 'Store owes driver', money(r.owedCents.abs())),
+          ),
+        ],
+      ),
     );
   }
 }

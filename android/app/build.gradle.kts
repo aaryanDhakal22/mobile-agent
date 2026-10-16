@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -5,8 +8,15 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Release signing: the Quibase key lives outside the repo (~/.quibase, backed
+// up by the owner). QUIBASE_KEY_PROPERTIES overrides the path. Without it
+// (CI, a fresh machine) release builds fall back to the debug key — such a
+// build can't update a tablet that has the real one installed.
+val quibaseKeyFile = file(System.getenv("QUIBASE_KEY_PROPERTIES") ?: (System.getProperty("user.home") + "/.quibase/key.properties"))
+val quibaseKey = Properties().apply { if (quibaseKeyFile.exists()) load(FileInputStream(quibaseKeyFile)) }
+
 android {
-    namespace = "com.example.mobile_agent"
+    namespace = "com.quiccpos.quibase"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -20,23 +30,33 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.mobile_agent"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = "com.quiccpos.quibase"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
-    buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+    signingConfigs {
+        create("release") {
+            if (quibaseKeyFile.exists()) {
+                storeFile = file(quibaseKey["storeFile"] as String)
+                storePassword = quibaseKey["storePassword"] as String
+                keyAlias = quibaseKey["keyAlias"] as String
+                keyPassword = quibaseKey["keyPassword"] as String
+            }
         }
     }
+
+    buildTypes {
+        release {
+            signingConfig = if (quibaseKeyFile.exists()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+        }
+    }
+}
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.13.1") // FileProvider for the self-update installer
 }
 
 flutter {
