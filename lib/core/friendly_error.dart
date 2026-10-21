@@ -95,6 +95,14 @@ class FriendlyError {
         return f('Nothing printed', 'Check the printers — the order was not accepted', GuideId.printer);
       case 'receipt_unsupported':
         return f('This Pi needs an update for receipt settings', 'Tell the owner');
+      case 'kitchen_unsupported':
+        return f('This Pi needs an update to resend to the kitchen', 'Tell the owner');
+      case 'not_accepted':
+        return f("This order hasn't been accepted yet.");
+      case 'nothing_for_kitchen':
+        return f('Nothing on this order goes to a kitchen printer.');
+      case 'print_failed':
+        return f("Printer problem — the kitchen tickets didn't print.", '', GuideId.printer);
       case 'test_in_progress':
         return f('A test print is already running', 'Wait a few seconds');
       case 'already_accepted':

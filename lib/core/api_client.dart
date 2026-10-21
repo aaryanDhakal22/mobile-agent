@@ -40,6 +40,38 @@ String normalizeAgentAddress(String input) {
 /// settings".
 const String kReceiptUnsupported = 'receipt_unsupported';
 
+/// [AgentException.code] for `POST /api/orders/{id}/kitchen` on an older Pi
+/// that doesn't have the route (2.0.8+): "This Pi needs an update to resend
+/// to the kitchen".
+const String kKitchenUnsupported = 'kitchen_unsupported';
+
+/// What `POST /api/orders/{id}/kitchen` printed: the station (printer) names
+/// that printed, the ones that failed, and the ones a failover covered.
+class KitchenResend {
+  final StoredOrder? order;
+  final List<String> printed;
+  final List<String> failed;
+  final List<String> rerouted;
+  const KitchenResend({this.order, this.printed = const [], this.failed = const [], this.rerouted = const []});
+
+  static List<String> _names(Object? v) => v is List
+      ? [
+          for (final x in v)
+            if (x is String && x.trim().isNotEmpty)
+              x.trim()
+            else if (x is Map && jStr(x['name'] ?? x['printer'] ?? x['station']).isNotEmpty)
+              jStr(x['name'] ?? x['printer'] ?? x['station']),
+        ]
+      : const [];
+
+  factory KitchenResend.fromJson(Map<String, dynamic> json) => KitchenResend(
+    order: json['order'] is Map ? StoredOrder.fromJson(jMap(json['order'])) : null,
+    printed: _names(json['printed']),
+    failed: _names(json['failed']),
+    rerouted: _names(json['rerouted']),
+  );
+}
+
 /// [AgentException.code] when adding a printer: the store already has a
 /// printer with that name (409).
 const String kPrinterNameTaken = 'name_taken';
@@ -273,8 +305,32 @@ class AgentClient {
     await _send('POST', '/api/device/unpair');
   }
 
+  /// `POST /api/orders/{id}/reprint` — the customer receipt only, again.
   Future<void> reprint(String id) async {
     await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/reprint', timeout: printTimeout);
+  }
+
+  /// `POST /api/orders/{id}/kitchen` — every kitchen (station) ticket of an
+  /// accepted order again, no receipt. 409 `not_accepted` /
+  /// `nothing_for_kitchen`, 502 `print_failed`, 404 unknown order. An older
+  /// Pi without the route answers 405 (or a plain-text 404) → thrown as
+  /// [kKitchenUnsupported].
+  Future<KitchenResend> resendKitchen(String id) async {
+    try {
+      final body = await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/kitchen', timeout: printTimeout);
+      return body is Map ? KitchenResend.fromJson(jMap(body)) : const KitchenResend();
+    } on AgentException catch (e) {
+      // A JSON 404 is the new route saying "no such order"; the mux's 405 or
+      // its plain "404 page not found" means the route isn't there.
+      final missing = e.statusCode == 405 || (e.statusCode == 404 && e.body.isEmpty);
+      if (missing) {
+        throw AgentException(e.message, statusCode: e.statusCode, code: kKitchenUnsupported, body: e.body);
+      }
+      if (e.statusCode == 404 && e.code == null) {
+        throw AgentException(e.message, statusCode: 404, code: 'not_found', body: e.body);
+      }
+      rethrow;
+    }
   }
 
   Future<List<StoredOrder>> assignDelivery({required String driverId, required List<String> orderIds}) async {

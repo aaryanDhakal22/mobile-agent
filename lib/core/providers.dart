@@ -295,7 +295,21 @@ class FloorController extends Notifier<FloorState> {
     }
   }
 
+  /// The customer receipt again.
   Future<void> reprint(String id) => _requireClient(ref).reprint(id);
+
+  /// Every kitchen ticket of an accepted order again (no receipt).
+  Future<KitchenResend> resendKitchen(String id) async {
+    try {
+      final r = await _requireClient(ref).resendKitchen(id);
+      if (r.order != null) _upsert([r.order!]);
+      return r;
+    } on AgentException catch (e) {
+      // not_accepted / unknown order: the screen is out of date.
+      if (e.code == 'not_accepted' || (e.isNotFound && e.code != kKitchenUnsupported)) unawaited(refresh());
+      rethrow;
+    }
+  }
 
   Future<void> assign(String driverId, List<String> orderIds) async {
     try {

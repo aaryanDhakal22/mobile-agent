@@ -7,6 +7,7 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../arrived/accept_controls.dart';
 import '../common/widgets.dart';
+import '../kitchen/resend_kitchen.dart';
 
 /// Full order: items (size / modifiers / notes), customer, address, kitchen
 /// number, and the floor timeline. Follows live updates for orders in the
@@ -272,7 +273,8 @@ class _Totals extends StatelessWidget {
   }
 }
 
-/// State-dependent actions: accept (arrived), ready (accepted), reprint.
+/// State-dependent actions: accept (arrived), ready (accepted), reprint the
+/// receipt, and resend to the kitchen (once it has a kitchen number).
 class _Actions extends ConsumerStatefulWidget {
   final StoredOrder order;
   const _Actions({required this.order});
@@ -319,16 +321,62 @@ class _ActionsState extends ConsumerState<_Actions> {
           ),
         if (so.state != OrderState.arrived) ...[
           const SizedBox(height: 10),
-          SizedBox(
-            height: 56,
-            child: OutlinedButton.icon(
-              onPressed: _busy ? null : () => _do(() => floor.reprint(so.id), 'Reprinted', 'Not reprinted'),
-              icon: const Icon(Icons.print_outlined),
-              label: const Text('REPRINT'),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 56,
+                  child: Tooltip(
+                    message: kReprintReceiptLabel,
+                    child: OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () => _do(() => floor.reprint(so.id), 'Receipt reprinted', 'Receipt not reprinted'),
+                      icon: const Icon(Icons.print_outlined),
+                      label: const _OneLine('REPRINT RECEIPT'),
+                    ),
+                  ),
+                ),
+              ),
+              if (canResendToKitchen(so)) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SizedBox(
+                    height: 56,
+                    child: Tooltip(
+                      message: kResendKitchenLabel,
+                      child: OutlinedButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => resendToKitchen(
+                                context,
+                                ref,
+                                so,
+                                area: 'order',
+                                onBusy: (b) {
+                                  if (mounted) setState(() => _busy = b);
+                                },
+                              ),
+                        icon: const Icon(Icons.send_outlined),
+                        label: const _OneLine('RESEND TO KITCHEN'),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ],
     );
   }
+}
+
+/// A button label that shrinks instead of wrapping on a narrow screen.
+class _OneLine extends StatelessWidget {
+  final String text;
+  const _OneLine(this.text);
+
+  @override
+  Widget build(BuildContext context) => FittedBox(fit: BoxFit.scaleDown, child: Text(text, maxLines: 1));
 }

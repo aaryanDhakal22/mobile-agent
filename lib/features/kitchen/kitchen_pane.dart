@@ -8,6 +8,7 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../common/widgets.dart';
 import '../order_detail/order_detail_screen.dart';
+import 'resend_kitchen.dart';
 
 /// Ticket column width and gap (compact tickets, ~6 across on the tablet).
 const double kTicketWidth = 280;
@@ -113,6 +114,7 @@ class KitchenCard extends ConsumerStatefulWidget {
 class _KitchenCardState extends ConsumerState<KitchenCard> {
   bool _busy = false;
   bool _reprinting = false;
+  bool _resending = false;
 
   Future<void> _ready() async {
     setState(() => _busy = true);
@@ -135,12 +137,39 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
     setState(() => _reprinting = true);
     try {
       await ref.read(floorProvider.notifier).reprint(widget.order.id);
-      if (mounted) toast(context, 'Reprinted ${widget.order.displayNumber}');
+      if (mounted) toast(context, 'Receipt reprinted — ${widget.order.displayNumber}');
     } catch (e) {
       if (mounted) toastError(context, e, lead: 'Not reprinted', area: 'kitchen');
     } finally {
       if (mounted) setState(() => _reprinting = false);
     }
+  }
+
+  Future<void> _resend() => resendToKitchen(
+    context,
+    ref,
+    widget.order,
+    onBusy: (b) {
+      if (mounted) setState(() => _resending = b);
+    },
+  );
+
+  /// A 48×44 outlined icon button with a tooltip / screen-reader label.
+  Widget _iconButton({required String label, required IconData icon, required bool busy, VoidCallback? onPressed}) {
+    return Tooltip(
+      message: label,
+      child: SizedBox(
+        width: 48,
+        height: 44,
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(48, 44)),
+          onPressed: busy ? null : onPressed,
+          child: busy
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : Icon(icon, size: 20, semanticLabel: label),
+        ),
+      ),
+    );
   }
 
   @override
@@ -214,20 +243,18 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        SizedBox(
-                          width: 48,
-                          height: 44,
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(48, 44)),
-                            onPressed: _reprinting ? null : _reprint,
-                            child: _reprinting
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.print_outlined, size: 20),
-                          ),
+                        _iconButton(
+                          label: kReprintReceiptLabel,
+                          icon: Icons.print_outlined,
+                          busy: _reprinting,
+                          onPressed: _reprint,
+                        ),
+                        const SizedBox(width: 6),
+                        _iconButton(
+                          label: kResendKitchenLabel,
+                          icon: Icons.send_outlined,
+                          busy: _resending,
+                          onPressed: _resend,
                         ),
                         const SizedBox(width: 8),
                         Expanded(

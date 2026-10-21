@@ -144,7 +144,8 @@ void main() {
     expect(find.text('931 Taylor Avenue, Apt 4'), findsOneWidget);
     expect(find.text('Delivered'), findsNothing);
     expect(find.text('Maria Lopez'), findsOneWidget);
-    expect(find.text('REPRINT'), findsOneWidget);
+    expect(find.text('REPRINT RECEIPT'), findsOneWidget);
+    expect(find.text('RESEND TO KITCHEN'), findsOneWidget, reason: 'out on a run: it has a kitchen number');
     await tester.pumpWidget(const SizedBox());
   });
 
