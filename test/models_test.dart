@@ -279,4 +279,52 @@ void main() {
     expect(so.isFinished, isTrue);
     expect(so.status.cancelledAt, isNotNull);
   });
+
+  group('cash due / prepaid (same rule as the agent receipt)', () {
+    OrderSnapshot order(List<Map<String, dynamic>>? payments) => OrderSnapshot.fromJson({
+      'id': 'p1',
+      'money': {'total_cents': 3000},
+      'payments': ?payments,
+    });
+
+    test('no payments at all (older order) → cash for the whole total', () {
+      final o = order(null);
+      expect(o.cashDueCents, 3000);
+      expect(o.isPrepaid, isFalse);
+      expect(order(const []).cashDueCents, 3000);
+    });
+
+    test('explicit cash payment → that amount, case-insensitive', () {
+      final o = order([
+        {'method': 'CASH', 'amount_cents': 3000},
+      ]);
+      expect(o.cashDueCents, 3000);
+      expect(o.isPrepaid, isFalse);
+    });
+
+    test('card only → prepaid', () {
+      final o = order([
+        {'method': 'card', 'amount_cents': 3000, 'last4': '1111'},
+      ]);
+      expect(o.cashDueCents, 0);
+      expect(o.isPrepaid, isTrue);
+    });
+
+    test('card + cash part-paid → cash is the cash part', () {
+      final o = order([
+        {'method': 'card', 'amount_cents': 1000},
+        {'method': 'cash', 'amount_cents': 2000},
+      ]);
+      expect(o.cashDueCents, 2000);
+      expect(o.isPrepaid, isFalse);
+    });
+
+    test('"other" only (third party / invoice) → prepaid, not cash', () {
+      final o = order([
+        {'method': 'other', 'amount_cents': 3000},
+      ]);
+      expect(o.cashDueCents, 0);
+      expect(o.isPrepaid, isTrue);
+    });
+  });
 }

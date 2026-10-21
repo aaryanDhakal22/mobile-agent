@@ -33,7 +33,6 @@ object RingChannel {
                     MainActivity.current?.ringEnded()
                     result.success(null)
                 }
-                "isForeground" -> result.success(MainActivity.resumed)
                 else -> result.notImplemented()
             }
         }

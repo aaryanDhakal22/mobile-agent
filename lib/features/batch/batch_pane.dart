@@ -40,14 +40,27 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
       _error = null;
     });
     try {
+      final floor = ref.read(floorProvider.notifier);
+      // CLOSE ANYWAY only forces the orders that were on screen: the agent is
+      // asked again first, and an order that came in while the list was open
+      // (it would be cancelled unseen) shows the list again instead.
+      Set<String>? shown;
       CloseBatchResult r;
-      try {
-        r = await ref.read(floorProvider.notifier).closeBatch(force: false);
-      } on BatchLeftoversException catch (e) {
-        if (!mounted) return;
-        final force = await _confirmLeftovers(e.leftovers);
-        if (!force || !mounted) return;
-        r = await ref.read(floorProvider.notifier).closeBatch(force: true);
+      while (true) {
+        try {
+          r = await floor.closeBatch(force: false);
+          break;
+        } on BatchLeftoversException catch (e) {
+          if (!mounted) return;
+          final ids = e.leftovers.map((o) => o.id).toSet();
+          if (shown != null && shown.containsAll(ids)) {
+            r = await floor.closeBatch(force: true);
+            break;
+          }
+          final newIds = shown == null ? const <String>{} : ids.difference(shown);
+          if (!await _confirmLeftovers(e.leftovers, newIds: newIds) || !mounted) return;
+          shown = ids;
+        }
       }
       if (mounted) setState(() => _last = r);
     } catch (e) {
@@ -57,7 +70,8 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
     }
   }
 
-  Future<bool> _confirmLeftovers(List<StoredOrder> leftovers) async {
+  /// [newIds]: orders that weren't on the list the last time it was shown.
+  Future<bool> _confirmLeftovers(List<StoredOrder> leftovers, {Set<String> newIds = const {}}) async {
     final r = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -68,6 +82,13 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (newIds.isNotEmpty) ...[
+                Text(
+                  '${newIds.length} new order${newIds.length == 1 ? ' came' : 's came'} in — check the list again.',
+                  style: const TextStyle(fontWeight: FontWeight.w700, color: QuiccColors.statusFiring),
+                ),
+                const SizedBox(height: 8),
+              ],
               const Text(
                 'Closing anyway finishes them automatically: orders in progress → ready '
                 '(pickup / dine-in) or delivered (delivery). Orders nobody accepted are CANCELLED '
@@ -91,7 +112,10 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
                             color: QuiccColors.brand400,
                           ),
                         ),
-                        title: Text('${o.order.customerName} · ${o.order.fulfillment.type.label}'),
+                        title: Text(
+                          '${newIds.contains(o.id) ? 'NEW · ' : ''}'
+                          '${o.order.customerName} · ${o.order.fulfillment.type.label}',
+                        ),
                         trailing: StatePill(o.state),
                       ),
                   ],
@@ -234,10 +258,11 @@ class _DriverReportsCardState extends ConsumerState<_DriverReportsCard> {
   void initState() {
     super.initState();
     _batch = widget.initialBatch ?? 0;
-    _load();
+    _load(first: true);
   }
 
-  void _load() {
+  /// [first]: from initState, where setState isn't allowed yet.
+  void _load({bool first = false}) {
     final c = ref.read(agentClientProvider);
     if (c == null) return;
     c
@@ -246,7 +271,12 @@ class _DriverReportsCardState extends ConsumerState<_DriverReportsCard> {
           if (mounted) setState(() => _batches = b);
         })
         .catchError((Object _) {});
-    setState(() => _reports = c.driverReports(_batch));
+    final reports = c.driverReports(_batch);
+    if (first) {
+      _reports = reports;
+    } else {
+      setState(() => _reports = reports);
+    }
   }
 
   Future<void> _print() async {

@@ -8,7 +8,6 @@ import 'alert_player.dart';
 import 'providers.dart';
 import 'ring_platform.dart';
 import 'sse.dart';
-import 'storage.dart';
 
 /// Overridden in tests with a fake.
 final ringPlatformProvider = Provider<RingPlatform>((_) => RingPlatform());
@@ -42,7 +41,9 @@ VoidCallback startRingBridge(ProviderContainer c) {
           break;
       }
       if (!next.ringing) {
-        if (prev?.ringing ?? false) unawaited(ring.cancelRing());
+        // At start (prev == null) too: a ring notification left over from
+        // before a restart / update must not outlive its order.
+        if (prev == null || prev.ringing) unawaited(ring.cancelRing());
       } else if (ringNotificationDue(prev, next)) {
         final n = next.known.length;
         unawaited(
@@ -55,11 +56,14 @@ VoidCallback startRingBridge(ProviderContainer c) {
     }, fireImmediately: true),
   );
 
+  // Only pairing / unpairing matters here (not a rename or a new address).
+  // Unpaired at start also stops the service: RestartReceiver starts it after
+  // a reboot / self-update before Dart knows whether the tablet is paired.
   subs.add(
-    c.listen<Pairing?>(pairingProvider, (prev, next) {
-      if (next != null) {
+    c.listen<bool>(pairingProvider.select((p) => p != null), (prev, paired) {
+      if (paired) {
         unawaited(ring.startService(serviceText(c.read(floorProvider).connection)));
-      } else if (prev != null) {
+      } else {
         unawaited(ring.stopService());
       }
     }, fireImmediately: true),

@@ -62,6 +62,11 @@ class AgentException implements Exception {
   bool get isPrinterFailure => statusCode == 502;
   bool get isConflict => statusCode == 409;
   bool get isNotFound => statusCode == 404;
+
+  /// The agent doesn't have this route (an older Pi): a GET falls to the web
+  /// UI's `/api/*` 404, a PUT / POST to the mux's 405. A real 404
+  /// `not_configured` (unknown printer) is not that.
+  bool get isMissingRoute => (statusCode == 404 && code != 'not_configured') || statusCode == 405;
   bool get isNetwork => statusCode == null;
 
   @override
@@ -445,8 +450,7 @@ class AgentClient {
     try {
       return await call();
     } on AgentException catch (e) {
-      final missing = (e.statusCode == 404 && e.code != 'not_configured') || e.statusCode == 405;
-      if (!missing) rethrow;
+      if (!e.isMissingRoute) rethrow;
       throw AgentException(e.message, statusCode: e.statusCode, code: kReceiptUnsupported, body: e.body);
     }
   }

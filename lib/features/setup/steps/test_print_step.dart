@@ -54,7 +54,8 @@ class _TestPrintPanelState extends ConsumerState<TestPrintPanel> {
       _report();
     } on AgentException catch (e) {
       if (!mounted) return;
-      if (e.isNotFound) {
+      // An older Pi: 404 (agent < 2.0) or 405 (2.0.0's mux for a POST).
+      if (e.isMissingRoute) {
         setState(() => _unsupported = true);
       } else {
         setState(() => _error = FriendlyError.from(e));

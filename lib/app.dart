@@ -102,10 +102,14 @@ class _MobileAgentAppState extends ConsumerState<MobileAgentApp> {
       // The alarm (full-screen alert + "still ringing" banner) rides above
       // every route — the setup wizard included, once paired — so it shows
       // over order detail screens and dialogs too. A newer Quibase on the
-      // agent locks everything above it until installed (UpdateGate).
-      builder: (context, child) => paired
-          ? UpdateGate(child: AlarmHost(child: child ?? const SizedBox.shrink()))
-          : (child ?? const SizedBox.shrink()),
+      // agent locks everything below the alarm until installed (UpdateGate):
+      // the new-order alert stays on top, so orders can always be accepted.
+      builder: (context, child) =>
+          paired ? pairedOverlays(child ?? const SizedBox.shrink()) : (child ?? const SizedBox.shrink()),
     );
   }
 }
+
+/// What rides above every route once paired: the alarm on top of the update
+/// lock (UpdateGate) on top of the app.
+Widget pairedOverlays(Widget child) => AlarmHost(child: UpdateGate(child: child));

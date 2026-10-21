@@ -290,7 +290,20 @@ class _ReadyRow extends StatelessWidget {
                 },
               ),
               const SizedBox(width: 12),
-              Text(money(o.money.totalCents), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(money(o.money.totalCents), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                  // What the driver collects at the door (same rule as the receipt).
+                  Text(
+                    o.isPrepaid ? 'PAID' : 'CASH ${money(o.cashDueCents)}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: o.isPrepaid ? context.palette.textMuted : QuiccColors.statusFiring,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),

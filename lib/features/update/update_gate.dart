@@ -45,12 +45,35 @@ final updatePlatformProvider = Provider<UpdatePlatform>((_) => UpdatePlatform())
 bool needsUpdate(int? installed, AppRelease? release) =>
     installed != null && release != null && release.versionCode > installed;
 
+/// After this many failed attempts (download, damaged file, installer) the
+/// lock offers LATER, so a broken release can't take the counter down.
+const int kUpdateFailuresBeforeLater = 2;
+
+/// How long LATER hides the lock.
+const Duration kUpdateSnooze = Duration(hours: 1);
+
+/// Deletes every downloaded APK in [dir] except [keep] (older releases).
+Future<void> pruneOldApks(Directory dir, String keep) async {
+  try {
+    await for (final f in dir.list()) {
+      if (f is File && f.path != keep && f.path.endsWith('.apk')) {
+        await f.delete().catchError((Object _) => f);
+      }
+    }
+  } catch (_) {
+    // Only cache space: never block an update on it.
+  }
+}
+
 enum UpdatePhase { downloading, needPermission, installing, failed }
 
 /// Forced self-update: when the agent has a newer Quibase than the one
 /// installed, the whole app is locked behind "Updating Quibase" until it is
 /// installed (releases are only pushed after close). Android still shows its
-/// own one-tap install screen.
+/// own one-tap install screen. The new-order alert rides above the lock
+/// (app.dart), a release withdrawn on the agent unlocks it again, and after
+/// [kUpdateFailuresBeforeLater] failed attempts LATER hides it for
+/// [kUpdateSnooze].
 class UpdateGate extends ConsumerStatefulWidget {
   final Widget child;
   const UpdateGate({super.key, required this.child});
@@ -66,6 +89,9 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
   FriendlyError? _error;
   String? _apkPath;
   bool _checking = false;
+  int _failures = 0;
+  bool _snoozed = false;
+  Timer? _snoozeTimer;
   Timer? _timer;
   late final AppLifecycleListener _lifecycle;
 
@@ -80,6 +106,7 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
   @override
   void dispose() {
     _timer?.cancel();
+    _snoozeTimer?.cancel();
     _lifecycle.dispose();
     super.dispose();
   }
@@ -89,12 +116,18 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
     if (_target != null && _phase == UpdatePhase.needPermission) {
       unawaited(_install());
     } else {
+      // Still running after the installer = it was cancelled or failed
+      // (an install that works restarts the app).
+      if (_target != null && _phase == UpdatePhase.installing) setState(() => _failures++);
       unawaited(_check());
     }
   }
 
+  /// Also re-checks while locked: a release withdrawn on the agent (or no
+  /// longer newer than what's installed) unlocks, a different newer one
+  /// replaces the target.
   Future<void> _check() async {
-    if (_checking || _target != null) return;
+    if (_checking) return;
     final client = ref.read(agentClientProvider);
     if (client == null) return;
     _checking = true;
@@ -103,13 +136,13 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
       final installed = await platform.installedVersion();
       if (installed == null) return;
       final rel = await client.appLatest();
-      if (!needsUpdate(installed, rel) || !mounted) return;
-      setState(() {
-        _target = rel;
-        _phase = UpdatePhase.downloading;
-        _progress = null;
-        _error = null;
-      });
+      if (!mounted) return;
+      if (!needsUpdate(installed, rel)) {
+        if (_target != null) setState(() => _setTarget(null));
+        return;
+      }
+      if (_target?.versionCode == rel!.versionCode) return;
+      setState(() => _setTarget(rel));
       await _download();
     } catch (_) {
       // Agent unreachable / old agent: try again on the next tick.
@@ -118,8 +151,20 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
     }
   }
 
+  void _setTarget(AppRelease? rel) {
+    _target = rel;
+    _phase = UpdatePhase.downloading;
+    _progress = null;
+    _error = null;
+    _apkPath = null;
+    _failures = 0;
+    _snoozed = false;
+    _snoozeTimer?.cancel();
+  }
+
   Future<void> _download() async {
-    final rel = _target!;
+    final rel = _target;
+    if (rel == null) return;
     final client = ref.read(agentClientProvider);
     if (client == null) return;
     try {
@@ -131,6 +176,7 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
           if (mounted && total > 0) setState(() => _progress = got / total);
         },
       );
+      if (!identical(_target, rel)) return; // withdrawn / replaced meanwhile
       if (rel.sha256.isNotEmpty && sum != rel.sha256) {
         await file.delete().catchError((Object _) => file);
         _fail(
@@ -143,9 +189,10 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
         return;
       }
       _apkPath = file.path;
+      await pruneOldApks(Directory(dir), file.path);
       await _install();
     } catch (e) {
-      _fail(FriendlyError.from(e));
+      if (identical(_target, rel)) _fail(FriendlyError.from(e));
     }
   }
 
@@ -155,7 +202,18 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
     setState(() {
       _phase = UpdatePhase.failed;
       _error = f;
+      _failures++;
     });
+  }
+
+  /// LATER: hide the lock for [kUpdateSnooze], then show it again.
+  void _snooze() {
+    ref.read(localLogProvider).warn('update', 'update put off for ${kUpdateSnooze.inMinutes} min after $_failures failures');
+    _snoozeTimer?.cancel();
+    _snoozeTimer = Timer(kUpdateSnooze, () {
+      if (mounted) setState(() => _snoozed = false);
+    });
+    setState(() => _snoozed = true);
   }
 
   Future<void> _install() async {
@@ -185,7 +243,7 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
     return Stack(
       children: [
         widget.child,
-        if (target != null) Positioned.fill(child: _lock(context, target)),
+        if (target != null && !_snoozed) Positioned.fill(child: _lock(context, target)),
       ],
     );
   }
@@ -199,7 +257,8 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
       ),
       UpdatePhase.installing => (
         'Install the update',
-        'Tap INSTALL on the screen that opened. Nothing is lost — the app comes back paired.',
+        'Tap INSTALL on the screen that opened. Nothing is lost — Quibase comes back paired and '
+            'listening for orders by itself.',
       ),
       UpdatePhase.failed => ('Update not finished', _error == null ? 'Something went wrong.' : '${_error!.short}.'),
     };
@@ -253,6 +312,14 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
                     },
                     child: const Text('TRY AGAIN'),
                   ),
+                if ((_phase == UpdatePhase.failed || _phase == UpdatePhase.installing) &&
+                    _failures >= kUpdateFailuresBeforeLater) ...[
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: _snooze,
+                    child: const Text('LATER', style: TextStyle(color: Colors.white70, fontSize: 18)),
+                  ),
+                ],
               ],
             ),
           ),
