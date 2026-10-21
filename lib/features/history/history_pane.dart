@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
-import '../order_detail/order_detail_view.dart';
+import '../common/widgets.dart';
+import '../order_detail/order_detail_screen.dart';
 
+/// Orders of the current batch (live) or a kept closed batch.
 class HistoryPane extends ConsumerStatefulWidget {
   const HistoryPane({super.key});
 
@@ -14,122 +17,80 @@ class HistoryPane extends ConsumerStatefulWidget {
 }
 
 class _HistoryPaneState extends ConsumerState<HistoryPane> {
-  int? _selectedId;
+  int? _batchId; // null → current (open) batch
 
   @override
   Widget build(BuildContext context) {
-    final history = ref.watch(orderHistoryProvider);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SizedBox(
-          width: 360,
-          child: _ListColumn(
-            history: history,
-            selectedId: _selectedId,
-            onSelect: (o) => setState(() => _selectedId = o.order.orderId),
-            onRefresh: () => ref.invalidate(orderHistoryProvider),
-          ),
-        ),
-        const VerticalDivider(width: 1),
-        Expanded(
-          child: history.maybeWhen(
-            data: (orders) {
-              final selected = _firstOrNullWhere(orders, (o) => o.order.orderId == _selectedId)
-                  ?? (orders.isNotEmpty ? orders.first : null);
-              if (selected == null) return const _NoHistoryYet();
-              // Lazily sync initial selection so the detail pane isn't blank
-              // on first build.
-              if (_selectedId == null && orders.isNotEmpty) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!mounted) return;
-                  setState(() => _selectedId = selected.order.orderId);
-                });
-              }
-              return OrderDetailView(
-                key: ValueKey(selected.order.orderId),
-                order: selected,
-                confirmable: false,
-                popOnAccept: false,
-              );
-            },
-            orElse: () => const _DetailPlaceholder(
-              message: 'Select an order to view details',
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
+    final currentId = ref.watch(floorProvider.select((s) => s.currentBatchId));
+    final batches = ref.watch(batchesProvider);
+    final showingCurrent = _batchId == null || _batchId == currentId;
 
-T? _firstOrNullWhere<T>(List<T> list, bool Function(T) test) {
-  for (final x in list) {
-    if (test(x)) return x;
-  }
-  return null;
-}
+    final AsyncValue<List<StoredOrder>> orders = showingCurrent
+        ? AsyncValue.data(ref.watch(floorProvider.select((s) => s.currentBatchOrders)))
+        : ref.watch(batchOrdersProvider(_batchId!));
 
-class _ListColumn extends StatelessWidget {
-  final AsyncValue<List<StoredOrder>> history;
-  final int? selectedId;
-  final ValueChanged<StoredOrder> onSelect;
-  final VoidCallback onRefresh;
+    final options = batches.valueOrNull ?? const <Batch>[];
 
-  const _ListColumn({
-    required this.history,
-    required this.selectedId,
-    required this.onSelect,
-    required this.onRefresh,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: context.palette.bgSurface,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 12, 8),
-            child: Row(
-              children: [
-                const Text(
-                  'History',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+          PaneHeader(
+            title: 'History',
+            subtitle: orders.valueOrNull == null ? null : '${orders.valueOrNull!.length} orders',
+            trailing: SizedBox(
+              width: 340,
+              child: DropdownButtonFormField<int?>(
+                key: ValueKey('batch-$currentId-${options.length}'),
+                initialValue: showingCurrent ? null : _batchId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.layers_outlined),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 ),
-                const Spacer(),
-                IconButton(
-                  icon: Icon(Icons.refresh, color: context.palette.textMuted),
-                  onPressed: onRefresh,
-                  tooltip: 'Refresh',
-                ),
-              ],
+                items: [
+                  DropdownMenuItem<int?>(
+                    value: null,
+                    child: Text('Current batch${currentId == null ? '' : ' #$currentId'}'),
+                  ),
+                  for (final b in options.where((b) => b.id != currentId))
+                    DropdownMenuItem<int?>(
+                      value: b.id,
+                      child: Text('Batch #${b.id} · ${dateClock(b.openedAt)} · ${b.orderCount}'),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _batchId = v),
+              ),
             ),
           ),
           Expanded(
-            child: history.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => _ListError(error: e.toString(), onRetry: onRefresh),
-              data: (orders) {
-                if (orders.isEmpty) return const _EmptyHistory();
-                return ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  itemCount: orders.length + 1,
-                  separatorBuilder: (_, _) => const SizedBox(height: 6),
-                  itemBuilder: (context, i) {
-                    if (i == orders.length) {
-                      return const _EndOfPageHint();
-                    }
-                    final o = orders[i];
-                    return _HistoryRow(
-                      order: o,
-                      selected: o.order.orderId == selectedId,
-                      onTap: () => onSelect(o),
-                    );
-                  },
-                );
+            child: RefreshIndicator(
+              onRefresh: () async {
+                ref.invalidate(batchesProvider);
+                if (showingCurrent) {
+                  await ref.read(floorProvider.notifier).refresh();
+                } else {
+                  ref.invalidate(batchOrdersProvider(_batchId!));
+                }
               },
+              child: orders.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => ListView(children: [InlineError('Could not load orders: $e')]),
+                data: (list) => list.isEmpty
+                    ? ListView(
+                        children: const [
+                          SizedBox(height: 80),
+                          EmptyState(icon: Icons.receipt_long_outlined, title: 'No orders in this batch'),
+                        ],
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.only(bottom: 32),
+                        itemCount: list.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        itemBuilder: (context, i) => HistoryRow(order: list[i]),
+                      ),
+              ),
             ),
           ),
         ],
@@ -138,198 +99,66 @@ class _ListColumn extends StatelessWidget {
   }
 }
 
-class _HistoryRow extends StatelessWidget {
+class HistoryRow extends StatelessWidget {
   final StoredOrder order;
-  final bool selected;
-  final VoidCallback onTap;
-  const _HistoryRow({
-    required this.order,
-    required this.selected,
-    required this.onTap,
-  });
+  const HistoryRow({super.key, required this.order});
 
   @override
   Widget build(BuildContext context) {
-    final req = order.order;
-    final when = order.status.printedDate ?? order.status.arrivalDate;
-    return Material(
-      color: Colors.transparent,
+    final o = order.order;
+    return Card(
       child: InkWell(
-        borderRadius: BorderRadius.circular(QuiccRadius.md),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          decoration: BoxDecoration(
-            color: selected ? QuiccColors.brand400.withValues(alpha: 0.10) : context.palette.bgElevated,
-            borderRadius: BorderRadius.circular(QuiccRadius.md),
-            border: Border.all(
-              color: selected ? QuiccColors.brand400.withValues(alpha: 0.55) : Colors.transparent,
-            ),
+        borderRadius: BorderRadius.circular(QuiccRadius.lg),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => OrderDetailScreen(orderId: order.id, initial: order),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Text(
-                    '#${req.orderNumber}',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: selected ? QuiccColors.brand400 : context.palette.textPrimary,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '\$${req.orderTotal.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
+              SizedBox(
+                width: 96,
+                child: Text(
+                  order.displayNumber,
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: QuiccColors.brand400),
+                ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                req.customerName,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: context.palette.textSecondary, fontSize: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(o.customerName, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        if (o.fulfillment.type != FulfillmentType.unknown) o.fulfillment.type.label,
+                        '${o.itemCount} item${o.itemCount == 1 ? '' : 's'}',
+                        clock(order.status.arrivalDate ?? o.receivedAt),
+                        if (order.status.driverName != null) 'driver ${order.status.driverName}',
+                      ].join(' · '),
+                      style: TextStyle(color: context.palette.textSecondary),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 2),
-              Row(
-                children: [
-                  if (req.serviceType.isNotEmpty)
-                    Text(
-                      req.serviceType,
-                      style: TextStyle(color: context.palette.textMuted, fontSize: 12),
-                    ),
-                  if (req.serviceType.isNotEmpty && when != null)
-                    Text(
-                      '  Â·  ',
-                      style: TextStyle(color: context.palette.textMuted, fontSize: 12),
-                    ),
-                  if (when != null)
-                    Text(
-                      _formatRelative(when),
-                      style: TextStyle(color: context.palette.textMuted, fontSize: 12),
-                    ),
-                ],
+              StatePill(order.state),
+              const SizedBox(width: 16),
+              SizedBox(
+                width: 96,
+                child: Text(
+                  money(o.money.totalCents),
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                ),
               ),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right, color: context.palette.textMuted),
             ],
           ),
         ),
       ),
     );
   }
-}
-
-class _EmptyHistory extends StatelessWidget {
-  const _EmptyHistory();
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'No orders yet.',
-            style: TextStyle(color: context.palette.textMuted),
-          ),
-        ),
-      );
-}
-
-class _EndOfPageHint extends StatelessWidget {
-  const _EndOfPageHint();
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 24),
-        child: Text(
-          'Showing the latest 50 orders.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: context.palette.textMuted, fontSize: 11, letterSpacing: 1.2),
-        ),
-      );
-}
-
-class _ListError extends StatelessWidget {
-  final String error;
-  final VoidCallback onRetry;
-  const _ListError({required this.error, required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.cloud_off, color: QuiccColors.statusVoided, size: 48),
-          const SizedBox(height: 12),
-          const Text(
-            "Can't load history",
-            style: TextStyle(fontWeight: FontWeight.w500),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            error,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: context.palette.textMuted, fontSize: 12),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh),
-            label: const Text('RETRY'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NoHistoryYet extends StatelessWidget {
-  const _NoHistoryYet();
-  @override
-  Widget build(BuildContext context) {
-    return const _DetailPlaceholder(
-      message: 'Nothing to show yet â€” orders will appear here once they come in.',
-    );
-  }
-}
-
-class _DetailPlaceholder extends StatelessWidget {
-  final String message;
-  const _DetailPlaceholder({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.receipt_long_outlined, size: 72, color: context.palette.textMuted),
-            const SizedBox(height: 16),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: context.palette.textMuted),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-String _formatRelative(DateTime when) {
-  final diff = DateTime.now().difference(when);
-  if (diff.isNegative) return 'just now';
-  if (diff.inSeconds < 45) return 'just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-  if (diff.inHours < 24) return '${diff.inHours} h ago';
-  if (diff.inDays < 7) return '${diff.inDays} d ago';
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${two(when.month)}/${two(when.day)}';
 }
