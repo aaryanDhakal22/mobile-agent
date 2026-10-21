@@ -40,6 +40,13 @@ String normalizeAgentAddress(String input) {
 /// settings".
 const String kReceiptUnsupported = 'receipt_unsupported';
 
+/// [AgentException.code] when adding a printer: the store already has a
+/// printer with that name (409).
+const String kPrinterNameTaken = 'name_taken';
+
+/// [AgentException.code] when the Pi can't reach main to add a printer (503).
+const String kMainOffline = 'main_offline';
+
 /// A non-2xx answer from the agent. Error bodies are `{"error", "code"?}`;
 /// `body` keeps the whole decoded map (e.g. `leftovers` on a 409).
 class AgentException implements Exception {
@@ -419,6 +426,44 @@ class AgentClient {
       timeout: printTimeout,
     );
     return jList(jMap(body)['results'], PrinterTestResult.fromJson);
+  }
+
+  /// `GET /api/printers/found` — printers the Pi found on its network;
+  /// [refresh] makes it scan again now (slower). An older Pi has no such
+  /// route ([AgentException.isMissingRoute]).
+  Future<FoundPrinters> foundPrinters({bool refresh = false}) async => FoundPrinters.fromJson(
+    jMap(
+      await _send(
+        'GET',
+        '/api/printers/found',
+        query: refresh ? const {'refresh': '1'} : null,
+        timeout: refresh ? const Duration(seconds: 15) : null,
+      ),
+    ),
+  );
+
+  /// `POST /api/printers/add {name, ip, mac}` — the Pi asks main to add the
+  /// printer (main pushes the new roster back). 409 [kPrinterNameTaken],
+  /// 503 [kMainOffline], 400 `bad_request`.
+  Future<AddedPrinter> addPrinter(String name, String ip, String mac) async {
+    try {
+      final body = await _send(
+        'POST',
+        '/api/printers/add',
+        body: {'name': name.trim(), 'ip': ip, 'mac': mac},
+        timeout: const Duration(seconds: 15),
+      );
+      return AddedPrinter.fromJson(jMap(body));
+    } on AgentException catch (e) {
+      // Keep the codes reliable even if the body had none.
+      final code = switch (e.statusCode) {
+        409 => kPrinterNameTaken,
+        503 => kMainOffline,
+        _ => null,
+      };
+      if (code == null || e.code == code) rethrow;
+      throw AgentException(e.message, statusCode: e.statusCode, code: code, body: e.body, cause: e.cause);
+    }
   }
 
   // --- receipt settings ------------------------------------------------------

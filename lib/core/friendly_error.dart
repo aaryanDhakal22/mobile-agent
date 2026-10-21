@@ -110,6 +110,10 @@ class FriendlyError {
         return f('Some orders are not finished yet');
       case 'too_large':
         return f('That was too big to send');
+      case 'name_taken':
+        return f('There is already a printer with that name', 'Pick another name');
+      case 'main_offline':
+        return f("The Pi can't reach Quicc right now", 'Check the Pi\'s internet, then try again', GuideId.noOrders);
     }
     if (e.statusCode == 502) return f('Nothing printed', 'Check the printers', GuideId.printer);
     if (e.statusCode == 404) return f('The Pi needs an update for this', 'Tell the owner');

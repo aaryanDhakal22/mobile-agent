@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,6 +9,7 @@ import '../../../core/friendly_error.dart';
 import '../../../core/local_log.dart';
 import '../../../core/providers.dart';
 import '../../../theme/quicc_colors.dart';
+import '../found_printers.dart';
 import '../setup_widgets.dart';
 
 /// What to check when a printer didn't answer the test.
@@ -36,6 +39,39 @@ class _TestPrintPanelState extends ConsumerState<TestPrintPanel> {
   FriendlyError? _error;
   bool _unsupported = false;
 
+  /// After adding a printer from "Found on the network": what to do next.
+  String? _addedNote;
+  Timer? _rosterPoll;
+
+  @override
+  void dispose() {
+    _rosterPoll?.cancel();
+    super.dispose();
+  }
+
+  /// A printer was added: ask the Pi until its roster has [name] (main
+  /// pushes it within seconds), then say to print the test again.
+  void _afterAdd(String name) {
+    _rosterPoll?.cancel();
+    setState(() => _addedNote = 'Adding $name… the Pi gets it in a few seconds.');
+    var tries = 0;
+    void done() {
+      _rosterPoll?.cancel();
+      if (mounted) setState(() => _addedNote = '$name is set up. Tap PRINT AGAIN to test it.');
+    }
+
+    _rosterPoll = Timer.periodic(const Duration(seconds: 2), (_) async {
+      final client = ref.read(agentClientProvider);
+      if (client == null || ++tries > 10) return done();
+      try {
+        final d = await client.getDiag(timeout: const Duration(seconds: 4));
+        if (d.printers.any((p) => p.name.toLowerCase() == name.toLowerCase())) done();
+      } catch (_) {
+        // The Pi may be busy; try again on the next tick.
+      }
+    });
+  }
+
   Future<void> _run() async {
     final client = ref.read(agentClientProvider);
     if (client == null) return;
@@ -43,7 +79,9 @@ class _TestPrintPanelState extends ConsumerState<TestPrintPanel> {
       _busy = true;
       _error = null;
       _cameOut.clear();
+      _addedNote = null;
     });
+    _rosterPoll?.cancel();
     try {
       final r = await client.testPrinters();
       if (!mounted) return;
@@ -82,52 +120,72 @@ class _TestPrintPanelState extends ConsumerState<TestPrintPanel> {
       );
     }
     final r = _results;
-    return ListView(
-      children: [
-        Row(
-          children: [
-            BigButton(r == null ? 'PRINT TEST SLIPS' : 'PRINT AGAIN', icon: Icons.print, busy: _busy, onPressed: _run),
-            if (_busy) ...[
-              const SizedBox(width: 16),
-              const Expanded(
-                child: Text('Printing… a printer that is off can take 15 seconds', style: TextStyle(fontSize: 16)),
+    // A Column (not a ListView) so the found-printers section keeps its state
+    // when the lines above it change.
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              BigButton(
+                r == null ? 'PRINT TEST SLIPS' : 'PRINT AGAIN',
+                icon: Icons.print,
+                busy: _busy,
+                onPressed: _run,
               ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (_error != null)
-          Text(
-            '${_error!.title}. ${_error!.whatToDo}',
-            style: const TextStyle(fontSize: 17, color: QuiccColors.statusVoided),
-          ),
-        if (r != null && r.isEmpty)
-          const Text(
-            'No printers set up yet. Add them on the Quicc website (Store → Printers).',
-            style: TextStyle(fontSize: 18),
-          ),
-        for (final x in r ?? const <PrinterTestResult>[])
-          x.ok
-              ? _CameOutRow(
-                  name: x.name,
-                  answer: _cameOut[x.id],
-                  onAnswer: (v) {
-                    setState(() => _cameOut[x.id] = v);
-                    if (!v) ref.read(localLogProvider).warn('setup', 'test slip did not come out of ${x.name}');
-                    _report();
-                  },
-                  onFix: widget.onFix == null ? null : () => widget.onFix!(GuideId.printer),
-                )
-              : CheckRow(
-                  icon: Icons.print_disabled,
-                  label: x.name,
-                  detail: printerAdvice(x.errorCode),
-                  ok: false,
-                  actionLabel: widget.onFix == null ? null : 'FIX IT',
-                  onAction: widget.onFix == null ? null : () => widget.onFix!(GuideId.printer),
-                  failText: 'Not answering',
+              if (_busy) ...[
+                const SizedBox(width: 16),
+                const Expanded(
+                  child: Text('Printing… a printer that is off can take 15 seconds', style: TextStyle(fontSize: 16)),
                 ),
-      ],
+              ],
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_error != null)
+            Text(
+              '${_error!.title}. ${_error!.whatToDo}',
+              style: const TextStyle(fontSize: 17, color: QuiccColors.statusVoided),
+            ),
+          if (r != null && r.isEmpty) ...[
+            const Text(
+              'No printers set up yet. Add them on the Quicc website (Store → Printers).',
+              style: TextStyle(fontSize: 18),
+            ),
+            if (_addedNote != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  _addedNote!,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: QuiccColors.statusPaid),
+                ),
+              ),
+            FoundPrintersSection(key: const ValueKey('found-printers'), noPrintersYet: true, onAdded: _afterAdd),
+          ],
+          for (final x in r ?? const <PrinterTestResult>[])
+            x.ok
+                ? _CameOutRow(
+                    name: x.name,
+                    answer: _cameOut[x.id],
+                    onAnswer: (v) {
+                      setState(() => _cameOut[x.id] = v);
+                      if (!v) ref.read(localLogProvider).warn('setup', 'test slip did not come out of ${x.name}');
+                      _report();
+                    },
+                    onFix: widget.onFix == null ? null : () => widget.onFix!(GuideId.printer),
+                  )
+                : CheckRow(
+                    icon: Icons.print_disabled,
+                    label: x.name,
+                    detail: printerAdvice(x.errorCode),
+                    ok: false,
+                    actionLabel: widget.onFix == null ? null : 'FIX IT',
+                    onAction: widget.onFix == null ? null : () => widget.onFix!(GuideId.printer),
+                    failText: 'Not answering',
+                  ),
+        ],
+      ),
     );
   }
 }

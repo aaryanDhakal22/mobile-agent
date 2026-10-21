@@ -7,6 +7,7 @@ import '../../../core/api_client.dart';
 import '../../../core/diag_models.dart';
 import '../../../core/providers.dart';
 import '../../../theme/quicc_colors.dart';
+import '../found_printers.dart';
 import '../setup_flow.dart';
 import '../setup_widgets.dart';
 
@@ -45,6 +46,13 @@ class _PiReadyPanelState extends ConsumerState<PiReadyPanel> {
   void dispose() {
     _poll?.cancel();
     super.dispose();
+  }
+
+  /// A printer was just added: look again quickly until the Pi has it.
+  void _afterAdd(String _) {
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _read());
+    scheduleMicrotask(_read);
   }
 
   bool _complete(PiDiag d) => d.connectedToMain && d.printers.isNotEmpty && d.printersDown.isEmpty;
@@ -88,63 +96,79 @@ class _PiReadyPanelState extends ConsumerState<PiReadyPanel> {
     // ✓ as soon as it's true; still checking while we wait; ✗ after.
     bool? state(bool good) => good ? true : (waiting ? null : false);
 
-    return ListView(
-      children: [
-        if (link != null) _Restored(link: link),
-        if (_restarting)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 10),
-            child: Text('The Pi is restarting… (a few seconds)', style: TextStyle(fontSize: 17)),
-          ),
-        if (_unsupported)
-          const CheckRow(
-            icon: Icons.info_outline,
-            label: "This Pi can't report its health",
-            detail: 'It runs an older version. Everything else still works.',
-            ok: true,
-          )
-        else ...[
-          CheckRow(icon: Icons.public, label: 'Internet', ok: state(d?.mainReachable == true), failText: 'No internet'),
-          CheckRow(
-            icon: Icons.cloud_done,
-            label: 'Connected to Quicc',
-            ok: state(d?.connectedToMain == true),
-            failText: 'Not connected',
-          ),
-          CheckRow(
-            icon: Icons.sd_card,
-            label: 'Memory card',
-            detail: d != null && d.health.fileStale ? "The Pi can't check it" : null,
-            unknown: d != null && d.health.fileStale,
-            ok: d == null ? null : !d.health.sdTrouble,
-            failText: 'Errors found',
-          ),
-          CheckRow(
-            icon: Icons.power,
-            label: 'Power supply',
-            unknown: d != null && d.health.fileStale,
-            ok: d == null ? null : !d.health.powerTrouble,
-            failText: 'Too weak',
-          ),
-          const SizedBox(height: 10),
-          const Text('Printers', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          if (d != null && d.printers.isEmpty)
-            CheckRow(
-              icon: Icons.print_disabled,
-              label: waiting ? 'Waiting for the printers…' : 'No printers set up yet',
-              detail: waiting ? null : 'Add them on the Quicc website (Store → Printers)',
-              ok: waiting ? null : false,
+    // A Column (not a ListView) so the found-printers section keeps its state
+    // when the restarting line above it comes and goes.
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (link != null) _Restored(link: link),
+          if (_restarting)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text('The Pi is restarting… (a few seconds)', style: TextStyle(fontSize: 17)),
             ),
-          for (final p in d?.printers ?? const <DiagPrinter>[])
+          if (_unsupported)
+            const CheckRow(
+              icon: Icons.info_outline,
+              label: "This Pi can't report its health",
+              detail: 'It runs an older version. Everything else still works.',
+              ok: true,
+            )
+          else ...[
             CheckRow(
-              icon: Icons.print,
-              label: p.name + (p.isReceipt ? ' (receipts)' : ''),
-              ok: state(p.up),
-              failText: 'Not answering',
+              icon: Icons.public,
+              label: 'Internet',
+              ok: state(d?.mainReachable == true),
+              failText: 'No internet',
             ),
+            CheckRow(
+              icon: Icons.cloud_done,
+              label: 'Connected to Quicc',
+              ok: state(d?.connectedToMain == true),
+              failText: 'Not connected',
+            ),
+            CheckRow(
+              icon: Icons.sd_card,
+              label: 'Memory card',
+              detail: d != null && d.health.fileStale ? "The Pi can't check it" : null,
+              unknown: d != null && d.health.fileStale,
+              ok: d == null ? null : !d.health.sdTrouble,
+              failText: 'Errors found',
+            ),
+            CheckRow(
+              icon: Icons.power,
+              label: 'Power supply',
+              unknown: d != null && d.health.fileStale,
+              ok: d == null ? null : !d.health.powerTrouble,
+              failText: 'Too weak',
+            ),
+            const SizedBox(height: 10),
+            const Text('Printers', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            if (d != null && d.printers.isEmpty)
+              CheckRow(
+                icon: Icons.print_disabled,
+                label: waiting ? 'Waiting for the printers…' : 'No printers set up yet',
+                detail: waiting ? null : 'Add them on the Quicc website (Store → Printers)',
+                ok: waiting ? null : false,
+              ),
+            for (final p in d?.printers ?? const <DiagPrinter>[])
+              CheckRow(
+                icon: Icons.print,
+                label: p.name + (p.isReceipt ? ' (receipts)' : ''),
+                ok: state(p.up),
+                failText: 'Not answering',
+              ),
+            if (d != null)
+              FoundPrintersSection(
+                key: const ValueKey('found-printers'),
+                noPrintersYet: d.printers.isEmpty,
+                onAdded: _afterAdd,
+              ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
