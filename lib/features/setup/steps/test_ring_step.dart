@@ -34,16 +34,34 @@ class _TestRingPanelState extends ConsumerState<TestRingPanel> {
   bool? _heard;
   bool? _woke;
 
+  /// `ref` can't be used in dispose(); the container can.
+  late final ProviderContainer _container;
+
+  @override
+  void initState() {
+    super.initState();
+    _container = ProviderScope.containerOf(context, listen: false);
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
     // A preview stop never silences a real order's alarm (AlertPlayer).
     unawaited(AlertPlayer.stop(preview: true));
+    if (_phase == _Phase.screenOffRinging) unawaited(_cancelTestRing());
     super.dispose();
   }
 
   /// A real order may be ringing: never silence it.
   bool get _realAlarm => ref.read(alarmProvider).ringing;
+
+  /// Takes the test's full-screen notification down — unless a real order
+  /// rings meanwhile: it shares the one ring notification, which is now that
+  /// order's (the ring bridge takes it down once the order is accepted).
+  Future<void> _cancelTestRing() async {
+    if (_container.read(alarmProvider).ringing) return;
+    await _container.read(ringPlatformProvider).cancelRing();
+  }
 
   Future<void> _stopTest() async {
     if (_realAlarm) return;
@@ -91,7 +109,7 @@ class _TestRingPanelState extends ConsumerState<TestRingPanel> {
       await ring.showRing(title: 'Test ring', text: 'This is only a test — tap to go back');
       _timer = Timer(const Duration(seconds: 15), () async {
         await _stopTest();
-        await ring.cancelRing();
+        await _cancelTestRing();
         if (mounted) setState(() => _phase = _Phase.askScreenOff);
       });
     });

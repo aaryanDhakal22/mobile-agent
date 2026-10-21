@@ -27,18 +27,28 @@ class RingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val text = intent?.getStringExtra(EXTRA_TEXT) ?: lastText
-        lastText = text
+        // Always the latest text (start/update set it): at boot Android can
+        // deliver RestartReceiver's start seconds late, after Dart already
+        // connected — its "Connecting…" extra would then stick for good.
+        val text = lastText
         val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         try {
             ServiceCompat.startForeground(this, ID_SERVICE, connectionNotification(this, text), type)
+            inForeground = true
         } catch (e: Exception) {
             // Android refused (e.g. started from the background): no crash,
-            // the app starts it again the next time it is opened.
+            // the app starts it again the next time it is opened. A refused
+            // repeat start (RestartReceiver, then Dart) must not stop a
+            // service that is already in the foreground.
             Log.w(TAG, "startForeground refused: $e")
-            stopSelf()
+            if (!inForeground) stopSelf()
         }
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        inForeground = false
+        super.onDestroy()
     }
 
     companion object {
@@ -51,6 +61,7 @@ class RingService : Service() {
         const val EXTRA_RING = "quibase_ring"
 
         @Volatile private var lastText = "Listening for new orders"
+        @Volatile private var inForeground = false
 
         fun start(ctx: Context, text: String?): Boolean {
             ensureChannels(ctx)

@@ -100,6 +100,15 @@ class PairingNotifier extends Notifier<Pairing?> {
 
 final pairingProvider = NotifierProvider<PairingNotifier, Pairing?>(PairingNotifier.new);
 
+/// Just what the connection to the agent depends on: the address and the
+/// device key. Renaming the tablet (or saving the same address) leaves it
+/// unchanged, so the client, the SSE connection and the floor aren't rebuilt.
+typedef AgentLink = ({String address, String deviceKey});
+
+final _agentLinkProvider = Provider<AgentLink?>(
+  (ref) => ref.watch(pairingProvider.select((p) => p == null ? null : (address: p.address, deviceKey: p.deviceKey))),
+);
+
 /// Called by any 401 `device_required`: wipe the key, back to pairing.
 void _deviceRevoked(Ref ref) {
   // Deferred: this can fire from inside another provider's work.
@@ -116,7 +125,7 @@ void _deviceRevoked(Ref ref) {
 
 /// HTTP client for the paired agent (null while unpaired).
 final agentClientProvider = Provider<AgentClient?>((ref) {
-  final p = ref.watch(pairingProvider);
+  final p = ref.watch(_agentLinkProvider);
   if (p == null) return null;
   final client = AgentClient(baseUrl: p.address, deviceKey: p.deviceKey, onDeviceRevoked: () => _deviceRevoked(ref));
   ref.onDispose(client.dispose);
@@ -155,7 +164,7 @@ class FloorController extends Notifier<FloorState> {
 
   @override
   FloorState build() {
-    final pairing = ref.watch(pairingProvider);
+    final pairing = ref.watch(_agentLinkProvider);
     ref.watch(agentClientProvider);
     _disposed = false;
     final gen = ++_gen;

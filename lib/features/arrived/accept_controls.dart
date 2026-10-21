@@ -47,7 +47,7 @@ String? acceptRecheckMessage(StoredOrder? o) {
   };
 }
 
-/// Prep-time quick picks + ACCEPT. Used on the Arrived pane and the
+/// Prep-time quick picks + ACCEPT. Used on the order detail screen and the
 /// full-screen alert. Errors render inline (the alert sits above the
 /// navigator, so no dialogs / snackbars there).
 class AcceptControls extends ConsumerStatefulWidget {

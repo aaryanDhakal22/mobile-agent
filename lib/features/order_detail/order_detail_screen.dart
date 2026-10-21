@@ -174,8 +174,8 @@ class _ItemBlock extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(item.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                    if (item.size.isNotEmpty)
-                      Text(item.size, style: TextStyle(color: context.palette.textSecondary, fontSize: 15)),
+                    if (item.displaySize.isNotEmpty)
+                      Text(item.displaySize, style: TextStyle(color: context.palette.textSecondary, fontSize: 15)),
                   ],
                 ),
               ),
@@ -250,7 +250,8 @@ class _Totals extends StatelessWidget {
         if (m.tipCents != 0) row('Tip', m.tipCents),
         row('Total', m.totalCents, bold: true),
         const SizedBox(height: 8),
-        for (final p in o.payments)
+        // A cash payment is money still to collect, not money paid.
+        for (final p in o.payments.where((p) => !p.isCash))
           Align(
             alignment: Alignment.centerRight,
             child: Text(
@@ -258,12 +259,12 @@ class _Totals extends StatelessWidget {
               style: TextStyle(color: context.palette.textMuted),
             ),
           ),
-        if (o.payments.isEmpty)
-          const Align(
+        if (!o.isPrepaid)
+          Align(
             alignment: Alignment.centerRight,
             child: Text(
-              'NOT PAID',
-              style: TextStyle(color: QuiccColors.statusFiring, fontWeight: FontWeight.w700),
+              'CASH DUE ${money(o.cashDueCents)}',
+              style: const TextStyle(color: QuiccColors.statusFiring, fontWeight: FontWeight.w700),
             ),
           ),
       ],

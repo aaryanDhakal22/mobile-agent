@@ -30,6 +30,11 @@ class DiscoveredPi {
   /// How it was found: broadcast | hostname | saved | sweep | typed
   final String via;
 
+  /// For a Pi addressed by a name (the hostname, or a saved/typed name): the
+  /// IPv4s that name resolved to, so the same Pi found by its IP isn't listed
+  /// twice.
+  final List<String> resolvedIps;
+
   const DiscoveredPi({
     required this.address,
     this.storeName = '',
@@ -38,6 +43,7 @@ class DiscoveredPi {
     this.version = '',
     this.host = '',
     this.via = 'broadcast',
+    this.resolvedIps = const [],
   });
 
   bool get isNew => !linked && linkAvailable;
@@ -53,7 +59,22 @@ class DiscoveredPi {
     version: p.version.isNotEmpty ? p.version : version,
     host: p.hostname.isNotEmpty ? p.hostname : host,
     via: via,
+    resolvedIps: resolvedIps,
   );
+}
+
+/// One entry per Pi: a Pi addressed by a name (e.g. [kPiHostname]) is dropped
+/// when the IP it resolves to was found too (broadcast / saved / sweep). The IP is
+/// kept: it's reserved at the store, while the name depends on the router's
+/// DNS. Every card has the same hostname, so the name alone can't tell two Pis
+/// apart.
+List<DiscoveredPi> dedupePis(Iterable<DiscoveredPi> pis) {
+  final list = pis.toList();
+  final byIp = {for (final p in list) if (p.resolvedIps.isEmpty) p.ip};
+  return [
+    for (final p in list)
+      if (p.resolvedIps.isEmpty || !p.resolvedIps.any(byIp.contains)) p,
+  ];
 }
 
 /// The probe datagram: padded so a reply can never be bigger than the probe
@@ -101,14 +122,19 @@ String? subnetBroadcast(InternetAddress a) {
 class PiDiscovery {
   final http.Client Function() clientFactory;
   final Future<List<InternetAddress>> Function() localAddresses;
+
+  /// Resolves a hostname to its IPv4s ([] when it doesn't resolve).
+  final Future<List<String>> Function(String host) lookup;
   final Duration listenFor;
 
   PiDiscovery({
     http.Client Function()? clientFactory,
     Future<List<InternetAddress>> Function()? localAddresses,
+    Future<List<String>> Function(String host)? lookup,
     this.listenFor = const Duration(milliseconds: 2500),
   }) : clientFactory = clientFactory ?? http.Client.new,
-       localAddresses = localAddresses ?? _localIPv4;
+       localAddresses = localAddresses ?? _localIPv4,
+       lookup = lookup ?? _lookupIPv4;
 
   Stream<List<DiscoveredPi>> discover({String? savedAddress, bool sweep = true}) {
     final out = StreamController<List<DiscoveredPi>>();
@@ -119,9 +145,20 @@ class PiDiscovery {
       if (found.containsKey(p.address)) return;
       try {
         final probe = await AgentClient.probe(address: p.address, client: client, timeout: const Duration(seconds: 3));
+        // A name (quiccpos-pi, or a saved/typed one): what it points at.
+        final ips = p.resolvedIps.isEmpty && InternetAddress.tryParse(p.ip) == null ? await lookup(p.ip) : p.resolvedIps;
         if (found.containsKey(p.address) || out.isClosed) return;
-        found[p.address] = p.withProbe(probe);
-        out.add(found.values.toList());
+        found[p.address] = DiscoveredPi(
+          address: p.address,
+          storeName: p.storeName,
+          linked: p.linked,
+          linkAvailable: p.linkAvailable,
+          version: p.version,
+          host: p.host,
+          via: p.via,
+          resolvedIps: ips,
+        ).withProbe(probe);
+        out.add(dedupePis(found.values));
       } catch (_) {
         // Not a Pi, or gone.
       }
@@ -217,6 +254,15 @@ class PiDiscovery {
   static String _nonce() {
     final r = Random.secure();
     return List.generate(8, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  static Future<List<String>> _lookupIPv4(String host) async {
+    try {
+      final r = await InternetAddress.lookup(host, type: InternetAddressType.IPv4).timeout(const Duration(seconds: 2));
+      return [for (final a in r) a.address];
+    } catch (_) {
+      return const [];
+    }
   }
 
   static Future<List<InternetAddress>> _localIPv4() async {

@@ -32,6 +32,9 @@ enum AlertSound {
 /// The audio operations AlertPlayer needs — the real one is audioplayers;
 /// tests swap in a fake via [AlertPlayer.sink].
 abstract class AlarmSink {
+  /// Called when the player stops or pauses by itself (not through [stop]).
+  void Function()? onStopped;
+
   Future<void> configure();
   Future<void> setSource(String asset);
   Future<void> setVolume(double volume);
@@ -45,9 +48,15 @@ abstract class AlarmSink {
 /// stays audible even when media volume is down — the DoorDash "can't miss
 /// it" posture. `stayAwake: true` keeps the CPU alive so the chime doesn't cut
 /// out if the screen dims (needs the WAKE_LOCK permission in the manifest).
+/// No audio focus is requested: with focus, another app taking it (a video,
+/// a call app) paused the chime with nothing to restart it.
 class AudioplayersAlarmSink implements AlarmSink {
   AudioPlayer? _p;
   AudioPlayer get _player => _p ??= AudioPlayer(playerId: 'quicc-new-order');
+  StreamSubscription<PlayerState>? _states;
+
+  @override
+  void Function()? onStopped;
 
   @override
   Future<void> configure() async {
@@ -58,7 +67,7 @@ class AudioplayersAlarmSink implements AlarmSink {
           stayAwake: true,
           contentType: AndroidContentType.sonification,
           usageType: AndroidUsageType.alarm,
-          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+          audioFocus: AndroidAudioFocus.none,
         ),
         iOS: AudioContextIOS(
           category: AVAudioSessionCategory.playback,
@@ -67,6 +76,9 @@ class AudioplayersAlarmSink implements AlarmSink {
       ),
     );
     await _player.setReleaseMode(ReleaseMode.loop);
+    _states ??= _player.onPlayerStateChanged.listen((s) {
+      if (s != PlayerState.playing) onStopped?.call();
+    });
   }
 
   @override
@@ -94,6 +106,8 @@ class AudioplayersAlarmSink implements AlarmSink {
 /// alarm host retries it on the next escalation / floor refresh
 /// ([shouldRetry]). A generation token makes a [stop] that lands while
 /// [start] is still awaiting the player win — the pending start never resumes.
+/// A player that stops by itself (an error, the end of the file) clears
+/// [isPlaying] too, so the same retry restarts it.
 class AlertPlayer {
   @visibleForTesting
   static AlarmSink sink = AudioplayersAlarmSink();
@@ -122,6 +136,7 @@ class AlertPlayer {
 
   /// The player is (as far as we know) looping the chime.
   static bool get isPlaying => _playing;
+  @visibleForTesting
   static bool get isStarting => _starting;
 
   /// The alarm should be ringing but isn't, and no start is in flight (and
@@ -140,6 +155,7 @@ class AlertPlayer {
   static Future<bool> start(AlertSound sound, {bool loud = false, bool preview = false}) async {
     if (preview && _alarmActive) return false;
     if (!preview) _alarmActive = true;
+    sink.onStopped = _sinkStopped;
     final gen = ++_gen;
     _starting = true;
     bool current() => gen == _gen;
@@ -175,6 +191,14 @@ class AlertPlayer {
     } finally {
       if (current()) _starting = false;
     }
+  }
+
+  /// The player stopped without [stop] (our own stop already cleared
+  /// [_playing]; a start in flight sets it itself).
+  static void _sinkStopped() {
+    if (!_playing || _starting) return;
+    _playing = false;
+    debugPrint('AlertPlayer: the player stopped by itself (will retry)');
   }
 
   /// Switches an already-ringing alarm between normal and loud.

@@ -14,21 +14,22 @@ the Pi) — never to `main/` or `online/`. The agent's API is specified in
 | Tab | What staff do there |
 |---|---|
 | **Kitchen** (start screen) | Compact tickets in masonry columns, **most urgent first** (earliest promised ready time): kitchen #, type, time since the order arrived, the customer's name, **every item** (small font), **Ready** and **Reprint**. Each ticket is tinted by lateness: **green** until *green till* minutes after it arrived (agent web UI setting, default 20), then amber, **fully red at twice that**. New orders don't have a tab — they ring full-screen (below) and are accepted there. |
-| **Deliveries** | Ready delivery orders (multi-select) → pick a driver → **Send out**. The picker offers only **clocked-in, available** drivers in queue order (first = preselected); with nobody clocked in it says so and points to the Drivers tab. Below: drivers out with their orders and a live run timer, and **I have returned** per driver. |
+| **Deliveries** | Ready delivery orders (multi-select), each with its total and **CASH $x** to collect or **PAID** → pick a driver → **Send out**. The picker offers only **clocked-in, available** drivers in queue order (first = preselected); with nobody clocked in it says so and points to the Drivers tab. Below: drivers out with their orders and a live run timer, and **I have returned** per driver. |
 | **Drivers** | Driver roster in queue order: add, rename, remove, drag to reorder. Each driver shows **off** (clocked out) / **available** (in the queue) / **out** (on a run), the clock-in time and runs this batch. **Clock in** puts a driver at the back of the queue; **Clock out** works while they're available (out on a run → "tap I have returned first"). Shows the daily auto clock-out time ("Everyone is clocked out daily at 10:00 AM" — set in the agent web UI). **Shifts** lists the last 7 days of clock-in/out records (for reports, not wages). |
-| **History** | Current batch (live) or any kept closed batch; tap an order for full detail (items with size / modifiers / notes, customer, address, kitchen #, timeline). |
-| **Batch** | The open batch and **Close batch**. If orders are unfinished the agent lists them; confirm to close anyway (they're auto-finished). Kitchen numbers restart at 1100. Closing prints **one driver report per driver** on the receipt printer. Below: **Driver reports** for the open or any kept batch (deliveries, cash owed, tips after tip tax, owed to store) and **Print driver reports** to reprint. |
+| **History** | Current batch (live) or any kept closed batch; tap an order for full detail (items with size / modifiers / notes, customer, address, kitchen #, timeline, what was paid and the **CASH DUE**). |
+| **Batch** | The open batch and **Close batch**. If orders are unfinished the agent lists them; confirm to close anyway (they're auto-finished). CLOSE ANYWAY asks the agent again first: an order that came in while the list was open shows the list again (marked NEW) instead of being cancelled unseen. Kitchen numbers restart at 1100. Closing prints **one driver report per driver** on the receipt printer. Below: **Driver reports** for the open or any kept batch (deliveries, cash owed, tips after tip tax, owed to store) and **Print driver reports** to reprint. |
 | **Printers** | Read-only printer reachability. Printers are configured in the Quicc web app (main), not here. |
-| **Settings** | Big-button cards, each with an (i) explaining it in plain words: **Continue setup** (while the setup wizard is unfinished); **The Pi** — its address, checked live as you type ("Found the Pi ✓ — *store*" / "Nothing there ✗"; a bare IP gets `:8080`), SAVE keeps the pairing, plus live / last sync / sync backlog; **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code from the Pi, shown big with an expiry countdown and the steps for the new tablet: open Quibase → pick this Pi → I have a code → type it), **Unpair**; **Order chime** (sound + preview); **Checks & tests** (tablet checks, test ring, test print); **Light / Dark / System** (remembered across restarts; the `q` logo still toggles light ↔ dark); **About & diagnostics**. |
+| **Settings** | Big-button cards, each with an (i) explaining it in plain words: **Continue setup** (while the setup wizard is unfinished); **The Pi** — its address, checked live as you type ("Found the Pi ✓ — *store*" / "Nothing there ✗"; a bare IP gets `:8080`), SAVE keeps the pairing, plus live / last sync / sync backlog; **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code from the Pi, shown big with an expiry countdown and the steps for the new tablet: open Quibase → pick this Pi → I have a code → type it), **Unpair**; **Order chime** (sound + preview); **Receipts** — kitchen-ticket item / number size, the customer receipt's footer (store default, own text or none) and its size, copies (1 / 2), store name + address, customer phone, extra paper before the cut; SAVE, **PRINT SAMPLE** on a chosen printer (default the receipt printer; unsaved changes are saved first) and RESET TO DEFAULTS (`/api/settings/receipt`, `/api/printers/sample`; an older Pi shows "This Pi needs an update for receipt settings"); **Checks & tests** (tablet checks, test ring, test print); **Light / Dark / System** (remembered across restarts; the `q` logo still toggles light ↔ dark); **About & diagnostics**. |
 
 **New-order alarm.** A new order opens a full-screen alert and loops the chosen
 sound on the Android *alarm* stream. Tapping does **not** silence it — it stops
 only when every arrived order has been accepted. **Hide** takes the alert off
 the screen (a banner stays at the top, still ringing). If an order waits more
 than 2 minutes the agent sends `order.escalated`: the alert comes back, louder,
-and the sound is restarted. If the player fails to start (logged), it is
-retried on the next escalation / refresh. The manifest holds `WAKE_LOCK`, which
-the alarm stream's `stayAwake` needs.
+and the sound is restarted. If the player fails to start (logged) or stops
+by itself, it is retried on the next escalation / refresh. The chime asks for
+no audio focus, so another app playing sound can't pause it. The manifest
+holds `WAKE_LOCK`, which the alarm stream's `stayAwake` needs.
 
 **Errors in plain words.** Anything that goes wrong is shown as a short
 sentence plus what to do ("Can't reach the Pi — check the tablet is on the
@@ -53,6 +54,13 @@ reconnect and every 10 min) locks behind **Updating Quibase**, downloads it
 from the agent, checks its sha256 and opens Android's installer — one tap on
 **Install**. The first time, Android asks to allow installs from Quibase
 (**Allow installs** → switch on → back). Releases are pushed after close.
+The new-order alert stays **above** the lock, so an order can always be
+accepted. A release withdrawn on the agent (or no longer newer than what's
+installed) unlocks the tablet at the next check. After 2 failed attempts
+(download, damaged file, installer cancelled / failed) **LATER** hides the lock
+for an hour, so a broken APK can't take the counter down. Older APKs in the
+cache are deleted when a new one is downloaded. After the install Quibase
+comes back by itself (`RestartReceiver`, below) — nobody needs to open it.
 
 **Driver name flash.** When a driver is sent out (from this tablet or anywhere
 else — SSE `drivers.dispatched`) the driver's name fills the screen with the
@@ -116,8 +124,18 @@ running when the app is in the background, swiped away or the screen is off.
 The alarm is driven at the ProviderContainer level (`core/ring_bridge.dart`),
 not by a widget. A new order nobody sees posts a full-screen notification:
 over the lock screen it opens Quibase and turns the screen on; over another app
-it's a heads-up, like a call. The chime plays on the alarm stream. After a
-tablet reboot nothing rings until Quibase is opened once.
+it's a heads-up, like a call. The chime plays on the alarm stream.
+
+`RestartReceiver.kt` brings it all back after a **tablet reboot**
+(`BOOT_COMPLETED`) and after a **self-update** (`MY_PACKAGE_REPLACED` — the
+installer kills the process): the broadcast starts the process (so
+`QuibaseApp` starts the engine and Dart connects to the Pi) and the receiver
+starts `RingService` at once, inside Android's short window for starting a
+foreground service from these broadcasts. On an unpaired tablet the Dart side
+stops the service again. Quibase isn't direct-boot aware, so it starts after
+the first unlock (no `LOCKED_BOOT_COMPLETED`); a tablet with no screen lock
+unlocks by itself. A ring notification left over from before a restart is
+taken down when nothing is waiting.
 
 ## Help and troubleshooting
 
@@ -130,6 +148,13 @@ messages open the right guide. Every conclusion and **Send diagnostics to the
 owner** sends a report: via the Pi, else straight to main with a report-only
 key, else an outbox retried later. Code: `lib/features/diagnose/`,
 `lib/features/illustrations/`.
+
+**Cash vs prepaid.** One rule, the same as the agent's receipt: cash to
+collect = the sum of the payments whose method is `cash` (main sends cash
+owing as an explicit cash payment; part-paid = card + cash); an older order
+with **no payments at all** is cash for the whole total; `other` (third party /
+invoice) is prepaid. Prepaid = nothing to collect (`OrderSnapshot.cashDueCents`
+/ `isPrepaid`).
 
 ## Build / run
 
@@ -176,6 +201,7 @@ lib/
     device_platform.dart     quibase/device channel (tablet checks)
     discovery.dart           find Pis on the LAN
     diag_models.dart         /api/diag, printer test, pairing code, report token
+    receipt_models.dart      ReceiptPrefs (receipt settings) + the GET/PUT answer
     alert_player.dart        looping alarm sound (audioplayers)
     format.dart, json.dart   formatting + defensive JSON readers
   features/<screen>/          kitchen, deliveries, drivers (+ the dispatch

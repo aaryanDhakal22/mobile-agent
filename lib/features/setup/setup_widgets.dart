@@ -23,29 +23,37 @@ class StepLayout extends StatelessWidget {
     this.secondary,
   });
 
+  /// Below this height (the keyboard is up on a landscape tablet: ~340 of
+  /// ~640 dp left) the step drops its subtitle and tightens the spacing so
+  /// the fields being typed stay visible.
+  static const double compactBelow = 450;
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      LayoutBuilder(builder: (context, box) => _build(context, compact: box.maxHeight < compactBelow));
+
+  Widget _build(BuildContext context, {required bool compact}) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(40, 24, 40, 24),
+      padding: compact ? const EdgeInsets.fromLTRB(40, 8, 40, 8) : const EdgeInsets.fromLTRB(40, 24, 40, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               Flexible(
-                child: Text(title, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w700)),
+                child: Text(title, style: TextStyle(fontSize: compact ? 24 : 32, fontWeight: FontWeight.w700)),
               ),
               if (info != null) ...[const SizedBox(width: 4), InfoButton(info!, size: 24)],
             ],
           ),
-          if (subtitle != null) ...[
+          if (subtitle != null && !compact) ...[
             const SizedBox(height: 8),
             Text(subtitle!, style: TextStyle(fontSize: 18, color: context.palette.textSecondary, height: 1.35)),
           ],
-          const SizedBox(height: 20),
+          SizedBox(height: compact ? 8 : 20),
           Expanded(child: body),
           if (primary != null || secondary != null) ...[
-            const SizedBox(height: 16),
+            SizedBox(height: compact ? 8 : 16),
             Row(children: [?secondary, const Spacer(), ?primary]),
           ],
         ],

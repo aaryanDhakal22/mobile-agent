@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile_agent/core/alarm.dart';
 import 'package:mobile_agent/core/alert_player.dart';
 
 /// Records calls; any step can be made to throw or to wait on a completer.
@@ -8,6 +9,9 @@ class FakeSink implements AlarmSink {
   final List<String> calls = [];
   final Set<String> failOn = {};
   Completer<void>? holdSetSource;
+
+  @override
+  void Function()? onStopped;
 
   Future<void> _step(String name) async {
     calls.add(name);
@@ -101,6 +105,37 @@ void main() {
     expect(await AlertPlayer.start(AlertSound.ddlg, preview: true), isFalse);
     await AlertPlayer.stop(preview: true);
     expect(sink.calls, isEmpty);
+    expect(AlertPlayer.isPlaying, isTrue);
+  });
+
+  test('a player that stops by itself (e.g. lost audio focus) is restarted by the retry', () async {
+    await AlertPlayer.start(AlertSound.nokia);
+    expect(AlertPlayer.isPlaying, isTrue);
+    sink.onStopped!();
+    expect(AlertPlayer.isPlaying, isFalse);
+    expect(AlertPlayer.shouldRetry(), isTrue, reason: 'no failure throttle: retry on the next refresh');
+    // The ring bridge's rule then restarts it on the next alarm update.
+    const ringing = AlarmState(ringing: true, known: {'o1'});
+    expect(
+      alarmSoundAction(ringing, ringing, playing: AlertPlayer.isPlaying, retry: AlertPlayer.shouldRetry()),
+      AlarmSoundAction.start,
+    );
+    expect(await AlertPlayer.start(AlertSound.nokia), isTrue);
+    expect(AlertPlayer.isPlaying, isTrue);
+  });
+
+  test('our own stop and a start in flight are not "stopped by itself"', () async {
+    await AlertPlayer.start(AlertSound.nokia);
+    await AlertPlayer.stop();
+    sink.onStopped!();
+    expect(AlertPlayer.shouldRetry(), isFalse, reason: 'alarm is off');
+
+    sink.holdSetSource = Completer<void>();
+    final pending = AlertPlayer.start(AlertSound.dhoom);
+    await Future<void>.delayed(Duration.zero);
+    sink.onStopped!();
+    sink.holdSetSource!.complete();
+    expect(await pending, isTrue);
     expect(AlertPlayer.isPlaying, isTrue);
   });
 }

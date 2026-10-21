@@ -9,6 +9,7 @@ import 'diag_models.dart';
 import 'json.dart';
 import 'models.dart';
 import 'printer_models.dart';
+import 'receipt_models.dart';
 
 /// Header carrying the paired tablet's key on every floor request.
 const String kDeviceKeyHeader = 'X-Agent-Device-Key';
@@ -34,6 +35,11 @@ String normalizeAgentAddress(String input) {
   return s;
 }
 
+/// [AgentException.code] for a receipt-settings route an older Pi doesn't
+/// have (it answers 404 / 405): "This Pi needs an update for receipt
+/// settings".
+const String kReceiptUnsupported = 'receipt_unsupported';
+
 /// A non-2xx answer from the agent. Error bodies are `{"error", "code"?}`;
 /// `body` keeps the whole decoded map (e.g. `leftovers` on a 409).
 class AgentException implements Exception {
@@ -56,6 +62,11 @@ class AgentException implements Exception {
   bool get isPrinterFailure => statusCode == 502;
   bool get isConflict => statusCode == 409;
   bool get isNotFound => statusCode == 404;
+
+  /// The agent doesn't have this route (an older Pi): a GET falls to the web
+  /// UI's `/api/*` 404, a PUT / POST to the mux's 405. A real 404
+  /// `not_configured` (unknown printer) is not that.
+  bool get isMissingRoute => (statusCode == 404 && code != 'not_configured') || statusCode == 405;
   bool get isNetwork => statusCode == null;
 
   @override
@@ -408,6 +419,40 @@ class AgentClient {
       timeout: printTimeout,
     );
     return jList(jMap(body)['results'], PrinterTestResult.fromJson);
+  }
+
+  // --- receipt settings ------------------------------------------------------
+
+  /// `GET /api/settings/receipt` → the saved settings, the defaults and the
+  /// footer that prints now. An older Pi throws [kReceiptUnsupported].
+  Future<ReceiptSettings> getReceiptPrefs() =>
+      _receiptRoute(() async => ReceiptSettings.fromJson(jMap(await _get('/api/settings/receipt'))));
+
+  /// `PUT /api/settings/receipt` with the full object → what the Pi saved.
+  /// 400 `bad_request` carries a plain reason in the message.
+  Future<ReceiptSettings> putReceiptPrefs(ReceiptPrefs prefs) => _receiptRoute(
+    () async => ReceiptSettings.fromJson(jMap(await _send('PUT', '/api/settings/receipt', body: prefs.toJson()))),
+  );
+
+  /// `POST /api/printers/sample {printer_id?}` — a sample customer receipt
+  /// and kitchen ticket with the saved settings on that printer (default:
+  /// the receipt printer), no failover. 409 `test_in_progress`; 404
+  /// `not_configured` for an unknown printer.
+  Future<List<PrinterTestResult>> printSample({String? printerId}) => _receiptRoute(() async {
+    final body = await _send('POST', '/api/printers/sample', body: {'printer_id': ?printerId}, timeout: printTimeout);
+    return jList(jMap(body)['results'], PrinterTestResult.fromJson);
+  });
+
+  /// An older Pi has none of the receipt routes: the GET falls to the web
+  /// UI's `/api/*` 404, a PUT / POST to the mux's 405. Both become
+  /// [kReceiptUnsupported] (a real 404 `not_configured` is kept).
+  static Future<T> _receiptRoute<T>(Future<T> Function() call) async {
+    try {
+      return await call();
+    } on AgentException catch (e) {
+      if (!e.isMissingRoute) rethrow;
+      throw AgentException(e.message, statusCode: e.statusCode, code: kReceiptUnsupported, body: e.body);
+    }
   }
 
   // --- this tablet + diagnostics ----------------------------------------------

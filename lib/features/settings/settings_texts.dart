@@ -65,3 +65,72 @@ const kThemeInfo = InfoText(
       'follows the tablet\'s own setting. Tapping the q logo at the top left also switches between '
       'light and dark.',
 );
+
+const kReceiptsInfo = InfoText(
+  'Receipts',
+  'How the Pi prints the kitchen tickets and the customer receipt. A change is used from the '
+      'next order on, on every tablet.\n\n'
+      'Change what you like, tap SAVE, then PRINT SAMPLE to see it on paper. RESET TO DEFAULTS '
+      'puts everything back to how it came.',
+);
+
+const kKitchenItemSizeInfo = InfoText(
+  'Item text size',
+  'How big the food items print on the kitchen tickets. Bigger is easier to read from a '
+      'distance but makes the ticket longer.\n\n'
+      'Large is the standard.',
+);
+
+const kKitchenNumberSizeInfo = InfoText(
+  'Ticket number size',
+  'How big the kitchen number (like 1104) prints at the top of each kitchen ticket. Make it bigger '
+      'if the cooks can\'t read it from where they stand.\n\n'
+      'Extra large is the standard.',
+);
+
+const kFooterInfo = InfoText(
+  'Footer text',
+  'A short line printed at the bottom of the customer receipt, for example "THANK YOU".\n\n'
+      'Use the store default: prints the line set for the store on the Quicc website (or ONLINE '
+      'ORDER if none is set).\n\n'
+      'Switch it off to type your own line, up to 32 letters. Leave it empty for no footer at all.',
+);
+
+const kFooterSizeInfo = InfoText('Footer size', 'How big the footer line prints. Extra large is the standard.');
+
+const kCopiesInfo = InfoText(
+  'Copies',
+  'How many customer receipts print for each order. Choose 2 if you staple one to the bag and '
+      'keep one. The kitchen tickets always print once.',
+);
+
+const kStoreAddressInfo = InfoText(
+  'Store name and address',
+  'Prints the store\'s name and address at the top of the customer receipt. Switch it off for a '
+      'shorter receipt.',
+);
+
+const kPhoneInfo = InfoText(
+  'Customer phone',
+  'Prints the customer\'s phone number on the receipt, so a driver can call them. Switch it off '
+      'if you don\'t want phone numbers on paper.',
+);
+
+const kExtraPaperInfo = InfoText(
+  'Extra paper before cutting',
+  'Feeds a little more paper before the printer cuts, so the last line isn\'t cut in half. '
+      'Switch it off to save paper.',
+);
+
+const kPrintSampleInfo = InfoText(
+  'Print sample',
+  'Prints a made-up customer receipt and kitchen ticket on the printer you pick, using the saved '
+      'settings. Nothing is sent to the kitchen and no order is made.\n\n'
+      'If you have changes that are not saved yet, they are saved first.',
+);
+
+const kResetReceiptInfo = InfoText(
+  'Reset to defaults',
+  'Puts every receipt setting back to how it came and saves it. The footer goes back to the '
+      'store default.',
+);

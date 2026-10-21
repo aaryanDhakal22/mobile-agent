@@ -93,6 +93,8 @@ class FriendlyError {
         return f('This tablet is no longer paired', 'Pair it again', GuideId.piSwap);
       case 'nothing_printed':
         return f('Nothing printed', 'Check the printers — the order was not accepted', GuideId.printer);
+      case 'receipt_unsupported':
+        return f('This Pi needs an update for receipt settings', 'Tell the owner');
       case 'test_in_progress':
         return f('A test print is already running', 'Wait a few seconds');
       case 'already_accepted':

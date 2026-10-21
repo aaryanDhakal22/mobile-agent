@@ -193,7 +193,17 @@ class OrderSnapshot {
   /// Total item count (sum of top-level quantities).
   int get itemCount => items.fold(0, (n, i) => n + (i.quantity <= 0 ? 1 : i.quantity));
 
-  bool get isPrepaid => payments.isNotEmpty;
+  /// Cash to collect from the customer: the sum of the `cash` payments (main
+  /// sends cash owing as an explicit cash payment; a part-paid order has card
+  /// + cash). An older order with no payments at all is cash for the whole
+  /// total. `other` (third party / invoice) is prepaid, not cash. The agent
+  /// uses the same rule, so the tablet and the printed receipt agree.
+  int get cashDueCents {
+    if (payments.isEmpty) return money.totalCents;
+    return payments.where((p) => p.isCash).fold(0, (n, p) => n + p.amountCents);
+  }
+
+  bool get isPrepaid => cashDueCents == 0;
 
   String get storeName => jStr(sourceMetadata['store_name']);
 }
@@ -360,6 +370,15 @@ class LineItem {
     routing: jStr(json['routing']),
     printerId: jStr(json['printer_id']),
   );
+
+  /// The size worth showing: the vendor sends "Serving" for single-size items
+  /// (hidden) and "Serving (2 Piece)" for a fixed portion (shown as "2 Piece").
+  String get displaySize {
+    final s = size.trim();
+    if (s.toLowerCase() == 'serving') return '';
+    final m = RegExp(r'^serving\s*\((.+)\)$', caseSensitive: false).firstMatch(s);
+    return m != null ? m.group(1)!.trim() : s;
+  }
 }
 
 class Payment {
@@ -367,6 +386,9 @@ class Payment {
   final int amountCents;
   final String last4;
   const Payment({this.method = '', this.amountCents = 0, this.last4 = ''});
+
+  /// Cash to collect (owing), not money already paid.
+  bool get isCash => method.trim().toLowerCase() == 'cash';
   factory Payment.fromJson(Map<String, dynamic> json) =>
       Payment(method: jStr(json['method']), amountCents: jInt(json['amount_cents']), last4: jStr(json['last4']));
 }
