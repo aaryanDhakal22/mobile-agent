@@ -418,16 +418,27 @@ void main() {
     testWidgets('renders every card', (tester) async {
       await pumpSettings(tester);
       expect(tester.takeException(), isNull);
-      for (final t in ['THE PI', 'THIS TABLET', 'ORDER CHIME', 'CHECKS & TESTS', 'LIGHT OR DARK']) {
+      // The list is lazy: check each thing once it is scrolled to.
+      for (final t in [
+        'THE PI',
+        'THIS TABLET',
+        'Counter tablet',
+        'RENAME',
+        'PAIR ANOTHER TABLET',
+        'UNPAIR',
+        'ORDER CHIME',
+        'PREVIEW',
+        'RECEIPTS',
+        'CHECKS & TESTS',
+        'TABLET CHECKS',
+        'TEST RING',
+        'TEST PRINT',
+        'LIGHT OR DARK',
+        'System',
+      ]) {
         await tester.scrollUntilVisible(find.text(t), 200, scrollable: find.byType(Scrollable).first);
         expect(find.text(t), findsOneWidget, reason: t);
       }
-      expect(find.text('Counter tablet'), findsOneWidget);
-      expect(find.text('PREVIEW'), findsOneWidget);
-      for (final b in ['RENAME', 'PAIR ANOTHER TABLET', 'UNPAIR', 'TABLET CHECKS', 'TEST RING', 'TEST PRINT']) {
-        expect(find.text(b), findsOneWidget, reason: b);
-      }
-      expect(find.text('System'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -535,6 +546,8 @@ void main() {
       final c = await pumpSettings(tester);
       expect(c.read(themeModeProvider), ThemeMode.dark, reason: 'dark by default');
       await tester.scrollUntilVisible(find.text('Light'), 200, scrollable: find.byType(Scrollable).first);
+      await tester.ensureVisible(find.text('Light'));
+      await tester.pump();
       await tester.tap(find.text('Light'));
       await tester.pump();
       expect(c.read(themeModeProvider), ThemeMode.light);

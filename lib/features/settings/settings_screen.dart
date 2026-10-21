@@ -15,6 +15,8 @@ import '../common/widgets.dart';
 import '../diagnose/diagnose_entry.dart';
 import '../setup/setup_entry.dart';
 import 'chime_picker.dart';
+import 'receipt_settings_card.dart';
+import 'settings_card.dart';
 import 'settings_texts.dart';
 
 /// Asks whatever answers at an address whether it is a Quicc Pi (`GET
@@ -39,52 +41,17 @@ class SettingsScreen extends ConsumerWidget {
         ContinueSetupCard(),
         _PiCard(),
         _TabletCard(),
-        _SettingsCard(
+        SettingsCard(
           title: 'Order chime',
           info: kChimeInfo,
           subtitle: 'Rings until every new order is accepted.',
           children: [ChimePicker()],
         ),
+        ReceiptSettingsCard(),
         _ChecksCard(),
         _ThemeCard(),
         AboutDiagnosticsCard(),
       ],
-    );
-  }
-}
-
-/// A Settings card: eyebrow title + (i), optional subtitle, then [children].
-class _SettingsCard extends StatelessWidget {
-  final String title;
-  final InfoText info;
-  final String? subtitle;
-  final List<Widget> children;
-  const _SettingsCard({required this.title, required this.info, this.subtitle, required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: LabelWithInfo(label: Eyebrow(title), info: info),
-              ),
-              if (subtitle != null) ...[
-                const SizedBox(height: 2),
-                Text(subtitle!, style: TextStyle(color: context.palette.textSecondary)),
-              ],
-              const SizedBox(height: 14),
-              ...children,
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -160,7 +127,7 @@ class _PiCardState extends ConsumerState<_PiCard> {
   Widget build(BuildContext context) {
     final fs = ref.watch(floorProvider);
     final unsynced = fs.floor?.unsyncedEvents ?? 0;
-    return _SettingsCard(
+    return SettingsCard(
       title: 'The Pi',
       info: kPiAddressInfo,
       subtitle: 'Its address on the store Wi-Fi. The tablet stays paired when you change it.',
@@ -324,7 +291,7 @@ class _TabletCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final pairing = ref.watch(pairingProvider);
     final name = pairing?.deviceName.isNotEmpty == true ? pairing!.deviceName : 'Paired tablet';
-    return _SettingsCard(
+    return SettingsCard(
       title: 'This tablet',
       info: kTabletNameInfo,
       children: [
@@ -517,7 +484,7 @@ class _ChecksCard extends StatelessWidget {
       height: 64,
       child: OutlinedButton.icon(onPressed: () => _open(context, screen), icon: Icon(icon), label: Text(label)),
     );
-    return _SettingsCard(
+    return SettingsCard(
       title: 'Checks & tests',
       info: kChecksInfo,
       subtitle: 'Run these after an Android update or when something seems off.',
@@ -542,7 +509,7 @@ class _ThemeCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mode = ref.watch(themeModeProvider);
-    return _SettingsCard(
+    return SettingsCard(
       title: 'Light or dark',
       info: kThemeInfo,
       children: [
