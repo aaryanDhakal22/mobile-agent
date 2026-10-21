@@ -30,8 +30,9 @@ class DiscoveredPi {
   /// How it was found: broadcast | hostname | saved | sweep | typed
   final String via;
 
-  /// For a Pi found by hostname: the IPv4s that name resolved to (so the same
-  /// Pi found by its IP isn't listed twice).
+  /// For a Pi addressed by a name (the hostname, or a saved/typed name): the
+  /// IPv4s that name resolved to, so the same Pi found by its IP isn't listed
+  /// twice.
   final List<String> resolvedIps;
 
   const DiscoveredPi({
@@ -62,8 +63,8 @@ class DiscoveredPi {
   );
 }
 
-/// One entry per Pi: a Pi found by hostname ([kPiHostname]) is dropped when
-/// the IP it resolves to was found too (broadcast / saved / sweep). The IP is
+/// One entry per Pi: a Pi addressed by a name (e.g. [kPiHostname]) is dropped
+/// when the IP it resolves to was found too (broadcast / saved / sweep). The IP is
 /// kept: it's reserved at the store, while the name depends on the router's
 /// DNS. Every card has the same hostname, so the name alone can't tell two Pis
 /// apart.
@@ -144,8 +145,19 @@ class PiDiscovery {
       if (found.containsKey(p.address)) return;
       try {
         final probe = await AgentClient.probe(address: p.address, client: client, timeout: const Duration(seconds: 3));
+        // A name (quiccpos-pi, or a saved/typed one): what it points at.
+        final ips = p.resolvedIps.isEmpty && InternetAddress.tryParse(p.ip) == null ? await lookup(p.ip) : p.resolvedIps;
         if (found.containsKey(p.address) || out.isClosed) return;
-        found[p.address] = p.withProbe(probe);
+        found[p.address] = DiscoveredPi(
+          address: p.address,
+          storeName: p.storeName,
+          linked: p.linked,
+          linkAvailable: p.linkAvailable,
+          version: p.version,
+          host: p.host,
+          via: p.via,
+          resolvedIps: ips,
+        ).withProbe(probe);
         out.add(dedupePis(found.values));
       } catch (_) {
         // Not a Pi, or gone.
@@ -158,9 +170,7 @@ class PiDiscovery {
         _broadcast(locals, (p) => confirm(p)),
         if ((savedAddress ?? '').isNotEmpty)
           confirm(DiscoveredPi(address: normalizeAgentAddress(savedAddress!), via: 'saved')),
-        lookup(kPiHostname).then(
-          (ips) => confirm(DiscoveredPi(address: normalizeAgentAddress(kPiHostname), via: 'hostname', resolvedIps: ips)),
-        ),
+        confirm(DiscoveredPi(address: normalizeAgentAddress(kPiHostname), via: 'hostname')),
       ];
       await Future.wait(tasks);
       if (found.isEmpty && sweep) await _sweep(locals, client, confirm);

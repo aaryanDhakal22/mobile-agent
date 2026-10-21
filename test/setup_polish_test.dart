@@ -1,7 +1,12 @@
 // Fixes from the 2026-10-21 staging install rehearsal (Quibase 1.3.2).
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:mobile_agent/core/discovery.dart';
 import 'package:mobile_agent/core/floor_state.dart';
 import 'package:mobile_agent/core/format.dart';
@@ -67,6 +72,26 @@ void main() {
 
     test('the hostname entry stays when it is the only way the Pi was found', () {
       expect(dedupePis([byName]), [byName]);
+    });
+
+    test('discovery resolves the hostname and lists the Pi once, by its IP', () async {
+      // Only these two addresses answer (any real LAN reply to the broadcast
+      // fails against the mock client and is ignored).
+      final client = MockClient((req) async {
+        if (req.url.host == 'quiccpos-pi' || req.url.host == '10.9.9.9') {
+          return http.Response(jsonEncode({'state': 'locked', 'store_name': "Lombardi's Pizza", 'hostname': 'quiccpos-pi'}), 200);
+        }
+        throw const SocketException('unreachable');
+      });
+      final d = PiDiscovery(
+        clientFactory: () => client,
+        localAddresses: () async => const [],
+        lookup: (host) async => host == 'quiccpos-pi' ? const ['10.9.9.9'] : const [],
+        listenFor: const Duration(milliseconds: 900),
+      );
+      final last = await d.discover(savedAddress: '10.9.9.9', sweep: false).last;
+      expect(last.map((p) => p.ip), ['10.9.9.9']);
+      expect(last.single.host, 'quiccpos-pi');
     });
 
     test('another Pi with the same hostname is not merged', () {
