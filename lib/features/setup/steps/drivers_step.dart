@@ -8,6 +8,10 @@ import '../../../theme/quicc_colors.dart';
 
 /// "Who drives tonight?": the roster (restored from the Pi, or empty for a
 /// new store), a quick add box, a clock-in switch per driver, drag to reorder.
+///
+/// Rows keep the order they first appeared in (or the order dragged to): the
+/// Pi re-sorts its queue when someone clocks in, and a list that jumps under
+/// the finger makes the next tap hit a different driver.
 class DriversPanel extends ConsumerStatefulWidget {
   const DriversPanel({super.key});
 
@@ -19,6 +23,19 @@ class _DriversPanelState extends ConsumerState<DriversPanel> {
   final _name = TextEditingController();
   bool _busy = false;
   String? _error;
+
+  /// Driver ids in the order shown.
+  final List<String> _order = [];
+
+  List<Driver> _stable(List<Driver> drivers) {
+    final ids = {for (final d in drivers) d.id};
+    _order.removeWhere((id) => !ids.contains(id));
+    for (final d in drivers) {
+      if (!_order.contains(d.id)) _order.add(d.id);
+    }
+    final byId = {for (final d in drivers) d.id: d};
+    return [for (final id in _order) byId[id]!];
+  }
 
   @override
   void dispose() {
@@ -49,7 +66,7 @@ class _DriversPanelState extends ConsumerState<DriversPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final drivers = ref.watch(floorProvider.select((s) => s.drivers));
+    final drivers = _stable(ref.watch(floorProvider.select((s) => s.drivers)));
     final floor = ref.read(floorProvider.notifier);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -96,6 +113,9 @@ class _DriversPanelState extends ConsumerState<DriversPanel> {
                     final list = [...drivers];
                     final d = list.removeAt(from);
                     list.insert(to > from ? to - 1 : to, d);
+                    setState(() => _order
+                      ..clear()
+                      ..addAll(list.map((d) => d.id)));
                     _do(() => floor.reorderDrivers(list));
                   },
                   children: [

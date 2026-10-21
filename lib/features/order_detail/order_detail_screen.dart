@@ -174,8 +174,8 @@ class _ItemBlock extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(item.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                    if (item.size.isNotEmpty)
-                      Text(item.size, style: TextStyle(color: context.palette.textSecondary, fontSize: 15)),
+                    if (item.displaySize.isNotEmpty)
+                      Text(item.displaySize, style: TextStyle(color: context.palette.textSecondary, fontSize: 15)),
                   ],
                 ),
               ),

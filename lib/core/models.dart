@@ -360,6 +360,15 @@ class LineItem {
     routing: jStr(json['routing']),
     printerId: jStr(json['printer_id']),
   );
+
+  /// The size worth showing: the vendor sends "Serving" for single-size items
+  /// (hidden) and "Serving (2 Piece)" for a fixed portion (shown as "2 Piece").
+  String get displaySize {
+    final s = size.trim();
+    if (s.toLowerCase() == 'serving') return '';
+    final m = RegExp(r'^serving\s*\((.+)\)$', caseSensitive: false).firstMatch(s);
+    return m != null ? m.group(1)!.trim() : s;
+  }
 }
 
 class Payment {

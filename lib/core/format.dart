@@ -78,7 +78,7 @@ IconData fulfillmentIcon(FulfillmentType t) => switch (t) {
 /// "12 Medium Pepperoni Pizza" — size first, as it's called out in a kitchen.
 String itemTitle(LineItem i) {
   final q = i.quantity > 1 ? '${i.quantity}× ' : '';
-  final size = i.size.trim().isEmpty ? '' : '${i.size.trim()} ';
+  final size = i.displaySize.isEmpty ? '' : '${i.displaySize} ';
   return '$q$size${i.name}';
 }
 
