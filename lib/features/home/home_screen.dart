@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
 import '../../core/sse.dart';
+import '../diagnose/diagnose_entry.dart';
+import '../diagnose/guide_session.dart';
 import '../../theme/quicc_colors.dart';
 import '../batch/batch_pane.dart';
 import '../deliveries/deliveries_pane.dart';
@@ -15,6 +17,7 @@ import '../printers/printers_pane.dart';
 import '../settings/settings_screen.dart';
 import 'pi_unreachable_banner.dart';
 import 'quicc_nav_rail.dart';
+import 'warning_bars.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -26,10 +29,21 @@ class HomeScreen extends ConsumerStatefulWidget {
 /// The rail's sections, top to bottom. Kitchen is the start screen — new
 /// orders ring full-screen over whatever is showing (AlarmHost), so there is
 /// no separate "Arrived" list any more.
-enum HomeSection { kitchen, deliveries, drivers, history, batch, printers, settings }
+enum HomeSection { kitchen, deliveries, drivers, history, batch, printers, help, settings }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   HomeSection _section = HomeSection.kitchen;
+
+  @override
+  void initState() {
+    super.initState();
+    installGuideHook();
+    // A guide was running when the app stopped (e.g. mid SD-card swap):
+    // carry on with it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && resumableGuideSession(ref.read(storageProvider)) != null) resumeGuide(context);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,74 +54,79 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       // Don't shrink the body for the keyboard — the rail's evenly spread
       // items would get squashed.
       resizeToAvoidBottomInset: false,
-      body: Row(
-        children: [
-          QuiccNavRail(
-            selectedIndex: _section.index,
-            onDestinationSelected: (i) => setState(() => _section = HomeSection.values[i]),
-            header: Column(
-              children: [
-                _ThemeToggleLogo(
-                  onTap: () {
-                    final m = ref.read(themeModeProvider);
-                    ref.read(themeModeProvider.notifier).state = m == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
-                  },
-                ),
-                const SizedBox(height: 10),
-                const _ConnectionDot(),
-              ],
-            ),
-            destinations: [
-              QuiccNavDestination(
-                icon: Icons.soup_kitchen_outlined,
-                selectedIcon: Icons.soup_kitchen,
-                label: 'Kitchen',
-                badge: kitchen,
-              ),
-              QuiccNavDestination(
-                icon: Icons.delivery_dining_outlined,
-                selectedIcon: Icons.delivery_dining,
-                label: 'Deliveries',
-                badge: ready,
-              ),
-              const QuiccNavDestination(icon: Icons.groups_outlined, selectedIcon: Icons.groups, label: 'Drivers'),
-              const QuiccNavDestination(
-                icon: Icons.receipt_long_outlined,
-                selectedIcon: Icons.receipt_long,
-                label: 'History',
-              ),
-              const QuiccNavDestination(icon: Icons.layers_outlined, selectedIcon: Icons.layers, label: 'Batch'),
-              const QuiccNavDestination(icon: Icons.print_outlined, selectedIcon: Icons.print, label: 'Printers'),
-              const QuiccNavDestination(icon: Icons.settings_outlined, selectedIcon: Icons.settings, label: 'Settings'),
-            ],
-          ),
-          const VerticalDivider(width: 1),
-          Expanded(
-            child: Column(
-              children: [
-                const PiUnreachableBanner(),
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 260),
-                    reverseDuration: const Duration(milliseconds: 140),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    layoutBuilder: (current, previous) =>
-                        Stack(fit: StackFit.expand, alignment: Alignment.center, children: [...previous, ?current]),
-                    transitionBuilder: (child, anim) => FadeTransition(
-                      opacity: anim,
-                      child: SlideTransition(
-                        position: Tween<Offset>(begin: const Offset(0, 0.015), end: Offset.zero).animate(anim),
-                        child: child,
-                      ),
-                    ),
-                    child: KeyedSubtree(key: ValueKey<HomeSection>(_section), child: _buildSection(_section)),
+      body: DiagPoller(
+        child: Row(
+          children: [
+            QuiccNavRail(
+              selectedIndex: _section.index,
+              onDestinationSelected: (i) => setState(() => _section = HomeSection.values[i]),
+              header: Column(
+                children: [
+                  _ThemeToggleLogo(
+                    onTap: () => ref.read(themeModeProvider.notifier).toggle(),
                   ),
+                  const SizedBox(height: 10),
+                  const _ConnectionDot(),
+                ],
+              ),
+              destinations: [
+                QuiccNavDestination(
+                  icon: Icons.soup_kitchen_outlined,
+                  selectedIcon: Icons.soup_kitchen,
+                  label: 'Kitchen',
+                  badge: kitchen,
+                ),
+                QuiccNavDestination(
+                  icon: Icons.delivery_dining_outlined,
+                  selectedIcon: Icons.delivery_dining,
+                  label: 'Deliveries',
+                  badge: ready,
+                ),
+                const QuiccNavDestination(icon: Icons.groups_outlined, selectedIcon: Icons.groups, label: 'Drivers'),
+                const QuiccNavDestination(
+                  icon: Icons.receipt_long_outlined,
+                  selectedIcon: Icons.receipt_long,
+                  label: 'History',
+                ),
+                const QuiccNavDestination(icon: Icons.layers_outlined, selectedIcon: Icons.layers, label: 'Batch'),
+                const QuiccNavDestination(icon: Icons.print_outlined, selectedIcon: Icons.print, label: 'Printers'),
+                const QuiccNavDestination(icon: Icons.help_outline, selectedIcon: Icons.help, label: 'Help'),
+                const QuiccNavDestination(
+                  icon: Icons.settings_outlined,
+                  selectedIcon: Icons.settings,
+                  label: 'Settings',
                 ),
               ],
             ),
-          ),
-        ],
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: Column(
+                children: [
+                  const PiUnreachableBanner(),
+                  const WarningBars(),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 260),
+                      reverseDuration: const Duration(milliseconds: 140),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      layoutBuilder: (current, previous) =>
+                          Stack(fit: StackFit.expand, alignment: Alignment.center, children: [...previous, ?current]),
+                      transitionBuilder: (child, anim) => FadeTransition(
+                        opacity: anim,
+                        child: SlideTransition(
+                          position: Tween<Offset>(begin: const Offset(0, 0.015), end: Offset.zero).animate(anim),
+                          child: child,
+                        ),
+                      ),
+                      child: KeyedSubtree(key: ValueKey<HomeSection>(_section), child: _buildSection(_section)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -120,10 +139,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       HomeSection.history => const HistoryPane(),
       HomeSection.batch => const BatchPane(),
       HomeSection.printers => const PrintersPane(),
+      HomeSection.help => const HelpPane(),
       HomeSection.settings => const SettingsScreen(),
     };
-    if (s == HomeSection.settings) return pane;
-    // The driver button floats bottom-right over every pane but Settings.
+    if (s == HomeSection.settings || s == HomeSection.help) return pane;
+    // The driver button floats bottom-right over every pane but Help and
+    // Settings.
     return Stack(
       children: [
         Positioned.fill(child: pane),

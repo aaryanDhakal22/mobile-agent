@@ -1,10 +1,6 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/alarm.dart';
-import '../../core/alert_player.dart';
 import '../../core/format.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
@@ -12,48 +8,20 @@ import '../arrived/accept_controls.dart';
 import '../common/widgets.dart';
 import '../drivers/dispatch_flash.dart';
 
-/// Drives the looping alarm sound from [alarmProvider] and stacks, above every
-/// route: the driver name flash, the "still ringing" banner, and on top the
-/// full-screen new-order alert (it wins over the name flash).
-class AlarmHost extends ConsumerStatefulWidget {
+/// Stacks, above every route: the driver name flash, the "still ringing"
+/// banner, and on top the full-screen new-order alert (it wins over the name
+/// flash). The sound and Android's full-screen notification are driven by the
+/// ring bridge (core/ring_bridge.dart), which also runs with no screen.
+class AlarmHost extends ConsumerWidget {
   final Widget child;
   const AlarmHost({super.key, required this.child});
 
   @override
-  ConsumerState<AlarmHost> createState() => _AlarmHostState();
-}
-
-class _AlarmHostState extends ConsumerState<AlarmHost> {
-  @override
-  void initState() {
-    super.initState();
-    ref.listenManual<AlarmState>(alarmProvider, (prev, next) {
-      final action = alarmSoundAction(prev, next, playing: AlertPlayer.isPlaying, retry: AlertPlayer.shouldRetry());
-      switch (action) {
-        case AlarmSoundAction.start:
-          unawaited(AlertPlayer.start(ref.read(alertSoundProvider), loud: next.loud));
-        case AlarmSoundAction.stop:
-          unawaited(AlertPlayer.stop());
-        case AlarmSoundAction.setLoud:
-          unawaited(AlertPlayer.setLoud(next.loud));
-        case AlarmSoundAction.none:
-          break;
-      }
-    }, fireImmediately: true);
-  }
-
-  @override
-  void dispose() {
-    unawaited(AlertPlayer.stop());
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final alarm = ref.watch(alarmProvider);
     return Stack(
       children: [
-        Positioned.fill(child: widget.child),
+        Positioned.fill(child: child),
         const Positioned.fill(child: DispatchFlash()),
         if (alarm.ringing && !alarm.visible) const Positioned(top: 0, left: 0, right: 0, child: _RingingBanner()),
         if (alarm.ringing && alarm.visible) const Positioned.fill(child: NewOrderAlert()),

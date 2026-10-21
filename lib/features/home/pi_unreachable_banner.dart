@@ -3,8 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/friendly_error.dart';
 import '../../core/providers.dart';
 import '../../core/sse.dart';
+import '../diagnose/diagnose_entry.dart';
+import '../diagnose/texts.dart';
 
 /// How long the agent may be unreachable before the banner shows (a short
 /// blip — the Pi restarting, Wi-Fi roaming — shouldn't alarm anyone).
@@ -85,10 +88,25 @@ class _PiUnreachableBannerState extends ConsumerState<PiUnreachableBanner> {
                   ],
                 ),
               ),
-              TextButton(
-                onPressed: () => ref.read(floorProvider.notifier).resume(),
-                style: TextButton.styleFrom(foregroundColor: Colors.white),
-                child: const Text('RETRY NOW'),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  FilledButton(
+                    onPressed: () => openGuide(context, GuideId.piUnreachable),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFFC62828),
+                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+                    ),
+                    child: const Text(GuideText.fixIt),
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed: () => ref.read(floorProvider.notifier).resume(),
+                    style: TextButton.styleFrom(foregroundColor: Colors.white),
+                    child: const Text('RETRY NOW'),
+                  ),
+                ],
               ),
             ],
           ),

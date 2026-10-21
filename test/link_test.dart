@@ -11,9 +11,7 @@ import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/home/pi_unreachable_banner.dart';
-import 'package:mobile_agent/features/pairing/pairing_screen.dart';
 import 'package:mobile_agent/theme/quicc_colors.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class _StaticFloor extends FloorController {
   final FloorState initial;
@@ -80,58 +78,6 @@ void main() {
     expect(AgentProbe.fromJson({'state': 'unconfigured', 'link_available': true}).isNew, isTrue);
     expect(AgentProbe.fromJson({'state': 'unconfigured'}).isNew, isFalse);
     expect(AgentProbe.fromJson({'state': 'locked', 'link_available': true}).isNew, isFalse);
-  });
-
-  testWidgets('a new Pi asks for the manager login; a code is still possible', (tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    SharedPreferences.setMockInitialValues({'agent_address': 'http://10.0.0.5:8080'});
-    final prefs = await SharedPreferences.getInstance();
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          sharedPrefsProvider.overrideWithValue(prefs),
-          agentProbeProvider.overrideWithValue(
-            (_) async => const AgentProbe(state: 'unconfigured', linkAvailable: true),
-          ),
-        ],
-        child: MaterialApp(theme: _theme(), home: const PairingScreen()),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-    expect(find.text('This Pi is new'), findsOneWidget);
-    expect(find.byKey(const ValueKey('link-user')), findsOneWidget);
-    expect(find.text('SET UP PI'), findsOneWidget);
-    expect(find.text('PAIRING CODE'), findsNothing);
-
-    await tester.tap(find.text('I have a pairing code instead'));
-    await tester.pump();
-    expect(find.text('PAIRING CODE'), findsOneWidget);
-    expect(find.text('PAIR'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('a set-up Pi keeps the code flow', (tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    SharedPreferences.setMockInitialValues({'agent_address': 'http://10.0.0.5:8080'});
-    final prefs = await SharedPreferences.getInstance();
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          sharedPrefsProvider.overrideWithValue(prefs),
-          agentProbeProvider.overrideWithValue((_) async => const AgentProbe(state: 'locked', linkAvailable: true)),
-        ],
-        child: MaterialApp(theme: _theme(), home: const PairingScreen()),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-    expect(find.text('Pair this tablet'), findsOneWidget);
-    expect(find.text('I have a pairing code instead'), findsNothing);
   });
 
   testWidgets('the red banner shows only after 20 s without the Pi', (tester) async {

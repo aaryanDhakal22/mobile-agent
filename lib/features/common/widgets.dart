@@ -1,8 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
+import '../../core/friendly_error.dart';
+import '../../core/local_log.dart';
 import '../../core/models.dart';
 import '../../theme/quicc_colors.dart';
 
@@ -221,14 +224,218 @@ class ItemLines extends StatelessWidget {
   }
 }
 
-/// Inline error banner with an optional action.
-class InlineError extends StatelessWidget {
-  final String message;
-  final VoidCallback? onRetry;
-  const InlineError(this.message, {super.key, this.onRetry});
+/// Opens one of the troubleshooting guides. features/diagnose sets
+/// [openGuideHook] at startup; until then FIX IT does nothing.
+typedef OpenGuide = void Function(BuildContext context, GuideId guide);
+
+OpenGuide openGuideHook = (_, _) {};
+
+/// Writes a friendly error's technical text to the on-tablet log (best
+/// effort: no ProviderScope above [context] in some tests).
+void logErrorDetails(BuildContext context, String area, FriendlyError f) {
+  if (f.details.isEmpty) return;
+  try {
+    ProviderScope.containerOf(context, listen: false).read(localLogProvider).warn(area, '${f.title} · ${f.details}');
+  } catch (_) {}
+}
+
+/// An error snackbar in plain words: [lead] (what didn't happen, e.g. "Not
+/// printed") or the error's title, then what to do. DETAILS shows the
+/// technical text; FIX IT opens the matching guide (or runs [onFix]). The
+/// details go to the local log under [area].
+void toastError(
+  BuildContext context,
+  Object e, {
+  String? lead,
+  String area = 'app',
+  VoidCallback? onFix,
+  double rightInset = 0,
+}) {
+  final f = e is FriendlyError ? e : FriendlyError.from(e);
+  logErrorDetails(context, area, f);
+  final m = ScaffoldMessenger.maybeOf(context);
+  if (m == null) return;
+  final guide = f.guide;
+  final fix = onFix ?? (guide == null ? null : () => openGuideHook(context, guide));
+  m.hideCurrentSnackBar();
+  m.showSnackBar(
+    SnackBar(
+      behavior: SnackBarBehavior.floating,
+      margin: rightInset > 0 ? EdgeInsets.fromLTRB(24, 0, rightInset, 24) : null,
+      backgroundColor: QuiccColors.statusVoided,
+      duration: const Duration(seconds: 6),
+      content: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(lead ?? f.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                if ((lead == null ? f.whatToDo : f.short).isNotEmpty) Text(lead == null ? f.whatToDo : f.short),
+              ],
+            ),
+          ),
+          if (f.details.isNotEmpty)
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              onPressed: () {
+                m.hideCurrentSnackBar();
+                showErrorDetails(context, f);
+              },
+              child: const Text('DETAILS'),
+            ),
+        ],
+      ),
+      action: fix == null ? null : SnackBarAction(label: 'FIX IT', textColor: Colors.white, onPressed: fix),
+    ),
+  );
+}
+
+/// The technical text behind an error, in a dialog.
+Future<void> showErrorDetails(BuildContext context, FriendlyError f) => showDialog<void>(
+  context: context,
+  builder: (ctx) => AlertDialog(
+    title: Text(f.title),
+    content: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 520),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (f.whatToDo.isNotEmpty) Text(f.whatToDo, style: const TextStyle(fontSize: 17)),
+          const SizedBox(height: 12),
+          const Eyebrow('Details (for the owner)'),
+          const SizedBox(height: 4),
+          SelectableText(f.details, style: TextStyle(fontSize: 13, color: ctx.palette.textMuted)),
+        ],
+      ),
+    ),
+    actions: [FilledButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('CLOSE'))],
+  ),
+);
+
+/// A small "Details" link that unfolds the technical text in place (works
+/// where no dialog can open, e.g. on the full-screen alert).
+class DetailsToggle extends StatefulWidget {
+  final String details;
+  final Color? color;
+  const DetailsToggle(this.details, {super.key, this.color});
+
+  @override
+  State<DetailsToggle> createState() => _DetailsToggleState();
+}
+
+class _DetailsToggleState extends State<DetailsToggle> {
+  bool _open = false;
 
   @override
   Widget build(BuildContext context) {
+    final c = widget.color ?? context.palette.textMuted;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _open = !_open),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Details',
+                  style: TextStyle(color: c, fontSize: 13, decoration: TextDecoration.underline, decorationColor: c),
+                ),
+                Icon(_open ? Icons.expand_less : Icons.expand_more, size: 18, color: c),
+              ],
+            ),
+          ),
+        ),
+        if (_open) SelectableText(widget.details, style: TextStyle(color: c, fontSize: 13)),
+      ],
+    );
+  }
+}
+
+/// Inline error banner: [message], then [whatToDo], a Details link for
+/// [details], RETRY and FIX IT (opens [guide]'s guide, or runs [onFix]).
+class InlineError extends StatefulWidget {
+  final String message;
+  final String whatToDo;
+  final String details;
+  final GuideId? guide;
+  final VoidCallback? onRetry;
+  final VoidCallback? onFix;
+
+  /// When set, [details] are written to the local log under this area (once
+  /// per distinct text).
+  final String? logArea;
+
+  const InlineError(
+    this.message, {
+    super.key,
+    this.whatToDo = '',
+    this.details = '',
+    this.guide,
+    this.onRetry,
+    this.onFix,
+    this.logArea,
+  });
+
+  /// [e] in plain words ([FriendlyError.from]); [lead] names what didn't
+  /// happen ("Reports not loaded") and the error's own title follows it.
+  /// [fixIt] false hides FIX IT (e.g. above the navigator).
+  factory InlineError.from(
+    Object e, {
+    Key? key,
+    String? lead,
+    String? area,
+    VoidCallback? onRetry,
+    VoidCallback? onFix,
+    bool fixIt = true,
+  }) {
+    final f = e is FriendlyError ? e : FriendlyError.from(e);
+    return InlineError(
+      lead ?? f.title,
+      key: key,
+      whatToDo: lead == null ? f.whatToDo : f.short,
+      details: f.details,
+      guide: fixIt ? f.guide : null,
+      onRetry: onRetry,
+      onFix: fixIt ? onFix : null,
+      logArea: area,
+    );
+  }
+
+  @override
+  State<InlineError> createState() => _InlineErrorState();
+}
+
+class _InlineErrorState extends State<InlineError> {
+  @override
+  void initState() {
+    super.initState();
+    _log();
+  }
+
+  @override
+  void didUpdateWidget(InlineError old) {
+    super.didUpdateWidget(old);
+    if (old.details != widget.details) _log();
+  }
+
+  void _log() {
+    final area = widget.logArea;
+    if (area == null || widget.details.isEmpty) return;
+    logErrorDetails(context, area, FriendlyError(widget.message, details: widget.details));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = widget;
+    final guide = w.guide;
+    final fix = w.onFix ?? (guide == null ? null : () => openGuideHook(context, guide));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
@@ -241,12 +448,21 @@ class InlineError extends StatelessWidget {
           const Icon(Icons.error_outline, color: QuiccColors.statusVoided),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(color: QuiccColors.statusVoided, fontWeight: FontWeight.w600),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  w.message,
+                  style: const TextStyle(color: QuiccColors.statusVoided, fontWeight: FontWeight.w600),
+                ),
+                if (w.whatToDo.isNotEmpty) Text(w.whatToDo, style: TextStyle(color: context.palette.textSecondary)),
+                if (w.details.isNotEmpty) DetailsToggle(w.details),
+              ],
             ),
           ),
-          if (onRetry != null) TextButton(onPressed: onRetry, child: const Text('RETRY')),
+          if (fix != null) TextButton(onPressed: fix, child: const Text('FIX IT')),
+          if (w.onRetry != null) TextButton(onPressed: w.onRetry, child: const Text('RETRY')),
         ],
       ),
     );
@@ -290,13 +506,7 @@ Future<String?> textDialog(
 }) {
   return showDialog<String>(
     context: context,
-    builder: (ctx) => _TextDialog(
-      title: title,
-      initial: initial,
-      hint: hint,
-      confirm: confirm,
-      maxLength: maxLength,
-    ),
+    builder: (ctx) => _TextDialog(title: title, initial: initial, hint: hint, confirm: confirm, maxLength: maxLength),
   );
 }
 

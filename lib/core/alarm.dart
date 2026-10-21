@@ -48,13 +48,7 @@ class AlarmRule {
     final ids = arrivedIds.toSet();
     if (ids.isEmpty) return AlarmState.silent;
     final hasNew = ids.difference(s.known).isNotEmpty;
-    return AlarmState(
-      ringing: true,
-      loud: s.loud,
-      visible: s.visible || hasNew,
-      known: ids,
-      escalation: s.escalation,
-    );
+    return AlarmState(ringing: true, loud: s.loud, visible: s.visible || hasNew, known: ids, escalation: s.escalation);
   }
 
   /// An order has waited too long: louder, and back on screen.

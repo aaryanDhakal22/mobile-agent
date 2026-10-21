@@ -41,9 +41,9 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
         AgentException(code: 'driver_not_available') =>
           '${driver.name} isn\'t clocked in or is already out — pick another driver.',
         AgentException(isConflict: true) => 'An order is no longer ready for delivery — list refreshed.',
-        _ => 'Not sent out: $e',
+        _ => null,
       };
-      toast(context, msg, error: true);
+      msg == null ? toastError(context, e, lead: 'Not sent out', area: 'deliveries') : toast(context, msg, error: true);
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -59,9 +59,11 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
       final msg = switch (e) {
         AgentException(code: 'invalid_state') => '${d.name} isn\'t out any more — already marked returned.',
         AgentException(isNotFound: true) => '${d.name} was removed from the roster.',
-        _ => 'Could not mark ${d.name} returned: $e',
+        _ => null,
       };
-      toast(context, msg, error: true);
+      msg == null
+          ? toastError(context, e, lead: 'Could not mark ${d.name} returned', area: 'deliveries')
+          : toast(context, msg, error: true);
     } finally {
       if (mounted) setState(() => _returning.remove(d.id));
     }

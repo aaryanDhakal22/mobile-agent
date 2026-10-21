@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/friendly_error.dart';
+import '../../core/local_log.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/sse.dart';
 import '../../theme/quicc_colors.dart';
+import '../common/widgets.dart';
 
 /// How often the tablet asks its agent for a newer Quibase.
 const Duration kUpdateCheckInterval = Duration(minutes: 10);
@@ -60,7 +63,7 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
   AppRelease? _target;
   UpdatePhase _phase = UpdatePhase.downloading;
   double? _progress;
-  String? _error;
+  FriendlyError? _error;
   String? _apkPath;
   bool _checking = false;
   Timer? _timer;
@@ -130,18 +133,29 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
       );
       if (rel.sha256.isNotEmpty && sum != rel.sha256) {
         await file.delete().catchError((Object _) => file);
-        throw Exception('the download was corrupted');
+        _fail(
+          FriendlyError(
+            'The download was damaged',
+            whatToDo: 'Tap TRY AGAIN',
+            details: 'sha256 $sum, expected ${rel.sha256} (version ${rel.versionName})',
+          ),
+        );
+        return;
       }
       _apkPath = file.path;
       await _install();
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _phase = UpdatePhase.failed;
-          _error = '$e';
-        });
-      }
+      _fail(FriendlyError.from(e));
     }
+  }
+
+  void _fail(FriendlyError f) {
+    if (!mounted) return;
+    ref.read(localLogProvider).warn('update', '${f.title} · ${f.details}');
+    setState(() {
+      _phase = UpdatePhase.failed;
+      _error = f;
+    });
   }
 
   Future<void> _install() async {
@@ -156,12 +170,8 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
     try {
       await platform.install(path);
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _phase = UpdatePhase.failed;
-          _error = '$e';
-        });
-      }
+      final f = FriendlyError.from(e);
+      _fail(FriendlyError("Android couldn't open the installer", whatToDo: 'Tap TRY AGAIN', details: f.details));
     }
   }
 
@@ -187,8 +197,11 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
         'Allow Quibase to update',
         'Android needs permission once: tap ALLOW INSTALLS, switch on "Allow from this source", then come back.',
       ),
-      UpdatePhase.installing => ('Install the update', 'Tap INSTALL on the screen that opened. Nothing is lost — the app comes back paired.'),
-      UpdatePhase.failed => ('Update not finished', _error ?? 'Something went wrong.'),
+      UpdatePhase.installing => (
+        'Install the update',
+        'Tap INSTALL on the screen that opened. Nothing is lost — the app comes back paired.',
+      ),
+      UpdatePhase.failed => ('Update not finished', _error == null ? 'Something went wrong.' : '${_error!.short}.'),
     };
     return Material(
       color: QuiccColors.brand900,
@@ -202,13 +215,20 @@ class _UpdateGateState extends ConsumerState<UpdateGate> {
               children: [
                 const Icon(Icons.system_update, size: 72, color: QuiccColors.brand400),
                 const SizedBox(height: 20),
-                Text(title, style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: Colors.white)),
+                Text(
+                  title,
+                  style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: Colors.white),
+                ),
                 const SizedBox(height: 12),
                 Text(
                   message,
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 18, color: Colors.white70, height: 1.4),
                 ),
+                if (_phase == UpdatePhase.failed && (_error?.details.isNotEmpty ?? false)) ...[
+                  const SizedBox(height: 8),
+                  DetailsToggle(_error!.details, color: Colors.white54),
+                ],
                 const SizedBox(height: 24),
                 if (_phase == UpdatePhase.downloading)
                   SizedBox(

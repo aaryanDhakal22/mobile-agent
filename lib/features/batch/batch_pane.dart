@@ -6,7 +6,9 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../common/info_button.dart';
 import '../common/widgets.dart';
+import 'batch_texts.dart';
 
 /// The open batch + "Close batch" (end of shift): closes it, opens the next,
 /// resets kitchen numbers to 1100 and marks every driver available.
@@ -20,7 +22,7 @@ class BatchPane extends ConsumerStatefulWidget {
 class _BatchPaneState extends ConsumerState<BatchPane> {
   bool _busy = false;
   CloseBatchResult? _last;
-  String? _error;
+  Object? _error;
 
   Future<void> _close() async {
     final ok = await confirmDialog(
@@ -49,7 +51,7 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
       }
       if (mounted) setState(() => _last = r);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Batch not closed: $e');
+      if (mounted) setState(() => _error = e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -179,19 +181,25 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
           ),
         ),
         const SizedBox(height: 20),
-        if (_error != null) ...[InlineError(_error!), const SizedBox(height: 12)],
-        Align(
-          alignment: Alignment.centerLeft,
-          child: SizedBox(
-            height: 64,
-            child: FilledButton.icon(
-              onPressed: (_busy || floor == null) ? null : _close,
-              icon: _busy
-                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3))
-                  : const Icon(Icons.lock_clock_outlined),
-              label: const Text('CLOSE BATCH'),
+        if (_error != null) ...[
+          InlineError.from(_error!, lead: 'Batch not closed', area: 'batch'),
+          const SizedBox(height: 12),
+        ],
+        Row(
+          children: [
+            SizedBox(
+              height: 64,
+              child: FilledButton.icon(
+                onPressed: (_busy || floor == null) ? null : _close,
+                icon: _busy
+                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3))
+                    : const Icon(Icons.lock_clock_outlined),
+                label: const Text('CLOSE BATCH'),
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            const InfoButton(kCloseBatchInfo, size: 24),
+          ],
         ),
         const SizedBox(height: 12),
         Text(
@@ -232,9 +240,12 @@ class _DriverReportsCardState extends ConsumerState<_DriverReportsCard> {
   void _load() {
     final c = ref.read(agentClientProvider);
     if (c == null) return;
-    c.listBatches().then((b) {
-      if (mounted) setState(() => _batches = b);
-    }).catchError((Object _) {});
+    c
+        .listBatches()
+        .then((b) {
+          if (mounted) setState(() => _batches = b);
+        })
+        .catchError((Object _) {});
     setState(() => _reports = c.driverReports(_batch));
   }
 
@@ -256,9 +267,7 @@ class _DriverReportsCardState extends ConsumerState<_DriverReportsCard> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        toast(context, e is AgentException && e.isPrinterFailure ? 'Printer problem — nothing printed.' : 'Not printed: $e', error: true);
-      }
+      if (mounted) toastError(context, e, lead: 'Not printed', area: 'batch');
     } finally {
       if (mounted) setState(() => _printing = false);
     }
@@ -267,6 +276,7 @@ class _DriverReportsCardState extends ConsumerState<_DriverReportsCard> {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final tipTax = ref.watch(floorProvider.select((s) => s.floor?.tipTaxPercent ?? 6));
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -275,7 +285,7 @@ class _DriverReportsCardState extends ConsumerState<_DriverReportsCard> {
           children: [
             Row(
               children: [
-                const Eyebrow('Driver reports'),
+                LabelWithInfo(label: const Eyebrow('Driver reports'), info: driverReportInfo(tipTax)),
                 const Spacer(),
                 IconButton(tooltip: 'Refresh', onPressed: _load, icon: const Icon(Icons.refresh)),
               ],
@@ -301,7 +311,9 @@ class _DriverReportsCardState extends ConsumerState<_DriverReportsCard> {
               future: _reports,
               builder: (context, snap) {
                 if (snap.connectionState != ConnectionState.done) return const Text('Loading…');
-                if (snap.hasError) return InlineError('Reports not loaded: ${snap.error}', onRetry: _load);
+                if (snap.hasError) {
+                  return InlineError.from(snap.error!, lead: 'Reports not loaded', area: 'batch', onRetry: _load);
+                }
                 final reps = snap.data ?? const [];
                 if (reps.isEmpty) {
                   return Text('No drivers worked this batch.', style: TextStyle(color: p.textMuted));
@@ -351,10 +363,7 @@ class _ReportRow extends StatelessWidget {
           Expanded(flex: 2, child: _Stat('Deliveries', '${r.deliveries}')),
           Expanded(flex: 2, child: _Stat('Cash owed', money(r.cashCents))),
           Expanded(flex: 2, child: _Stat('Tips (A/T)', money(r.tipAfterTaxCents))),
-          Expanded(
-            flex: 3,
-            child: _Stat(owes ? 'Owed to store' : 'Store owes driver', money(r.owedCents.abs())),
-          ),
+          Expanded(flex: 3, child: _Stat(owes ? 'Owed to store' : 'Store owes driver', money(r.owedCents.abs()))),
         ],
       ),
     );

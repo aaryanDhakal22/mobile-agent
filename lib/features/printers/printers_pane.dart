@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
+import '../../core/friendly_error.dart';
 import '../../core/printer_models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
@@ -30,7 +31,7 @@ class PrintersPane extends ConsumerWidget {
         ),
         const SizedBox(height: 16),
         if (printers.hasError) ...[
-          InlineError('Could not load printer status: ${printers.error}'),
+          InlineError.from(printers.error!, lead: 'Could not load printer status', area: 'printers'),
           const SizedBox(height: 12),
         ],
         if (printers.valueOrNull == null && !printers.hasError)
@@ -78,11 +79,24 @@ class _PrinterCard extends StatelessWidget {
                     p.hasIP ? p.ip : 'No address configured',
                     style: TextStyle(color: context.palette.textSecondary),
                   ),
-                  if (!p.up && p.lastError.isNotEmpty)
-                    Text(p.lastError, style: const TextStyle(color: QuiccColors.statusVoided)),
+                  if (!p.up && p.hasIP) ...[
+                    const Text(
+                      'Not answering. Check it is switched on and its cable is plugged in.',
+                      style: TextStyle(color: QuiccColors.statusVoided),
+                    ),
+                    if (p.lastError.isNotEmpty) DetailsToggle(p.lastError),
+                  ],
                 ],
               ),
             ),
+            if (!p.up && p.hasIP) ...[
+              OutlinedButton.icon(
+                onPressed: () => openGuideHook(context, GuideId.printer),
+                icon: const Icon(Icons.build_outlined),
+                label: const Text('FIX IT'),
+              ),
+              const SizedBox(width: 16),
+            ],
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [

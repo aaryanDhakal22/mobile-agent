@@ -640,13 +640,35 @@ class AgentProbe {
   /// unconfigured | needs_password | locked | ready
   final String state;
   final bool linkAvailable;
-  const AgentProbe({required this.state, required this.linkAvailable});
+
+  /// Agent 2.0.1+ (empty on older Pis).
+  final String storeName;
+  final String version;
+  final String hostname;
+
+  /// unconfigured | connecting | connected | rejected — the Pi's stream to main.
+  final String sseState;
+
+  const AgentProbe({
+    required this.state,
+    required this.linkAvailable,
+    this.storeName = '',
+    this.version = '',
+    this.hostname = '',
+    this.sseState = '',
+  });
 
   /// A new (or wiped) Pi waiting to be linked with the manager login.
   bool get isNew => state == 'unconfigured' && linkAvailable;
 
-  factory AgentProbe.fromJson(Map<String, dynamic> json) =>
-      AgentProbe(state: jStr(json['state']), linkAvailable: json['link_available'] == true);
+  factory AgentProbe.fromJson(Map<String, dynamic> json) => AgentProbe(
+    state: jStr(json['state']),
+    linkAvailable: json['link_available'] == true,
+    storeName: jStr(json['store_name']),
+    version: jStr(json['version']),
+    hostname: jStr(json['hostname']),
+    sseState: jStr(json['sse_state']),
+  );
 }
 
 /// What `POST /api/setup/link` restored on the new Pi.
