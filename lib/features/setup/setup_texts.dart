@@ -22,8 +22,9 @@ class SetupInfo {
 
   static const typedAddress = InfoText(
     'The Pi\'s address',
-    'Every device on the store network has an address like 192.168.0.40. It is printed on the '
-        'label on the Pi, or ask the owner. You only need the numbers — the tablet adds the rest.',
+    'Try typing quiccpos-pi (the Pi\'s name on the store network). If that doesn\'t work, type '
+        'its address, like 192.168.0.201 — it is printed on the label on the Pi, or ask the owner. '
+        'You only need the numbers; the tablet adds the rest.',
   );
 
   static const managerLogin = InfoText(

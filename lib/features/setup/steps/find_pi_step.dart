@@ -201,7 +201,7 @@ class _FindPiStepState extends ConsumerState<FindPiStep> {
               keyboardType: TextInputType.url,
               autocorrect: false,
               style: const TextStyle(fontSize: 22),
-              decoration: const InputDecoration(hintText: '192.168.0.40'),
+              decoration: const InputDecoration(hintText: 'quiccpos-pi  or  192.168.0.201'),
               onChanged: _onTyped,
               onSubmitted: (_) => _checkTyped(),
             ),
