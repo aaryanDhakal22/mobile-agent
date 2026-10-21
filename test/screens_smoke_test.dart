@@ -1,19 +1,27 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:mobile_agent/core/api_client.dart';
 import 'package:mobile_agent/core/floor_state.dart';
+import 'package:mobile_agent/core/friendly_error.dart';
+import 'package:mobile_agent/core/local_log.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/printer_models.dart';
 import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/alert/new_order_alert.dart';
+import 'package:mobile_agent/features/common/widgets.dart';
 import 'package:mobile_agent/features/drivers/dispatch_flash.dart';
 import 'package:mobile_agent/features/drivers/driver_fab.dart';
 import 'package:mobile_agent/features/home/home_screen.dart';
 import 'package:mobile_agent/features/order_detail/order_detail_screen.dart';
+import 'package:mobile_agent/features/settings/settings_screen.dart';
 import 'package:mobile_agent/theme/quicc_colors.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -356,6 +364,273 @@ void main() {
       await tester.tapAt(const Offset(480, 300));
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('OUT NOW'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('Settings', () {
+    const paired = <String, Object>{
+      'agent_address': 'http://192.168.1.219:8080',
+      'device_key': 'qagt_test',
+      'device_name': 'Counter tablet',
+      'device_id': 'dev-1',
+    };
+
+    /// Settings on its own, paired, with the agent answered by [handler].
+    Future<ProviderContainer> pumpSettings(
+      WidgetTester tester, {
+      Future<http.Response> Function(http.Request req)? handler,
+      Future<AgentProbe> Function(String address)? probe,
+    }) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      SharedPreferences.setMockInitialValues(paired);
+      final prefs = await SharedPreferences.getInstance();
+      final c = ProviderContainer(
+        overrides: [
+          sharedPrefsProvider.overrideWithValue(prefs),
+          floorProvider.overrideWith(() => FakeFloor(_floorWith(withArrived: false))),
+          agentClientProvider.overrideWith(
+            (ref) => AgentClient(
+              baseUrl: '192.168.1.219',
+              deviceKey: 'qagt_test',
+              client: MockClient(handler ?? (_) async => http.Response('{"error":"nope"}', 500)),
+            ),
+          ),
+          if (probe != null) piProbeProvider.overrideWithValue(probe),
+        ],
+      );
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(
+            theme: _theme(),
+            home: const Scaffold(body: SettingsScreen()),
+          ),
+        ),
+      );
+      await tester.pump();
+      return c;
+    }
+
+    testWidgets('renders every card', (tester) async {
+      await pumpSettings(tester);
+      expect(tester.takeException(), isNull);
+      for (final t in ['THE PI', 'THIS TABLET', 'ORDER CHIME', 'CHECKS & TESTS', 'LIGHT OR DARK']) {
+        await tester.scrollUntilVisible(find.text(t), 200, scrollable: find.byType(Scrollable).first);
+        expect(find.text(t), findsOneWidget, reason: t);
+      }
+      expect(find.text('Counter tablet'), findsOneWidget);
+      expect(find.text('PREVIEW'), findsOneWidget);
+      for (final b in ['RENAME', 'PAIR ANOTHER TABLET', 'UNPAIR', 'TABLET CHECKS', 'TEST RING', 'TEST PRINT']) {
+        expect(find.text(b), findsOneWidget, reason: b);
+      }
+      expect(find.text('System'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('rename: asks the Pi, then remembers the new name', (tester) async {
+      http.Request? sent;
+      final c = await pumpSettings(
+        tester,
+        handler: (req) async {
+          sent = req;
+          return http.Response(jsonEncode({'name': 'Front counter'}), 200);
+        },
+      );
+      await tester.tap(find.text('RENAME'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'Front counter');
+      await tester.tap(find.widgetWithText(FilledButton, 'RENAME'));
+      await tester.pumpAndSettle();
+
+      expect(sent?.method, 'PATCH');
+      expect(sent?.url.path, '/api/device/self');
+      expect(jsonDecode(sent!.body), {'name': 'Front counter'});
+      expect(c.read(pairingProvider)?.deviceName, 'Front counter');
+      expect(c.read(pairingProvider)?.deviceKey, 'qagt_test', reason: 'still paired');
+      expect(c.read(sharedPrefsProvider).getString('device_name'), 'Front counter');
+      expect(find.text('Front counter'), findsWidgets);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('rename on an old Pi says so in plain words', (tester) async {
+      await pumpSettings(tester, handler: (_) async => http.Response('404 page not found', 404));
+      await tester.tap(find.text('RENAME'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'Front counter');
+      await tester.tap(find.widgetWithText(FilledButton, 'RENAME'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Not renamed'), findsOneWidget);
+      expect(find.textContaining('The Pi needs an update for this'), findsOneWidget);
+      expect(find.text('DETAILS'), findsOneWidget);
+      expect(find.textContaining('404 page not found'), findsNothing, reason: 'raw text stays behind DETAILS');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the address is checked as you type', (tester) async {
+      final asked = <String>[];
+      await pumpSettings(
+        tester,
+        probe: (a) async {
+          asked.add(a);
+          if (a.endsWith('.50')) throw const AgentException("Can't reach the Pi");
+          return const AgentProbe(state: 'ready', linkAvailable: false, storeName: "Lombardi's");
+        },
+      );
+      final field = find.byType(TextField).first;
+      await tester.enterText(field, '192.168.1.5');
+      await tester.enterText(field, '192.168.1.50');
+      await tester.pump();
+      expect(find.text('Looking for the Pi…'), findsOneWidget);
+      await tester.pump(kAddressCheckDelay);
+      await tester.pump();
+      expect(asked, ['192.168.1.50'], reason: 'debounced: only the last text is checked');
+      expect(find.textContaining('Nothing there ✗'), findsOneWidget);
+
+      await tester.enterText(field, '192.168.1.219');
+      await tester.pump(kAddressCheckDelay);
+      await tester.pump();
+      expect(find.text("Found the Pi ✓ — Lombardi's"), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('pair another tablet shows the code big with the steps', (tester) async {
+      await pumpSettings(
+        tester,
+        handler: (req) async => http.Response(
+          jsonEncode({
+            'code': '482913',
+            'expires_at': DateTime.now().toUtc().add(const Duration(minutes: 5)).toIso8601String(),
+          }),
+          200,
+        ),
+      );
+      await tester.tap(find.text('PAIR ANOTHER TABLET'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('482913'), findsOneWidget);
+      expect(find.textContaining('Expires in 4:'), findsOneWidget);
+      expect(find.textContaining('I have a code'), findsOneWidget);
+      await tester.tap(find.text('DONE'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an (i) opens its explanation', (tester) async {
+      await pumpSettings(tester);
+      await tester.tap(find.byTooltip('What is this?').first);
+      await tester.pumpAndSettle();
+      expect(find.text("The Pi's address"), findsOneWidget);
+      await tester.tap(find.text('GOT IT'));
+      await tester.pumpAndSettle();
+      expect(find.text("The Pi's address"), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the theme picker saves the choice', (tester) async {
+      final c = await pumpSettings(tester);
+      expect(c.read(themeModeProvider), ThemeMode.dark, reason: 'dark by default');
+      await tester.scrollUntilVisible(find.text('Light'), 200, scrollable: find.byType(Scrollable).first);
+      await tester.tap(find.text('Light'));
+      await tester.pump();
+      expect(c.read(themeModeProvider), ThemeMode.light);
+      expect(c.read(sharedPrefsProvider).getString('theme_mode'), 'light');
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  test('the theme is remembered across restarts', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    ProviderContainer boot() {
+      final c = ProviderContainer(overrides: [sharedPrefsProvider.overrideWithValue(prefs)]);
+      addTearDown(c.dispose);
+      return c;
+    }
+
+    final first = boot();
+    expect(first.read(themeModeProvider), ThemeMode.dark);
+    first.read(themeModeProvider.notifier).set(ThemeMode.system);
+    expect(boot().read(themeModeProvider), ThemeMode.system);
+
+    // The nav-rail logo's `.notifier.state =` saves too.
+    final second = boot();
+    second.read(themeModeProvider.notifier).state = ThemeMode.light;
+    expect(boot().read(themeModeProvider), ThemeMode.light);
+    second.read(themeModeProvider.notifier).toggle();
+    expect(boot().read(themeModeProvider), ThemeMode.dark);
+  });
+
+  group('friendly errors', () {
+    Future<ProviderContainer> pumpBody(WidgetTester tester, Widget body) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final c = ProviderContainer(overrides: [sharedPrefsProvider.overrideWithValue(prefs)]);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(
+            theme: _theme(),
+            home: Scaffold(body: body),
+          ),
+        ),
+      );
+      await tester.pump();
+      return c;
+    }
+
+    const refused = AgentException("Can't reach the Pi", cause: SocketException('Connection refused (errno 111)'));
+
+    testWidgets('an inline error shows the title + what to do, details behind a link, and logs them', (tester) async {
+      final c = await pumpBody(tester, InlineError.from(refused, lead: 'Reports not loaded', area: 'batch'));
+      expect(find.text('Reports not loaded'), findsOneWidget);
+      expect(find.textContaining("Can't reach the Pi. Check the tablet is on the store Wi-Fi"), findsOneWidget);
+      expect(find.textContaining('errno 111'), findsNothing);
+      expect(find.text('FIX IT'), findsOneWidget, reason: 'it names the Pi-unreachable guide');
+
+      await tester.tap(find.text('Details'));
+      await tester.pump();
+      expect(find.textContaining('errno 111'), findsOneWidget);
+      expect(c.read(localLogProvider).lines.single, contains('W batch:'));
+      expect(c.read(localLogProvider).lines.single, contains('errno 111'));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('FIX IT goes through openGuideHook', (tester) async {
+      final opened = <GuideId>[];
+      final before = openGuideHook;
+      openGuideHook = (_, g) => opened.add(g);
+      addTearDown(() => openGuideHook = before);
+
+      await pumpBody(
+        tester,
+        Builder(
+          builder: (context) => TextButton(
+            onPressed: () => toastError(
+              context,
+              const AgentException('nothing printed', statusCode: 502, code: 'nothing_printed'),
+              lead: 'Not reprinted',
+            ),
+            child: const Text('go'),
+          ),
+        ),
+      );
+      await tester.tap(find.text('go'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Not reprinted'), findsOneWidget);
+      expect(find.textContaining('Nothing printed. Check the printers'), findsOneWidget);
+      await tester.tap(find.text('FIX IT'));
+      expect(opened, [GuideId.printer]);
+
+      await tester.tap(find.text('DETAILS'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('nothing_printed'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });

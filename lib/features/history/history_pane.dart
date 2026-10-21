@@ -76,7 +76,16 @@ class _HistoryPaneState extends ConsumerState<HistoryPane> {
               },
               child: orders.when(
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => ListView(children: [InlineError('Could not load orders: $e')]),
+                error: (e, _) => ListView(
+                  children: [
+                    InlineError.from(
+                      e,
+                      lead: 'Could not load orders',
+                      area: 'history',
+                      onRetry: () => ref.invalidate(batchOrdersProvider(_batchId!)),
+                    ),
+                  ],
+                ),
                 data: (list) => list.isEmpty
                     ? ListView(
                         children: const [

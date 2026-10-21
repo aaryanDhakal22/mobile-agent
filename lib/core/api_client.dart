@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
+import 'diag_models.dart';
 import 'json.dart';
 import 'models.dart';
 import 'printer_models.dart';
@@ -12,14 +13,23 @@ import 'printer_models.dart';
 /// Header carrying the paired tablet's key on every floor request.
 const String kDeviceKeyHeader = 'X-Agent-Device-Key';
 
-/// Turns what staff type ("192.168.1.219:8080", "http://pi.lan:8080/") into a
-/// base URL with a scheme and no trailing slash. Returns '' for blank input.
+/// The agent's HTTP port when an address doesn't name one.
+const int kAgentPort = 8080;
+
+/// Turns what staff type ("192.168.1.219", "192.168.1.219:8080",
+/// "http://pi.lan:8080/") into a base URL with a scheme, a port (8080 when a
+/// plain-http address has none) and no trailing slash. Returns '' for blank
+/// input.
 String normalizeAgentAddress(String input) {
   var s = input.trim();
   if (s.isEmpty) return '';
   if (!s.startsWith('http://') && !s.startsWith('https://')) s = 'http://$s';
   while (s.endsWith('/')) {
     s = s.substring(0, s.length - 1);
+  }
+  final u = Uri.tryParse(s);
+  if (u != null && u.scheme == 'http' && u.host.isNotEmpty && !u.hasPort && u.path.isEmpty) {
+    s = '$s:$kAgentPort';
   }
   return s;
 }
@@ -32,7 +42,14 @@ class AgentException implements Exception {
   final String message;
   final Map<String, dynamic> body;
 
-  const AgentException(this.message, {this.statusCode, this.code, this.body = const {}});
+  /// For a network failure: what went wrong underneath (timeout, refused…),
+  /// kept for the "details" view and the diagnostics log.
+  final Object? cause;
+
+  const AgentException(this.message, {this.statusCode, this.code, this.body = const {}, this.cause});
+
+  /// No answer in time (as opposed to refused / unreachable).
+  bool get isTimeout => statusCode == null && cause is TimeoutException;
 
   /// The tablet's key was revoked (or never valid): re-pair.
   bool get isDeviceRevoked => statusCode == 401 && code == 'device_required';
@@ -111,7 +128,7 @@ class AgentClient {
     } on AgentException {
       rethrow;
     } catch (e) {
-      throw AgentException(_networkMessage(e));
+      throw AgentException(_networkMessage(e), cause: e);
     } finally {
       if (client == null) c.close();
     }
@@ -131,9 +148,26 @@ class AgentClient {
     } on AgentException {
       rethrow;
     } catch (e) {
-      throw AgentException(_networkMessage(e));
+      throw AgentException(_networkMessage(e), cause: e);
     } finally {
       if (client == null) c.close();
+    }
+  }
+
+  /// `GET /api/version` (open) — answers when [address] is a Quicc agent
+  /// (any version). Used by discovery's subnet sweep.
+  static Future<String?> version({
+    required String address,
+    required http.Client client,
+    Duration timeout = const Duration(milliseconds: 900),
+  }) async {
+    try {
+      final resp = await client.get(Uri.parse('${normalizeAgentAddress(address)}/api/version')).timeout(timeout);
+      if (resp.statusCode != 200) return null;
+      final m = jMap(jsonDecode(resp.body));
+      return jStr(m['service']) == 'quicc-agent' ? jStr(m['version']) : null;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -164,7 +198,7 @@ class AgentClient {
     } on AgentException {
       rethrow;
     } catch (e) {
-      throw AgentException(_networkMessage(e));
+      throw AgentException(_networkMessage(e), cause: e);
     } finally {
       if (client == null) c.close();
     }
@@ -282,7 +316,7 @@ class AgentClient {
     try {
       resp = await _client.send(req).timeout(const Duration(seconds: 30));
     } catch (e) {
-      throw AgentException(_networkMessage(e));
+      throw AgentException(_networkMessage(e), cause: e);
     }
     if (resp.statusCode != 200) {
       throw exceptionFromResponse(resp.statusCode, await resp.stream.bytesToString());
@@ -363,6 +397,43 @@ class AgentClient {
 
   Future<List<PrinterStatus>> listPrinters() async => jList(await _get('/api/printers'), PrinterStatus.fromJson);
 
+  /// `POST /api/printers/test` — prints a short test slip on every printer
+  /// (or [printerId]) with no failover; [probeOnly] just re-checks whether
+  /// they answer. 409 `test_in_progress` while another test runs.
+  Future<List<PrinterTestResult>> testPrinters({String? printerId, bool probeOnly = false}) async {
+    final body = await _send(
+      'POST',
+      '/api/printers/test',
+      body: {'printer_id': ?printerId, if (probeOnly) 'probe_only': true},
+      timeout: printTimeout,
+    );
+    return jList(jMap(body)['results'], PrinterTestResult.fromJson);
+  }
+
+  // --- this tablet + diagnostics ----------------------------------------------
+
+  /// `GET /api/diag` — the Pi's own view: connection to main, SD card /
+  /// power health, printers, recent orders.
+  Future<PiDiag> getDiag({Duration? timeout}) async =>
+      PiDiag.fromJson(jMap(await _send('GET', '/api/diag', timeout: timeout)));
+
+  /// `PATCH /api/device/self {name}` — renames this tablet.
+  Future<String> renameSelf(String name) async =>
+      jStr(jMap(await _send('PATCH', '/api/device/self', body: {'name': name.trim()}))['name']);
+
+  /// `POST /api/pairing/code` — a 6-digit code another tablet can pair with.
+  Future<PairingCode> pairingCode() async => PairingCode.fromJson(jMap(await _send('POST', '/api/pairing/code')));
+
+  /// `POST /api/device/report-token` — a report-only key for sending
+  /// diagnostics straight to main when the Pi is down.
+  Future<ReportToken> reportToken() async =>
+      ReportToken.fromJson(jMap(await _send('POST', '/api/device/report-token', timeout: const Duration(seconds: 15))));
+
+  /// `POST /api/diag/report` — forwards a diagnostics report to main.
+  Future<void> sendReport(Map<String, Object?> report) async {
+    await _send('POST', '/api/diag/report', body: report, timeout: const Duration(seconds: 15));
+  }
+
   // --- plumbing --------------------------------------------------------------
 
   Future<Object?> _get(String path, [Map<String, String>? query]) => _send('GET', path, query: query);
@@ -382,7 +453,7 @@ class AgentClient {
       final streamed = await _client.send(req).timeout(timeout ?? this.timeout);
       resp = await http.Response.fromStream(streamed).timeout(timeout ?? this.timeout);
     } catch (e) {
-      throw AgentException(_networkMessage(e));
+      throw AgentException(_networkMessage(e), cause: e);
     }
     try {
       _check(resp);
@@ -421,8 +492,8 @@ class AgentClient {
   }
 
   static String _networkMessage(Object e) {
-    if (e is TimeoutException) return "Agent didn't answer in time";
-    return "Can't reach the agent ($e)";
+    if (e is TimeoutException) return "The Pi didn't answer in time";
+    return "Can't reach the Pi";
   }
 
   void dispose() => _client.close();

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/friendly_error.dart';
+import '../../core/local_log.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
@@ -23,13 +25,12 @@ String acceptErrorMessage(Object e) {
       return switch (e.code) {
         'already_accepted' => 'Already accepted on another screen.',
         'invalid_state' => 'This order was cancelled or closed with its batch — it can\'t be accepted.',
-        _ => 'Not accepted: ${e.message}',
+        _ => 'Not accepted. ${FriendlyError.from(e).short}.',
       };
     }
     if (e.isNotFound) return 'This order is no longer on the agent.';
-    return 'Not accepted: ${e.message}';
   }
-  return 'Not accepted: $e';
+  return 'Not accepted. ${FriendlyError.from(e).short}.';
 }
 
 /// After [kAcceptChecking]: what the agent says about the order now. null
@@ -67,18 +68,27 @@ class _AcceptControlsState extends ConsumerState<AcceptControls> {
   bool _busy = false;
   String? _error;
 
+  /// The technical text behind [_error] (Details link + local log).
+  String _details = '';
+
   Future<void> _accept(int prep) async {
     if (_busy) return;
     setState(() {
       _busy = true;
       _error = null;
+      _details = '';
     });
     try {
       await ref.read(floorProvider.notifier).accept(widget.order.id, prep);
       // On success the order leaves the arrived queue and this widget unmounts.
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = acceptErrorMessage(e));
+      final f = FriendlyError.from(e);
+      ref.read(localLogProvider).warn('accept', '${widget.order.id}: ${f.details}');
+      setState(() {
+        _error = acceptErrorMessage(e);
+        _details = f.details;
+      });
       if (e is AgentException && e.isNetwork) {
         // The claim may have landed: read the order back before saying no.
         final o = await ref.read(floorProvider.notifier).recheck(widget.order.id);
@@ -143,7 +153,7 @@ class _AcceptControlsState extends ConsumerState<AcceptControls> {
         ),
         if (_error != null) ...[
           const SizedBox(height: 10),
-          InlineError(_error!, onRetry: _busy ? null : () => _accept(selected)),
+          InlineError(_error!, details: _details, onRetry: _busy ? null : () => _accept(selected)),
         ],
       ],
     );

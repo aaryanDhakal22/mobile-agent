@@ -19,7 +19,7 @@ the Pi) — never to `main/` or `online/`. The agent's API is specified in
 | **History** | Current batch (live) or any kept closed batch; tap an order for full detail (items with size / modifiers / notes, customer, address, kitchen #, timeline). |
 | **Batch** | The open batch and **Close batch**. If orders are unfinished the agent lists them; confirm to close anyway (they're auto-finished). Kitchen numbers restart at 1100. Closing prints **one driver report per driver** on the receipt printer. Below: **Driver reports** for the open or any kept batch (deliveries, cash owed, tips after tip tax, owed to store) and **Print driver reports** to reprint. |
 | **Printers** | Read-only printer reachability. Printers are configured in the Quicc web app (main), not here. |
-| **Settings** | Agent address, this tablet's name, **Unpair**, alarm sound, connection + sync backlog. |
+| **Settings** | Big-button cards, each with an (i) explaining it in plain words: **Continue setup** (while the setup wizard is unfinished); **The Pi** — its address, checked live as you type ("Found the Pi ✓ — *store*" / "Nothing there ✗"; a bare IP gets `:8080`), SAVE keeps the pairing, plus live / last sync / sync backlog; **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code from the Pi, shown big with an expiry countdown and the steps for the new tablet: open Quibase → pick this Pi → I have a code → type it), **Unpair**; **Order chime** (sound + preview); **Checks & tests** (tablet checks, test ring, test print); **Light / Dark / System** (remembered across restarts; the `q` logo still toggles light ↔ dark); **About & diagnostics**. |
 
 **New-order alarm.** A new order opens a full-screen alert and loops the chosen
 sound on the Android *alarm* stream. Tapping does **not** silence it — it stops
@@ -29,6 +29,15 @@ than 2 minutes the agent sends `order.escalated`: the alert comes back, louder,
 and the sound is restarted. If the player fails to start (logged), it is
 retried on the next escalation / refresh. The manifest holds `WAKE_LOCK`, which
 the alarm stream's `stayAwake` needs.
+
+**Errors in plain words.** Anything that goes wrong is shown as a short
+sentence plus what to do ("Can't reach the Pi — check the tablet is on the
+store Wi-Fi and the Pi is on"), never the raw agent text: that sits behind a
+small **Details** link and is written to the on-tablet log that rides along
+with diagnostics. When a troubleshooting guide fits, the error offers
+**FIX IT**. The Drivers and Batch tabs have (i) icons explaining clock in/out,
+the queue, removing a driver, closing a batch and how the driver report adds
+up; the driver button has one too (not the Kitchen screen).
 
 **Driver button** (bottom-right on every tab but Settings — the old app's
 queue button). Collapsed: a truck with a badge = drivers out on a run. Tap it:
@@ -62,23 +71,65 @@ the logo is green (live), amber (connecting) or red (retrying).
 
 The screen is kept on with `wakelock_plus`. There is no auto-accept in the app.
 
-## Pairing a tablet
+## First-time setup (the wizard)
 
-1. On a computer, open the agent's web UI (`http://<pi-ip>:8080`), log in, and
-   go to **Settings → Pair tablet**. It shows a **6-digit code** valid for 5
-   minutes.
-2. On the tablet, enter the agent address (`host:port`, e.g.
-   `192.168.1.219:8080`), the code, and a name for the tablet → **Pair**.
-3. The tablet stores the address + device key (`shared_preferences`) and sends
-   the key as `X-Agent-Device-Key` on every request.
+A fresh install (or a tablet that lost its pairing) opens a step-by-step setup
+for the **store manager** — big buttons, plain words, an (i) on every step:
+
+1. **Welcome**.
+2. **Find the Pi** — lists the Pis on the Wi-Fi (UDP broadcast to the agent's
+   discovery port 48080, plus the saved address and the `quiccpos-pi`
+   hostname; a /24 sweep of `:8080/api/version` if nothing answers). "My Pi
+   isn't listed" takes a typed address (a bare IP is enough — `:8080` is added).
+3. **Sign in** — a **new Pi** is set up with the store manager login (the Pi
+   links to the store, restores the open batch and pairs this tablet in one
+   call; no internet yet → it retries every 15 s); an already set-up Pi is
+   joined with a **6-digit code** from another tablet (Settings → Pair another
+   tablet) or the agent web UI.
+4. **Tablet checks** — notifications, full-screen alerts, battery saving off,
+   app updates allowed, alarm volume; each opens the right Android screen and
+   re-checks on return.
+5. **Pi ready** — what was restored, then the Pi's internet / connection to
+   Quicc / memory card / power and each printer as it comes online.
+6. **Test ring** ("Did you hear it?", plus a screen-off test) and
+7. **Test print** (a TEST slip per printer, no failover; FIX IT → printer guide).
+8. **Drivers** ("Who drives tonight?") and the **order chime**.
+9. **All set** → START TAKING ORDERS (sends a setup report to the owner).
+
+Progress is saved on every step (`setup_progress_v1`, never the password);
+after pairing, **Finish later** lets the counter work and Settings offers
+CONTINUE. Orders ring during the wizard too. Code: `lib/features/setup/`.
+
+A tablet upgraded from 1.2.0 skips the wizard and gets a one-time "Quick tablet
+check" prompt.
 
 If the tablet is revoked in the web UI, its next request gets
-`401 device_required`; the app wipes the key and returns to the pairing screen.
-**Settings → Unpair** revokes the key on the agent (`POST /api/device/unpair`)
-and forgets it locally; if the agent is unreachable, revoke it in the agent web
-UI (Settings → Counter tablets).
+`401 device_required`; the app wipes the key and returns to "Find the Pi".
+**Settings → Unpair** revokes the key on the agent (`POST /api/device/unpair`).
 
-If the Pi's IP changes, update the address in Settings (the key is kept).
+## Ringing with the screen off ("ring anywhere")
+
+`QuibaseApp.kt` keeps one Flutter engine for the whole process and
+`RingService.kt` (a `specialUse` foreground service, "Listening for new
+orders") keeps that process alive, so the SSE connection and the alarm keep
+running when the app is in the background, swiped away or the screen is off.
+The alarm is driven at the ProviderContainer level (`core/ring_bridge.dart`),
+not by a widget. A new order nobody sees posts a full-screen notification:
+over the lock screen it opens Quibase and turns the screen on; over another app
+it's a heads-up, like a call. The chime plays on the alarm stream. After a
+tablet reboot nothing rings until Quibase is opened once.
+
+## Help and troubleshooting
+
+The **Help** tab has four step-by-step guides with drawings — *Can't reach the
+Pi*, *Printer problem*, *No orders coming in*, *Swap the Pi card / pair a
+tablet* — that run automatic checks, ask only what can't be sensed, and re-test
+after each step (TEST AGAIN). FIX IT buttons on the red Pi banner, the warning
+bars (printer down, no orders while open, alarm quiet, tablet checks) and error
+messages open the right guide. Every conclusion and **Send diagnostics to the
+owner** sends a report: via the Pi, else straight to main with a report-only
+key, else an outbox retried later. Code: `lib/features/diagnose/`,
+`lib/features/illustrations/`.
 
 ## Build / run
 
@@ -107,7 +158,7 @@ Android manifest).
 
 ```
 lib/
-  main.dart, app.dart        bootstrap (prefs, wakelock), pairing gate, alarm host
+  main.dart, app.dart        bootstrap (prefs, ring bridge, wakelock), setup gate, alarm host
   core/
     api_client.dart          AgentClient — every /api call, error mapping
     sse.dart                 SSE line parser + self-reconnecting stream
@@ -116,13 +167,21 @@ lib/
     printer_models.dart      PrinterStatus
     floor_state.dart         FloorState + pure SSE reducer (applySseEvent)
     alarm.dart               pure alarm rule (ring while anything is arrived)
-    storage.dart             shared_preferences: pairing + sound
+    storage.dart             shared_preferences: pairing, sound, theme, …
+    friendly_error.dart      any error → title / what to do / details / guide
+    local_log.dart           on-tablet log (last 300 lines) for diagnostics
     providers.dart           Riverpod wiring (pairing, client, floor, alarm, …)
+    ring_bridge.dart         alarm → chime + full-screen notification + service
+    ring_platform.dart       quibase/ring channel (RingService.kt)
+    device_platform.dart     quibase/device channel (tablet checks)
+    discovery.dart           find Pis on the LAN
+    diag_models.dart         /api/diag, printer test, pairing code, report token
     alert_player.dart        looping alarm sound (audioplayers)
     format.dart, json.dart   formatting + defensive JSON readers
   features/<screen>/          kitchen, deliveries, drivers (+ the dispatch
                               name flash + the driver button), history, batch
-                              (+ driver reports), printers, settings, pairing,
+                              (+ driver reports), printers, settings, setup,
+                              diagnose (Help + guides), illustrations,
                               order_detail, alert (+ accept controls), update
                               (forced self-update gate), home (nav rail),
                               common (shared widgets)

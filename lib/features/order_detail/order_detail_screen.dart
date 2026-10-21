@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
@@ -284,19 +283,13 @@ class _Actions extends ConsumerStatefulWidget {
 class _ActionsState extends ConsumerState<_Actions> {
   bool _busy = false;
 
-  Future<void> _do(Future<void> Function() op, String ok) async {
+  Future<void> _do(Future<void> Function() op, String ok, String fail) async {
     setState(() => _busy = true);
     try {
       await op();
       if (mounted) toast(context, ok);
     } catch (e) {
-      if (mounted) {
-        toast(
-          context,
-          e is AgentException && e.isPrinterFailure ? 'Printer problem — nothing printed.' : '$e',
-          error: true,
-        );
-      }
+      if (mounted) toastError(context, e, lead: fail, area: 'order');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -318,7 +311,7 @@ class _ActionsState extends ConsumerState<_Actions> {
                 backgroundColor: QuiccColors.statusPaid,
                 foregroundColor: QuiccColors.brand900,
               ),
-              onPressed: _busy ? null : () => _do(() => floor.ready(so.id), 'Marked ready'),
+              onPressed: _busy ? null : () => _do(() => floor.ready(so.id), 'Marked ready', 'Not marked ready'),
               icon: const Icon(Icons.check_circle_outline),
               label: const Text('READY'),
             ),
@@ -328,7 +321,7 @@ class _ActionsState extends ConsumerState<_Actions> {
           SizedBox(
             height: 56,
             child: OutlinedButton.icon(
-              onPressed: _busy ? null : () => _do(() => floor.reprint(so.id), 'Reprinted'),
+              onPressed: _busy ? null : () => _do(() => floor.reprint(so.id), 'Reprinted', 'Not reprinted'),
               icon: const Icon(Icons.print_outlined),
               label: const Text('REPRINT'),
             ),

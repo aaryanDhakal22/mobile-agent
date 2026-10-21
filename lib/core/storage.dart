@@ -20,6 +20,18 @@ class AppStorage {
   static const _kName = 'device_name';
   static const _kId = 'device_id';
   static const _kSound = 'alert_sound';
+  static const _kTheme = 'theme_mode';
+
+  // Setup wizard + troubleshooting (JSON blobs owned by their features).
+  static const kSetupProgress = 'setup_progress_v1';
+  static const kGuideSession = 'guide_session_v1';
+  static const kLastPiDiag = 'last_pi_diag';
+  static const kDiagOutbox = 'diag_outbox';
+  static const kLocalLog = 'local_log';
+  static const kTabletChecksPrompted = 'tablet_checks_prompted';
+  static const kNoOrdersSnoozedUntil = 'no_orders_snoozed_until';
+  static const _kReportToken = 'report_token';
+  static const _kMainUrl = 'report_main_url';
 
   final SharedPreferences prefs;
   const AppStorage(this.prefs);
@@ -55,4 +67,30 @@ class AppStorage {
 
   String? get alertSound => prefs.getString(_kSound);
   Future<void> setAlertSound(String name) => prefs.setString(_kSound, name);
+
+  /// light | dark | system (null = never chosen).
+  String? get themeMode => prefs.getString(_kTheme);
+  Future<void> setThemeMode(String mode) => prefs.setString(_kTheme, mode);
+
+  Future<void> setDeviceName(String name) => prefs.setString(_kName, name);
+
+  /// The report-only key for main (see ReportSender) and where main is.
+  ({String token, String mainUrl})? get reportToken {
+    final t = prefs.getString(_kReportToken) ?? '';
+    final u = prefs.getString(_kMainUrl) ?? '';
+    return t.isEmpty || u.isEmpty ? null : (token: t, mainUrl: u);
+  }
+
+  Future<void> setReportToken(String token, String mainUrl) async {
+    await prefs.setString(_kReportToken, token);
+    await prefs.setString(_kMainUrl, mainUrl);
+  }
+
+  Future<void> clearReportToken() async {
+    await prefs.remove(_kReportToken);
+  }
+
+  String? getJson(String key) => prefs.getString(key);
+  Future<void> setJson(String key, String json) => prefs.setString(key, json);
+  Future<void> remove(String key) => prefs.remove(key);
 }

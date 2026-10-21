@@ -6,7 +6,9 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../common/info_button.dart';
 import '../common/widgets.dart';
+import 'drivers_texts.dart';
 
 /// The agent refuses (409 `driver_not_available`) to remove a driver who is
 /// out on a run.
@@ -35,7 +37,7 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
       await op();
       return true;
     } catch (e) {
-      if (mounted) toast(context, '$failure: $e', error: true);
+      if (mounted) toastError(context, e, lead: failure, area: 'drivers');
       return false;
     }
   }
@@ -73,9 +75,11 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
       final msg = switch (e) {
         AgentException(code: 'driver_not_available') => removeDriverOutMessage(d.name),
         AgentException(isNotFound: true) => '${d.name} was already removed.',
-        _ => 'Could not remove ${d.name}: $e',
+        _ => null,
       };
-      toast(context, msg, error: true);
+      msg == null
+          ? toastError(context, e, lead: 'Could not remove ${d.name}', area: 'drivers')
+          : toast(context, msg, error: true);
     }
   }
 
@@ -89,9 +93,11 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
       final msg = switch (e) {
         AgentException(code: 'invalid_state') => '${d.name} is already clocked in.',
         AgentException(isNotFound: true) => '${d.name} was removed from the roster.',
-        _ => 'Could not clock ${d.name} in: $e',
+        _ => null,
       };
-      toast(context, msg, error: true);
+      msg == null
+          ? toastError(context, e, lead: 'Could not clock ${d.name} in', area: 'drivers')
+          : toast(context, msg, error: true);
     } finally {
       if (mounted) setState(() => _busy.remove(d.id));
     }
@@ -110,9 +116,11 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
               ? '${d.name} is already clocked out.'
               : '${d.name} is out on a run — tap I HAVE RETURNED on Deliveries first, then clock them out.',
         AgentException(isNotFound: true) => '${d.name} was removed from the roster.',
-        _ => 'Could not clock ${d.name} out: $e',
+        _ => null,
       };
-      toast(context, msg, error: true);
+      msg == null
+          ? toastError(context, e, lead: 'Could not clock ${d.name} out', area: 'drivers')
+          : toast(context, msg, error: true);
     } finally {
       if (mounted) setState(() => _busy.remove(d.id));
     }
@@ -161,6 +169,14 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
                       'Clock drivers in when they start — they join the back of the queue, and the first '
                       'available driver is next up. Drag ≡ to reorder.',
                       style: TextStyle(color: context.palette.textMuted),
+                    ),
+                    const Wrap(
+                      spacing: 16,
+                      children: [
+                        LabelWithInfo(label: Text('Clock in / out'), info: kClockInfo),
+                        LabelWithInfo(label: Text('The queue'), info: kQueueInfo),
+                        LabelWithInfo(label: Text('Remove'), info: kRemoveDriverInfo),
+                      ],
                     ),
                     if (resetTime != null && resetTime.isNotEmpty) ...[
                       const SizedBox(height: 4),
@@ -380,7 +396,12 @@ class _ShiftsDialog extends ConsumerWidget {
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => Align(
             alignment: Alignment.topCenter,
-            child: InlineError('Could not load shifts: $e', onRetry: () => ref.invalidate(driverShiftsProvider)),
+            child: InlineError.from(
+              e,
+              lead: 'Could not load shifts',
+              area: 'drivers',
+              onRetry: () => ref.invalidate(driverShiftsProvider),
+            ),
           ),
           data: (list) => list.isEmpty
               ? Center(

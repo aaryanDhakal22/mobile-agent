@@ -120,11 +120,11 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
       await ref.read(floorProvider.notifier).ready(widget.order.id);
     } catch (e) {
       if (mounted) {
-        toast(
-          context,
-          e is AgentException && e.isConflict ? 'Already moved on: ${e.message}' : 'Not marked ready: $e',
-          error: true,
-        );
+        if (e is AgentException && e.isConflict) {
+          toast(context, 'Already moved on — the screen will refresh.', error: true);
+        } else {
+          toastError(context, e, lead: 'Not marked ready', area: 'kitchen');
+        }
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -137,13 +137,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
       await ref.read(floorProvider.notifier).reprint(widget.order.id);
       if (mounted) toast(context, 'Reprinted ${widget.order.displayNumber}');
     } catch (e) {
-      if (mounted) {
-        toast(
-          context,
-          e is AgentException && e.isPrinterFailure ? 'Printer problem — nothing reprinted.' : 'Reprint failed: $e',
-          error: true,
-        );
-      }
+      if (mounted) toastError(context, e, lead: 'Not reprinted', area: 'kitchen');
     } finally {
       if (mounted) setState(() => _reprinting = false);
     }
@@ -171,7 +165,9 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
             child: InkWell(
               borderRadius: BorderRadius.circular(QuiccRadius.md),
               onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => OrderDetailScreen(orderId: so.id, initial: so)),
+                MaterialPageRoute<void>(
+                  builder: (_) => OrderDetailScreen(orderId: so.id, initial: so),
+                ),
               ),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -208,7 +204,11 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
                       const SizedBox(height: 4),
                       Text(
                         '“${o.notes.trim()}”',
-                        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: QuiccColors.statusFiring),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                          color: QuiccColors.statusFiring,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 8),
@@ -221,7 +221,11 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
                             style: OutlinedButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(48, 44)),
                             onPressed: _reprinting ? null : _reprint,
                             child: _reprinting
-                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
                                 : const Icon(Icons.print_outlined, size: 20),
                           ),
                         ),

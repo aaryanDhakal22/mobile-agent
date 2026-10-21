@@ -25,7 +25,10 @@ void main() {
       acceptErrorMessage(const AgentException('x', statusCode: 409, code: 'invalid_state')),
       contains('cancelled or closed'),
     );
-    expect(acceptErrorMessage(const AgentException('weird', statusCode: 409, code: 'other')), 'Not accepted: weird');
+    // Anything else is said in plain words — never the agent's raw text.
+    final other = acceptErrorMessage(const AgentException('weird', statusCode: 409, code: 'other'));
+    expect(other, startsWith('Not accepted.'));
+    expect(other, isNot(contains('weird')));
   });
 
   test('printer failure and 404 keep their messages', () {

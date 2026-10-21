@@ -9,6 +9,9 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../common/info_button.dart';
+import '../common/widgets.dart';
+import 'drivers_texts.dart';
 
 /// Snackbars from the button stay left of it.
 const double _toastInset = 160;
@@ -73,12 +76,11 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
     } catch (e) {
       HapticFeedback.lightImpact();
       if (mounted) {
-        toast(
-          context,
-          e is AgentException && e.isConflict ? '${d.name} is not out on a run' : 'Not saved: $e',
-          error: true,
-          rightInset: _toastInset,
-        );
+        if (e is AgentException && e.isConflict) {
+          toast(context, '${d.name} is not out on a run', error: true, rightInset: _toastInset);
+        } else {
+          toastError(context, e, lead: 'Not saved', area: 'drivers', rightInset: _toastInset);
+        }
       }
     } finally {
       if (mounted) setState(() => _busyId = null);
@@ -107,12 +109,7 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
         if (mounted) toast(context, 'Undone — $name is out again', rightInset: _toastInset);
       } catch (e) {
         if (mounted) {
-          toast(
-            context,
-            'Could not undo: ${e is AgentException ? e.message : e}',
-            error: true,
-            rightInset: _toastInset,
-          );
+          toastError(context, e, lead: 'Could not undo', area: 'drivers', rightInset: _toastInset);
         }
       }
     });
@@ -170,6 +167,15 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Material(
+                                color: context.palette.bgElevated,
+                                elevation: 4,
+                                shape: const CircleBorder(),
+                                child: const InfoButton(kDriverButtonInfo, size: 24),
+                              ),
+                            ),
                             if (out.isEmpty)
                               const _Hint('No drivers out right now')
                             else

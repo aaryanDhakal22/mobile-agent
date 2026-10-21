@@ -9,6 +9,8 @@ import 'alarm.dart';
 import 'alert_player.dart';
 import 'api_client.dart';
 import 'floor_state.dart';
+import 'friendly_error.dart';
+import 'local_log.dart';
 import 'models.dart';
 import 'printer_models.dart';
 import 'sse.dart';
@@ -68,6 +70,14 @@ class PairingNotifier extends Notifier<Pairing?> {
     lastUnpairReason = null;
     state = p;
     return r;
+  }
+
+  /// This tablet was renamed on the agent: remember the new name.
+  Future<void> rename(String name) async {
+    final p = state;
+    if (p == null || name.trim().isEmpty) return;
+    await ref.read(storageProvider).setDeviceName(name.trim());
+    state = Pairing(address: p.address, deviceKey: p.deviceKey, deviceName: name.trim(), deviceId: p.deviceId);
   }
 
   /// Point the existing key at a new agent address (the Pi changed IP).
@@ -228,7 +238,13 @@ class FloorController extends Notifier<FloorState> {
       }
       _set(next);
     } catch (e) {
-      if (gen == _gen) _set(state.copyWith(error: e.toString()));
+      if (gen == _gen && !_disposed) {
+        // Plain words for anything that shows it; the technical text goes
+        // to the local log once per new problem (this retries every 20 s).
+        final f = FriendlyError.from(e);
+        if (state.error != f.short) ref.read(localLogProvider).warn('floor', 'refresh failed: ${f.details}');
+        _set(state.copyWith(error: f.short));
+      }
     } finally {
       _bufferedDuringRefresh = null;
       _refreshing = false;
@@ -417,8 +433,8 @@ final lastReturnProvider = StateProvider<LastReturn?>((_) => null);
 // Alarm
 // =============================================================================
 
-/// Derives the alarm from the floor state (see AlarmRule). The sound itself is
-/// driven by AlarmHost at the app root.
+/// Derives the alarm from the floor state (see AlarmRule). The sound and the
+/// full-screen notification are driven by the ring bridge (core/ring_bridge.dart).
 class AlarmNotifier extends Notifier<AlarmState> {
   @override
   AlarmState build() {
@@ -441,8 +457,31 @@ final alarmProvider = NotifierProvider<AlarmNotifier, AlarmState>(AlarmNotifier.
 // Preferences
 // =============================================================================
 
-/// Theme mode — toggled by the `q` logo on the nav rail.
-final themeModeProvider = StateProvider<ThemeMode>((_) => ThemeMode.dark);
+/// Theme mode, saved on the tablet (dark until someone picks another) —
+/// toggled by the `q` logo on the nav rail, chosen in Settings.
+class ThemeModeNotifier extends Notifier<ThemeMode> {
+  @override
+  ThemeMode build() => switch (ref.watch(storageProvider).themeMode) {
+    'light' => ThemeMode.light,
+    'system' => ThemeMode.system,
+    _ => ThemeMode.dark,
+  };
+
+  void set(ThemeMode mode) {
+    super.state = mode;
+    unawaited(ref.read(storageProvider).setThemeMode(mode.name));
+  }
+
+  /// Dark ↔ light (the nav-rail logo).
+  void toggle() => set(state == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark);
+
+  /// Public and saving, so `themeModeProvider.notifier.state = …` (as with
+  /// the old StateProvider) keeps working.
+  @override
+  set state(ThemeMode value) => set(value);
+}
+
+final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(ThemeModeNotifier.new);
 
 class AlertSoundNotifier extends Notifier<AlertSound> {
   @override
