@@ -101,6 +101,13 @@ for the **store manager** — big buttons, plain words, an (i) on every step:
    Quicc / memory card / power and each printer as it comes online.
 6. **Test ring** ("Did you hear it?", plus a screen-off test) and
 7. **Test print** (a TEST slip per printer, no failover; FIX IT → printer guide).
+
+   Both 5 and 7 (when no printers are set up) show **Found on the network**
+   (1.3.4): printers the Pi found on TCP 9100 that the store doesn't have yet
+   (`GET /api/printers/found`, SCAN AGAIN = `?refresh=1`), each with ADD →
+   name it (chips Online / Pizza / Desi / Sub / Wings / Kitchen) →
+   `POST /api/printers/add` (the Pi asks main; the first printer becomes the
+   receipt printer). A Pi without these routes hides the section.
 8. **Drivers** ("Who drives tonight?") and the **order chime**.
 9. **All set** → START TAKING ORDERS (sends a setup report to the owner).
 
