@@ -250,16 +250,19 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('Deliveries: the driver picker offers only clocked-in, available drivers', (tester) async {
+  testWidgets('Deliveries: one box per clocked-in, available driver, NEXT first', (tester) async {
     await pumpHome(tester, _floorWith(withArrived: false));
     await tester.tap(find.text('Deliveries').last);
     await tester.pump(const Duration(milliseconds: 600));
-    final chips = tester.widgetList<ChoiceChip>(find.byType(ChoiceChip)).toList();
-    expect(chips, hasLength(2));
-    expect(find.widgetWithText(ChoiceChip, 'Ana · NEXT'), findsOneWidget);
-    expect(find.widgetWithText(ChoiceChip, 'Joe'), findsOneWidget);
-    expect(find.widgetWithText(ChoiceChip, 'Lee'), findsNothing, reason: 'clocked out');
-    expect(find.widgetWithText(ChoiceChip, 'Sam'), findsNothing, reason: 'out on a run');
+    expect(find.byKey(const ValueKey('driver-d-ana')), findsOneWidget);
+    expect(find.byKey(const ValueKey('driver-d-joe')), findsOneWidget);
+    expect(find.byKey(const ValueKey('driver-d-lee')), findsNothing, reason: 'clocked out');
+    expect(find.byKey(const ValueKey('driver-d-sam')), findsNothing, reason: 'out on a run');
+    expect(find.text('NEXT'), findsOneWidget);
+    expect(
+      find.descendant(of: find.byKey(const ValueKey('driver-d-ana')), matching: find.text('NEXT')),
+      findsOneWidget,
+    );
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -269,7 +272,7 @@ void main() {
     await pumpHome(tester, s.copyWith(drivers: allOff));
     await tester.tap(find.text('Deliveries').last);
     await tester.pump(const Duration(milliseconds: 600));
-    expect(find.byType(ChoiceChip), findsNothing);
+    expect(find.text('SEND OUT'), findsNothing);
     expect(find.text('No driver clocked in — clock one in on the Drivers tab.'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });

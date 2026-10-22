@@ -134,3 +134,13 @@ const kResetReceiptInfo = InfoText(
   'Puts every receipt setting back to how it came and saves it. The footer goes back to the '
       'store default.',
 );
+
+const kDeliveriesInfo = InfoText(
+  'Deliveries',
+  'How AUTO on the Deliveries screen plans the runs. Saved on the Pi, so every tablet uses the '
+      'same numbers.\n\n'
+      'Delivery target: the most minutes from when the customer ordered to the door. AUTO starts '
+      'hurrying an order 10 minutes before it, and an order past it goes first, even alone.\n\n'
+      'Soon ready: AUTO also plans deliveries still cooking that should be ready within this many '
+      'minutes, so a driver can wait for them.',
+);

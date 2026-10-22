@@ -14,12 +14,12 @@ the Pi) — never to `main/` or `online/`. The agent's API is specified in
 | Tab | What staff do there |
 |---|---|
 | **Kitchen** (start screen) | Compact tickets in masonry columns, **most urgent first** (earliest promised ready time): kitchen #, type, time since the order arrived, the customer's name, **every item** (small font), **Reprint receipt** (the customer receipt only), **Resend to kitchen** (1.3.5: every kitchen ticket again, `POST /api/orders/{id}/kitchen`, always asks "Send to the kitchen again?" first; an older Pi says it needs an update) and **Ready**. The order details screen has the same two buttons (Resend once the order has a kitchen number). Each ticket is tinted by lateness: **green** until *green till* minutes after it arrived (agent web UI setting, default 20), then amber, **fully red at twice that**. New orders don't have a tab — they ring full-screen (below) and are accepted there. |
-| **Deliveries** | Ready delivery orders (multi-select), each with its total and **CASH $x** to collect or **PAID** → pick a driver → **Send out**. The picker offers only **clocked-in, available** drivers in queue order (first = preselected); with nobody clocked in it says so and points to the Drivers tab. Below: drivers out with their orders and a live run timer, and **I have returned** per driver. |
+| **Deliveries** | (1.4.0) Two columns. **Left — Unassigned · N**: delivery orders that are cooking (greyed, "ready in ~4 min") or ready and in nobody's pool, oldest placed first: kitchen #, customer, address, **2.3 mi · 7 min** (amber *approx* / red *outside area* tags; *locating…* / *no location* while main hasn't found it), tip, **CASH $x** / **PAID** and minutes since placed (amber 10 min before the delivery target, red past it). **Right**: one box per **available** driver in queue order (**NEXT** on top; no reordering here), each holding that driver's **pool** — chips with kitchen #, street, tip, mi · min, tags and ✕ (back to the left) — and **SEND OUT** (asks "#1104 isn't marked ready — send anyway?" when something is cooking; yes marks it ready; the name flash follows). Fill pools by **long-press drag** (left → driver, driver → driver, driver → left) or **SELECT** (tap deliveries, then tap a driver box — or the left column to unassign; a bar shows "N selected · CANCEL"). Tapping a driver's name opens the **run map**. Below: **Out** — each driver out with a run timer, their kitchen numbers (tap = the order) and **I HAVE RETURNED**. A single tap on any delivery opens it. **AUTO** asks the Pi for fair, route-aware runs for every available driver: the suggestions slide into the boxes with a **yellow glow** and nothing is saved until **CONFIRM** — an edited preview confirms only the stops still showing (`order_ids`) — (**CLEAR** drops them; *estimated (offline)* when the Pi had to guess drive times). Send Out on a driver with yellow stops sends those too. The preview drops itself (with a toast) if the floor changes under it. Pools live on the Pi (`/api/deliveries/pool`, `/api/drivers/{id}/send-out`, `/api/deliveries/auto-plan[/{id}/confirm]`). |
 | **Drivers** | Driver roster in queue order: add, rename, remove, drag to reorder. Each driver shows **off** (clocked out) / **available** (in the queue) / **out** (on a run), the clock-in time and runs this batch. **Clock in** puts a driver at the back of the queue; **Clock out** works while they're available (out on a run → "tap I have returned first"). Shows the daily auto clock-out time ("Everyone is clocked out daily at 10:00 AM" — set in the agent web UI). **Shifts** lists the last 7 days of clock-in/out records (for reports, not wages). |
 | **History** | Current batch (live) or any kept closed batch; tap an order for full detail (items with size / modifiers / notes, customer, address, kitchen #, timeline, what was paid and the **CASH DUE**). |
 | **Batch** | The open batch and **Close batch**. If orders are unfinished the agent lists them; confirm to close anyway (they're auto-finished). CLOSE ANYWAY asks the agent again first: an order that came in while the list was open shows the list again (marked NEW) instead of being cancelled unseen. Kitchen numbers restart at 1100. Closing prints **one driver report per driver** on the receipt printer. Below: **Driver reports** for the open or any kept batch (deliveries, cash owed, tips after tip tax, owed to store) and **Print driver reports** to reprint. |
 | **Printers** | Read-only printer reachability. Printers are configured in the Quicc web app (main), not here. |
-| **Settings** | Big-button cards, each with an (i) explaining it in plain words: **Continue setup** (while the setup wizard is unfinished); **The Pi** — its address, checked live as you type ("Found the Pi ✓ — *store*" / "Nothing there ✗"; a bare IP gets `:8080`), SAVE keeps the pairing, plus live / last sync / sync backlog; **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code from the Pi, shown big with an expiry countdown and the steps for the new tablet: open Quibase → pick this Pi → I have a code → type it), **Unpair**; **Order chime** (sound + preview); **Receipts** — kitchen-ticket item / number size, the customer receipt's footer (store default, own text or none) and its size, copies (1 / 2), store name + address, customer phone, extra paper before the cut; SAVE, **PRINT SAMPLE** on a chosen printer (default the receipt printer; unsaved changes are saved first) and RESET TO DEFAULTS (`/api/settings/receipt`, `/api/printers/sample`; an older Pi shows "This Pi needs an update for receipt settings"); **Checks & tests** (tablet checks, test ring, test print); **Light / Dark / System** (remembered across restarts; the `q` logo still toggles light ↔ dark); **About & diagnostics**. |
+| **Settings** | Big-button cards, each with an (i) explaining it in plain words: **Continue setup** (while the setup wizard is unfinished); **The Pi** — its address, checked live as you type ("Found the Pi ✓ — *store*" / "Nothing there ✗"; a bare IP gets `:8080`), SAVE keeps the pairing, plus live / last sync / sync backlog; **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code from the Pi, shown big with an expiry countdown and the steps for the new tablet: open Quibase → pick this Pi → I have a code → type it), **Unpair**; **Order chime** (sound + preview); **Receipts** — kitchen-ticket item / number size, the customer receipt's footer (store default, own text or none) and its size, copies (1 / 2), store name + address, customer phone, extra paper before the cut; SAVE, **PRINT SAMPLE** on a chosen printer (default the receipt printer; unsaved changes are saved first) and RESET TO DEFAULTS (`/api/settings/receipt`, `/api/printers/sample`; an older Pi shows "This Pi needs an update for receipt settings"); **Deliveries** — AUTO's delivery target (15–120 min, default 45) and "soon ready" minutes (0–30, default 5), − / + and SAVE (`PUT /api/settings/deliveries`); **Checks & tests** (tablet checks, test ring, test print); **Light / Dark / System** (remembered across restarts; the `q` logo still toggles light ↔ dark); **About & diagnostics**. |
 
 **New-order alarm.** A new order opens a full-screen alert and loops the chosen
 sound on the Android *alarm* stream. Tapping does **not** silence it — it stops
@@ -144,6 +144,36 @@ the first unlock (no `LOCKED_BOOT_COMPLETED`); a tablet with no screen lock
 unlocks by itself. A ring notification left over from before a restart is
 taken down when nothing is waiting.
 
+## Maps (1.4.0)
+
+Every delivery's detail has a **map** above the address: the store, the
+customer's door and the driving route (from main, OSRM), "2.3 mi · 7 min",
+amber *approximate location* / red *outside delivery area* tags, pan + zoom,
+a recenter button; light or dark with the app. *Locating…* while main is
+still looking (geo `pending`). **Not found** → "Not found on the map — tap to
+place pin"; never located (geo `unavailable`) → "No map location — tap to
+place pin":
+tap where the door is, **SAVE PIN** (`POST /api/orders/{id}/pin`; main
+remembers it for the address and the route arrives as an order update). A
+located order can be re-pinned too (pin button). Without a map file on the Pi
+yet: a plain card with the distance and "Map not downloaded yet". The **run
+map** (driver name on the Deliveries screen) numbers the pool's stops in the
+fastest driving order (`GET /api/drivers/{id}/pool/trip`), with the route
+and total miles and minutes — or straight dashed lines marked *approximate*
+when main can't be reached.
+
+The streets come **only from the Pi** (`GET /api/map.pmtiles`, a small
+offline Protomaps v4 file with Range requests) — no internet map service, no
+glyph or sprite downloads: `flutter_map` 7 + `vector_map_tiles` 8 +
+`vector_map_tiles_pmtiles` 1.5.0, drawn in **vector** layer mode (raster mode
+draws nothing on Android with Impeller). The upstream Protomaps v4 style
+labels with `format` expressions vector_tile_renderer 5 can't evaluate, so
+`map_layers.dart` rewrites every label to the tile's English / local name in
+the tablet's font and drops icons (`offlineProtomapsLayers`). Tests stub the
+tile layer (`mapBaseLayerProvider`); `test/map_file_integration_test.dart`
+checks a real file when `QUIBASE_MAP_URL` points at one. Code:
+`lib/features/maps/`.
+
 ## Help and troubleshooting
 
 The **Help** tab has four step-by-step guides with drawings — *Can't reach the
@@ -211,11 +241,15 @@ lib/
     receipt_models.dart      ReceiptPrefs (receipt settings) + the GET/PUT answer
     alert_player.dart        looping alarm sound (audioplayers)
     format.dart, json.dart   formatting + defensive JSON readers
+    delivery_models.dart     AUTO plan / confirm / pool trip / delivery settings
+    auto_preview.dart        the AUTO yellow preview (tablet memory only)
+    polyline.dart            Google encoded polyline decoder (routes)
   features/<screen>/          kitchen, deliveries, drivers (+ the dispatch
                               name flash + the driver button), history, batch
                               (+ driver reports), printers, settings, setup,
                               diagnose (Help + guides), illustrations,
-                              order_detail, alert (+ accept controls), update
+                              order_detail, maps (delivery map, run map,
+                              offline tiles), alert (+ accept controls), update
                               (forced self-update gate), home (nav rail),
                               common (shared widgets)
   theme/                     QuiccColors / QuiccPalette / QuiccTheme

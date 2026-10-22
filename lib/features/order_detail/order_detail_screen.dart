@@ -8,6 +8,7 @@ import '../../theme/quicc_colors.dart';
 import '../arrived/accept_controls.dart';
 import '../common/widgets.dart';
 import '../kitchen/resend_kitchen.dart';
+import '../maps/delivery_map.dart';
 
 /// Full order: items (size / modifiers / notes), customer, address, kitchen
 /// number, and the floor timeline. Follows live updates for orders in the
@@ -80,6 +81,10 @@ class OrderDetailScreen extends ConsumerWidget {
                 if (o.customer.phone.isNotEmpty) Text(o.customer.phone, style: const TextStyle(fontSize: 16)),
                 if (o.customer.email.isNotEmpty)
                   Text(o.customer.email, style: TextStyle(color: context.palette.textSecondary)),
+                if (so.isDelivery && o.fulfillment.address != null && !o.fulfillment.address!.isEmpty) ...[
+                  const SizedBox(height: 18),
+                  DeliveryMap(key: ValueKey('map-${so.id}'), order: so),
+                ],
                 if (o.fulfillment.address != null && !o.fulfillment.address!.isEmpty) ...[
                   const SizedBox(height: 18),
                   const Eyebrow('Delivery address'),
