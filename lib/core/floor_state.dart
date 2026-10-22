@@ -190,6 +190,33 @@ class FloorState {
   List<StoredOrder> get readyDeliveries =>
       _sorted(orders.values.where((o) => o.state == OrderState.ready && o.isDelivery), (o) => o.status.readyAt);
 
+  /// Deliveries waiting for a driver's pool (2.0.9): accepted (cooking) or
+  /// ready, in nobody's pool, oldest placed first. An order still pooled to a
+  /// driver who is no longer available (clocked out, out, removed — the Pi
+  /// clears those, this covers the moment before it does) counts as
+  /// unassigned too, so it never vanishes from both columns.
+  List<StoredOrder> get unassignedDeliveries {
+    final available = {for (final d in drivers) if (d.isAvailable) d.id};
+    return _sorted(
+      orders.values.where((o) {
+        if (!o.isPoolable) return false;
+        final pool = o.status.poolDriverId;
+        return pool == null || !available.contains(pool);
+      }),
+      (o) => o.placedTime,
+    );
+  }
+
+  /// The deliveries in [driverId]'s pool, in the order they were added.
+  List<StoredOrder> poolFor(String driverId) {
+    final list = orders.values.where((o) => o.isPoolable && o.status.poolDriverId == driverId).toList();
+    list.sort((a, b) {
+      final c = _cmpDate(a.status.pooledAt, b.status.pooledAt);
+      return c != 0 ? c : _cmpDate(a.placedTime, b.placedTime);
+    });
+    return list;
+  }
+
   /// Orders out with [driverId], oldest run first.
   List<StoredOrder> outWith(String driverId) => _sorted(
     orders.values.where((o) => o.state == OrderState.onDelivery && o.status.driverId == driverId),

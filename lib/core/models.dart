@@ -3,6 +3,7 @@
 // defensive — see json.dart.
 
 import 'json.dart';
+import 'polyline.dart';
 
 // ---------------------------------------------------------------------------
 // Order state
@@ -52,25 +53,39 @@ enum FulfillmentType {
 }
 
 // ---------------------------------------------------------------------------
-// StoredOrder = { order: Snapshot, status: Status }
+// StoredOrder = { order: Snapshot, status: Status, geo?: OrderGeo }
 // ---------------------------------------------------------------------------
 
 class StoredOrder {
   final OrderSnapshot order;
   final OrderStatus status;
 
-  const StoredOrder({required this.order, required this.status});
+  /// Where the delivery address is and the drive from the store (2.0.9+);
+  /// null until main has looked it up (or on an older Pi).
+  final OrderGeo? geo;
+
+  const StoredOrder({required this.order, required this.status, this.geo});
 
   /// Also accepts the SSE `order.arrived` / `order.escalated` payloads, which
   /// are `{order, status, ...extras}` — the extras are ignored.
   factory StoredOrder.fromJson(Map<String, dynamic> json) => StoredOrder(
     order: OrderSnapshot.fromJson(jMap(json['order'])),
     status: OrderStatus.fromJson(jMap(json['status'])),
+    geo: json['geo'] is Map ? OrderGeo.fromJson(jMap(json['geo'])) : null,
   );
+
+  StoredOrder copyWith({OrderStatus? status}) => StoredOrder(order: order, status: status ?? this.status, geo: geo);
 
   String get id => order.id;
   OrderState get state => status.state;
   bool get isDelivery => order.fulfillment.type == FulfillmentType.delivery;
+
+  /// A delivery that can sit in a driver's pool: accepted (cooking) or ready.
+  bool get isPoolable => isDelivery && (state == OrderState.accepted || state == OrderState.ready);
+
+  /// When the customer placed it (the clock the delivery target runs on);
+  /// falls back to when it reached us for orders without a placed time.
+  DateTime? get placedTime => order.placedAt ?? order.receivedAt ?? status.arrivalDate;
 
   /// Done on the floor: delivered, or ready for a non-delivery order
   /// (mirrors the agent's StoredOrder.IsFinished).
@@ -101,6 +116,11 @@ class OrderStatus {
   final String? driverId;
   final String? driverName;
 
+  /// The driver whose pool this delivery sits in (2.0.9+): built up on the
+  /// Deliveries screen before Send Out. Null = unassigned.
+  final String? poolDriverId;
+  final DateTime? pooledAt;
+
   const OrderStatus({
     required this.state,
     this.arrivalDate,
@@ -116,6 +136,8 @@ class OrderStatus {
     this.cancelledAt,
     this.driverId,
     this.driverName,
+    this.poolDriverId,
+    this.pooledAt,
   });
 
   factory OrderStatus.fromJson(Map<String, dynamic> json) => OrderStatus(
@@ -133,7 +155,121 @@ class OrderStatus {
     cancelledAt: jDate(json['cancelled_at']),
     driverId: jStrOrNull(json['driver_id']),
     driverName: jStrOrNull(json['driver_name']),
+    poolDriverId: jStrOrNull(json['pool_driver_id']),
+    pooledAt: jDate(json['pooled_at']),
   );
+
+  /// The same status in [driverId]'s pool (null = unassigned) — the
+  /// optimistic copy shown until the Pi answers.
+  OrderStatus withPool(String? driverId, {DateTime? at}) => OrderStatus(
+    state: state,
+    arrivalDate: arrivalDate,
+    printedDate: printedDate,
+    batchId: batchId,
+    kitchenNumber: kitchenNumber,
+    prepMinutes: prepMinutes,
+    estimatedReadyAt: estimatedReadyAt,
+    acceptedAt: acceptedAt,
+    readyAt: readyAt,
+    outAt: outAt,
+    deliveredAt: deliveredAt,
+    cancelledAt: cancelledAt,
+    driverId: this.driverId,
+    driverName: driverName,
+    poolDriverId: driverId,
+    pooledAt: driverId == null ? null : (at ?? DateTime.now().toUtc()),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Delivery location (2.0.9): main geocodes the address and routes from the
+// store, then pushes it to the Pi.
+// ---------------------------------------------------------------------------
+
+enum GeoState {
+  located('located'),
+  notFound('not_found'),
+
+  /// Main gave up (never located) — staff can still drop a pin.
+  unavailable('unavailable'),
+
+  /// Main is still looking (the order arrived recently).
+  pending('pending');
+
+  final String wire;
+  const GeoState(this.wire);
+
+  static GeoState parse(Object? v) => switch (jStr(v)) {
+    'located' => located,
+    'not_found' => notFound,
+    'unavailable' => unavailable,
+    _ => pending,
+  };
+}
+
+class OrderGeo {
+  final GeoState state;
+  final double? lat;
+  final double? lng;
+
+  /// exact | approx | pinned ('' when not found).
+  final String quality;
+
+  /// Store → address driving distance (meters) and time (seconds); 0 when
+  /// main had no route.
+  final int distanceM;
+  final int durationS;
+
+  /// Store → address route, Google encoded polyline (precision 5); '' = none.
+  final String polyline;
+
+  /// Farther from the store than its delivery radius.
+  final bool outsideArea;
+  final DateTime? updatedAt;
+
+  const OrderGeo({
+    required this.state,
+    this.lat,
+    this.lng,
+    this.quality = '',
+    this.distanceM = 0,
+    this.durationS = 0,
+    this.polyline = '',
+    this.outsideArea = false,
+    this.updatedAt,
+  });
+
+  factory OrderGeo.fromJson(Map<String, dynamic> json) => OrderGeo(
+    state: GeoState.parse(json['state']),
+    lat: _jDouble(json['lat']),
+    lng: _jDouble(json['lng']),
+    quality: jStr(json['quality']),
+    distanceM: jInt(json['distance_m']),
+    durationS: jInt(json['duration_s']),
+    polyline: jStr(json['polyline']),
+    outsideArea: jBool(json['outside_area']),
+    updatedAt: jDate(json['updated_at']),
+  );
+
+  /// Located with a usable point.
+  bool get hasPoint => state == GeoState.located && lat != null && lng != null && !(lat == 0 && lng == 0);
+  bool get isApprox => state == GeoState.located && quality == 'approx';
+
+  /// No usable point and main isn't looking any more: the map offers to drop
+  /// a pin.
+  bool get needsPin => state == GeoState.notFound || state == GeoState.unavailable;
+  bool get isPinned => quality == 'pinned';
+  bool get hasDrive => distanceM > 0 || durationS > 0;
+  GeoPoint? get point => hasPoint ? (lat: lat!, lng: lng!) : null;
+
+  /// The decoded store → address route (empty without one).
+  List<GeoPoint> get route => polyline.isEmpty ? const [] : decodePolyline(polyline);
+}
+
+double? _jDouble(Object? v) {
+  if (v is num) return v.toDouble();
+  if (v is String) return double.tryParse(v);
+  return null;
 }
 
 class OrderSnapshot {
@@ -546,6 +682,66 @@ class Batch {
   );
 }
 
+/// The store's own spot on the map (2.0.9; null until main knows it).
+class StoreGeo {
+  final double lat;
+  final double lng;
+
+  /// Farther than this is "outside the delivery area" (default 5 mi).
+  final int deliveryRadiusM;
+  const StoreGeo({required this.lat, required this.lng, this.deliveryRadiusM = 8047});
+
+  GeoPoint get point => (lat: lat, lng: lng);
+
+  static StoreGeo? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final m = jMap(raw);
+    final lat = _jDouble(m['lat']), lng = _jDouble(m['lng']);
+    if (lat == null || lng == null || (lat == 0 && lng == 0)) return null;
+    return StoreGeo(lat: lat, lng: lng, deliveryRadiusM: jInt(m['delivery_radius_m'], 8047));
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is StoreGeo && other.lat == lat && other.lng == lng && other.deliveryRadiusM == deliveryRadiusM;
+
+  @override
+  int get hashCode => Object.hash(lat, lng, deliveryRadiusM);
+}
+
+/// The offline map file the Pi serves (`/api/map.pmtiles`); null until one
+/// is downloaded.
+class MapInfo {
+  final String version;
+
+  /// Usually the Pi-relative "/api/map.pmtiles".
+  final String url;
+
+  /// [minLng, minLat, maxLng, maxLat] (empty if unknown).
+  final List<double> bbox;
+  const MapInfo({required this.version, required this.url, this.bbox = const []});
+
+  static MapInfo? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final m = jMap(raw);
+    final url = jStr(m['url']).trim();
+    if (url.isEmpty) return null;
+    final b = m['bbox'];
+    final bbox = b is List ? b.map(_jDouble).whereType<double>().toList(growable: false) : const <double>[];
+    return MapInfo(version: jStr(m['version']), url: url, bbox: bbox.length == 4 ? bbox : const []);
+  }
+
+  @override
+  bool operator ==(Object other) => other is MapInfo && other.version == version && other.url == url;
+
+  @override
+  int get hashCode => Object.hash(version, url);
+}
+
+/// Delivery settings defaults (agent settings table).
+const int kDefaultSoonReadyMinutes = 5;
+const int kDefaultDeliveryTargetMinutes = 45;
+
 /// Ticket lateness default (minutes green) when the agent doesn't say.
 const int kDefaultGreenTillMinutes = 20;
 
@@ -570,6 +766,15 @@ class Floor {
   /// Taken off drivers' tips on the driver report (percent).
   final double tipTaxPercent;
 
+  /// AUTO also plans cooking deliveries due ready within this many minutes.
+  final int soonReadyMinutes;
+
+  /// Placed → door target for a delivery (minutes).
+  final int deliveryTargetMinutes;
+
+  final StoreGeo? store;
+  final MapInfo? map;
+
   const Floor({
     required this.batch,
     this.kitchenNext = 0,
@@ -579,6 +784,10 @@ class Floor {
     this.driverResetTime,
     this.greenTillMinutes = kDefaultGreenTillMinutes,
     this.tipTaxPercent = 6,
+    this.soonReadyMinutes = kDefaultSoonReadyMinutes,
+    this.deliveryTargetMinutes = kDefaultDeliveryTargetMinutes,
+    this.store,
+    this.map,
   });
 
   factory Floor.fromJson(Map<String, dynamic> json) {
@@ -597,10 +806,16 @@ class Floor {
           ? jInt(json['green_till_minutes'])
           : kDefaultGreenTillMinutes,
       tipTaxPercent: (json['tip_tax_percent'] is num) ? (json['tip_tax_percent'] as num).toDouble() : 6,
+      soonReadyMinutes: jIntOrNull(json['soon_ready_minutes']) ?? kDefaultSoonReadyMinutes,
+      deliveryTargetMinutes: (jIntOrNull(json['delivery_target_minutes']) ?? 0) > 0
+          ? jInt(json['delivery_target_minutes'])
+          : kDefaultDeliveryTargetMinutes,
+      store: StoreGeo.fromJson(json['store']),
+      map: MapInfo.fromJson(json['map']),
     );
   }
 
-  Floor copyWith({Batch? batch}) => Floor(
+  Floor copyWith({Batch? batch, int? soonReadyMinutes, int? deliveryTargetMinutes}) => Floor(
     batch: batch ?? this.batch,
     kitchenNext: kitchenNext,
     lastPrepMinutes: lastPrepMinutes,
@@ -609,6 +824,10 @@ class Floor {
     driverResetTime: driverResetTime,
     greenTillMinutes: greenTillMinutes,
     tipTaxPercent: tipTaxPercent,
+    soonReadyMinutes: soonReadyMinutes ?? this.soonReadyMinutes,
+    deliveryTargetMinutes: deliveryTargetMinutes ?? this.deliveryTargetMinutes,
+    store: store,
+    map: map,
   );
 
   /// The prep time to preselect at accept: last used, if it is one of the

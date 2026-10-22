@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'alarm.dart';
 import 'alert_player.dart';
 import 'api_client.dart';
+import 'delivery_models.dart';
 import 'floor_state.dart';
 import 'friendly_error.dart';
 import 'local_log.dart';
@@ -327,6 +328,106 @@ class FloorController extends Notifier<FloorState> {
       if (!e.isNetwork) unawaited(refresh());
       rethrow;
     }
+  }
+
+  // --- driver pools (2.0.9) ---------------------------------------------------
+
+  /// Puts [orderIds] in [driverId]'s pool (null = back to unassigned).
+  /// Optimistic like [reorderDrivers]: the columns change at once, the Pi's
+  /// answer replaces them, a refusal puts them back (and resyncs on a
+  /// conflict — someone else moved or sent them).
+  Future<void> poolOrders(List<String> orderIds, String? driverId) async {
+    if (orderIds.isEmpty) return;
+    final before = <StoredOrder>[
+      for (final id in orderIds)
+        if (state.orders[id] != null) state.orders[id]!,
+    ];
+    final now = DateTime.now().toUtc();
+    _upsert([for (final o in before) o.copyWith(status: o.status.withPool(driverId, at: now))]);
+    try {
+      _upsert(await _requireClient(ref).poolOrders(orderIds, driverId: driverId));
+    } on AgentException catch (e) {
+      // Put back only what still shows our optimistic copy (an SSE frame
+      // may have brought the truth already).
+      _restore(before, (o) => o.status.poolDriverId == driverId);
+      if (!e.isNetwork) unawaited(refresh());
+      rethrow;
+    } catch (_) {
+      _restore(before, (o) => o.status.poolDriverId == driverId);
+      rethrow;
+    }
+  }
+
+  void _restore(List<StoredOrder> before, bool Function(StoredOrder current) stillOptimistic) {
+    final back = [
+      for (final o in before)
+        if (state.orders[o.id] != null && stillOptimistic(state.orders[o.id]!)) o,
+    ];
+    if (back.isNotEmpty) _upsert(back);
+  }
+
+  /// Sends [driverId]'s pool (plus [includeOrderIds], AUTO's yellow stops)
+  /// out now. Throws [NotReadyException] when something is cooking and
+  /// [markReady] is false. Flashes the name like [assign].
+  Future<List<StoredOrder>> sendOut(
+    String driverId, {
+    bool markReady = false,
+    List<String>? includeOrderIds,
+    String? planId,
+  }) async {
+    try {
+      final out = await _requireClient(
+        ref,
+      ).sendOut(driverId, markReady: markReady, includeOrderIds: includeOrderIds, planId: planId);
+      _upsert(out);
+      final driver = state.drivers.where((d) => d.id == driverId).firstOrNull;
+      if (driver != null && out.isNotEmpty) {
+        _set(state.withDispatch(DriverDispatch(driver: driver, orders: out), updateRoster: false));
+      }
+      unawaited(_reloadDrivers());
+      return out;
+    } on NotReadyException {
+      rethrow;
+    } on AgentException catch (e) {
+      if (!e.isNetwork) unawaited(refresh());
+      rethrow;
+    }
+  }
+
+  /// AUTO: a suggested set of runs. Changes nothing.
+  Future<AutoPlan> autoPlan() => _requireClient(ref).autoPlan();
+
+  /// Applies an AUTO suggestion (every stop still valid), then resyncs.
+  /// [orderIds] limits it to those suggestions (an edited preview).
+  Future<PlanConfirmResult> confirmPlan(String planId, {List<String>? orderIds}) async {
+    try {
+      return await _requireClient(ref).confirmPlan(planId, orderIds: orderIds);
+    } finally {
+      unawaited(refresh());
+    }
+  }
+
+  Future<PoolTrip> poolTrip(String driverId, List<String> orderIds) =>
+      _requireClient(ref).poolTrip(driverId, orderIds);
+
+  /// Staff placed the address on the map; the route comes back later.
+  Future<void> pinOrder(String orderId, double lat, double lng) => _requireClient(ref).pinOrder(orderId, lat, lng);
+
+  /// Saves the AUTO settings and shows them at once.
+  Future<DeliverySettings> setDeliverySettings(DeliverySettings s) async {
+    final saved = await _requireClient(ref).setDeliverySettings(s);
+    final f = state.floor;
+    if (f != null) {
+      _set(
+        state.copyWith(
+          floor: f.copyWith(
+            soonReadyMinutes: saved.soonReadyMinutes,
+            deliveryTargetMinutes: saved.deliveryTargetMinutes,
+          ),
+        ),
+      );
+    }
+    return saved;
   }
 
   /// 409 `invalid_state` = the driver isn't out (already returned

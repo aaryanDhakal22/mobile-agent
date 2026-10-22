@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
+import 'delivery_models.dart';
 import 'diag_models.dart';
 import 'json.dart';
 import 'models.dart';
@@ -110,6 +111,20 @@ class AgentException implements Exception {
 
   @override
   String toString() => statusCode == null ? message : 'HTTP $statusCode: $message';
+}
+
+/// [AgentException.code] for a pool / send-out / AUTO / map route an older
+/// Pi doesn't have: "This Pi needs an update for driver pools".
+const String kPoolsUnsupported = 'pools_unsupported';
+
+/// [AgentException.code] when AUTO finds no available driver (409).
+const String kNoDrivers = 'no_drivers';
+
+/// Send Out was refused: these orders aren't marked ready (409 `not_ready`).
+/// Ask "send anyway?" and retry with `markReady`.
+class NotReadyException extends AgentException {
+  final List<String> orderIds;
+  NotReadyException(super.message, {required this.orderIds, super.body}) : super(statusCode: 409, code: 'not_ready');
 }
 
 /// Close-batch was refused because unfinished orders remain.
@@ -336,6 +351,122 @@ class AgentClient {
   Future<List<StoredOrder>> assignDelivery({required String driverId, required List<String> orderIds}) async {
     final body = await _send('POST', '/api/deliveries/assign', body: {'driver_id': driverId, 'order_ids': orderIds});
     return jList(body, StoredOrder.fromJson);
+  }
+
+  // --- driver pools + AUTO (2.0.9) -------------------------------------------
+
+  /// `POST /api/deliveries/pool {order_ids, driver_id}` — puts the orders in
+  /// [driverId]'s pool (null = back to unassigned). All or nothing: 409
+  /// `invalid_state` / `driver_not_available`, 404 `driver_not_found` /
+  /// `not_found`.
+  Future<List<StoredOrder>> poolOrders(List<String> orderIds, {String? driverId}) => _poolsRoute(() async {
+    final body = await _send('POST', '/api/deliveries/pool', body: {'order_ids': orderIds, 'driver_id': driverId});
+    return jList(body, StoredOrder.fromJson);
+  });
+
+  /// `POST /api/drivers/{id}/send-out` — sends the driver's pool (plus
+  /// [includeOrderIds], pooled first in the same step) out now. Throws
+  /// [NotReadyException] when something is still cooking and [markReady] is
+  /// false; 400 `bad_request` = the pool is empty.
+  Future<List<StoredOrder>> sendOut(
+    String driverId, {
+    bool markReady = false,
+    List<String>? includeOrderIds,
+    String? planId,
+  }) => _poolsRoute(() async {
+    try {
+      final body = await _send(
+        'POST',
+        '/api/drivers/${Uri.encodeComponent(driverId)}/send-out',
+        body: {
+          'mark_ready': markReady,
+          if (includeOrderIds != null && includeOrderIds.isNotEmpty) 'include_order_ids': includeOrderIds,
+          if (planId != null && planId.isNotEmpty) 'plan_id': planId,
+        },
+        // Marking ready + dispatching can print nothing, but the Pi does a
+        // few writes in one transaction: allow a little more than a read.
+        timeout: const Duration(seconds: 15),
+      );
+      return jList(body, StoredOrder.fromJson);
+    } on AgentException catch (e) {
+      if (e.statusCode == 409 && e.code == 'not_ready') {
+        final raw = e.body['order_ids'];
+        final ids = raw is List ? raw.map((x) => jStr(x)).where((s) => s.isNotEmpty).toList() : <String>[];
+        throw NotReadyException(e.message, orderIds: ids, body: e.body);
+      }
+      rethrow;
+    }
+  });
+
+  /// `POST /api/deliveries/auto-plan` — a suggestion; nothing changes on the
+  /// floor. 409 [kNoDrivers] when nobody is available.
+  Future<AutoPlan> autoPlan() => _poolsRoute(() async {
+    try {
+      return AutoPlan.fromJson(
+        jMap(await _send('POST', '/api/deliveries/auto-plan', body: const {}, timeout: const Duration(seconds: 15))),
+      );
+    } on AgentException catch (e) {
+      if (e.statusCode == 409 && e.code == null) {
+        throw AgentException(e.message, statusCode: 409, code: kNoDrivers, body: e.body);
+      }
+      rethrow;
+    }
+  });
+
+  /// `POST /api/deliveries/auto-plan/{id}/confirm` — pools every suggestion
+  /// that is still valid (or only [orderIds] of them, to their planned
+  /// drivers — a preview staff edited); reports the ones skipped.
+  Future<PlanConfirmResult> confirmPlan(String planId, {List<String>? orderIds}) => _poolsRoute(
+    () async => PlanConfirmResult.fromJson(
+      jMap(
+        await _send(
+          'POST',
+          '/api/deliveries/auto-plan/${Uri.encodeComponent(planId)}/confirm',
+          body: {'order_ids': ?orderIds},
+        ),
+      ),
+    ),
+  );
+
+  /// `GET /api/drivers/{id}/pool/trip?order_ids=` — [orderIds] in the
+  /// fastest driving order with the route (main), or the Pi's own order with
+  /// `approximate` when main is unreachable.
+  Future<PoolTrip> poolTrip(String driverId, List<String> orderIds) => _poolsRoute(
+    () async => PoolTrip.fromJson(
+      jMap(
+        await _send(
+          'GET',
+          '/api/drivers/${Uri.encodeComponent(driverId)}/pool/trip',
+          query: {'order_ids': orderIds.join(',')},
+          timeout: const Duration(seconds: 15),
+        ),
+      ),
+    ),
+  );
+
+  /// `POST /api/orders/{id}/pin {lat, lng}` — staff placed the address on
+  /// the map; main remembers it and the route arrives later as an
+  /// `order.updated`. 503 [kMainOffline].
+  Future<void> pinOrder(String orderId, double lat, double lng) => _poolsRoute(() async {
+    await _send('POST', '/api/orders/${Uri.encodeComponent(orderId)}/pin', body: {'lat': lat, 'lng': lng});
+  });
+
+  /// `PUT /api/settings/deliveries` → what the Pi saved. 400 out of range.
+  Future<DeliverySettings> setDeliverySettings(DeliverySettings s) => _poolsRoute(
+    () async => DeliverySettings.fromJson(jMap(await _send('PUT', '/api/settings/deliveries', body: s.toJson()))),
+  );
+
+  /// An older Pi has none of the pool routes (its mux answers 405, or a
+  /// plain-text 404): [kPoolsUnsupported]. A JSON 404 (unknown order /
+  /// driver) is kept.
+  static Future<T> _poolsRoute<T>(Future<T> Function() call) async {
+    try {
+      return await call();
+    } on AgentException catch (e) {
+      final missing = e.statusCode == 405 || (e.statusCode == 404 && e.body.isEmpty);
+      if (!missing) rethrow;
+      throw AgentException(e.message, statusCode: e.statusCode, code: kPoolsUnsupported, body: e.body);
+    }
   }
 
   Future<List<StoredOrder>> driverReturned(String driverId) async {
