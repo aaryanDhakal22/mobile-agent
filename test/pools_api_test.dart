@@ -256,6 +256,31 @@ void main() {
       expect(c.store, f.store);
     });
 
+    test('pool_seq orders a pool (then kitchen #); same placed time → lower kitchen # first', () {
+      final placed = DateTime.utc(2026, 10, 22, 17);
+      StoredOrder at(StoredOrder o) => StoredOrder.fromJson({
+        'order': {'id': o.id, 'placed_at': placed.toIso8601String(), 'fulfillment': {'type': 'delivery'}},
+        'status': {
+          'state': 'ready',
+          'kitchen_number': o.status.kitchenNumber,
+          'pool_driver_id': ?o.status.poolDriverId,
+          'pool_seq': ?o.status.poolSeq,
+        },
+      });
+      final s = deliveryFloor().withOrders([
+        at(delivery('u2', 1302)),
+        at(delivery('u1', 1301)),
+        at(delivery('u3', 1303)),
+        delivery('p1', 1401, pool: 'd-joe', poolSeq: 2),
+        delivery('p2', 1400, pool: 'd-joe', poolSeq: 1),
+        delivery('p3', 1399, pool: 'd-joe'),
+      ]);
+      final same = s.unassignedDeliveries.where((o) => o.id.startsWith('u')).map((o) => o.id);
+      expect(same, ['u1', 'u2', 'u3']);
+      // d4 (#1106) has no pool_seq: after the numbered stops, then by kitchen #.
+      expect(s.poolFor('d-joe').map((o) => o.id), ['p2', 'p1', 'd4', 'p3']);
+    });
+
     test('floor views: unassigned by placed time, pools per driver', () {
       final s = deliveryFloor();
       expect(s.unassignedDeliveries.map((o) => o.id), ['d1', 'd2', 'd5']);

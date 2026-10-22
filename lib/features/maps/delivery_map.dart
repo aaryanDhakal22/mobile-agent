@@ -176,7 +176,7 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
     final dest = g.point;
     final route = g.route;
     final fitPts = <GeoPoint>[?store, ?dest];
-    final fit = fitPoints(fitPts.isEmpty ? [center!] : fitPts);
+    final fit = fitPoints(fitPts.isEmpty ? [center!] : fitPts, padding: const EdgeInsets.fromLTRB(48, 56, 48, 72));
     // The road route when main had one, else a dashed straight line.
     final line = route.length >= 2
         ? routeLine(route)

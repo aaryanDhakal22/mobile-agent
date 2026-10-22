@@ -52,6 +52,7 @@ StoredOrder delivery(
   int k, {
   String state = 'ready',
   String? pool,
+  int? poolSeq,
   Map<String, dynamic>? geo,
   int placedMinutesAgo = 20,
   int? readyInMinutes,
@@ -77,6 +78,7 @@ StoredOrder delivery(
   if (pool != null) {
     st['pool_driver_id'] = pool;
     st['pooled_at'] = now.subtract(const Duration(minutes: 2)).toIso8601String();
+    if (poolSeq != null) st['pool_seq'] = poolSeq;
   }
   if (geo != null) m['geo'] = geo;
   return StoredOrder.fromJson(m);

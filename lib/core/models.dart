@@ -121,6 +121,10 @@ class OrderStatus {
   final String? poolDriverId;
   final DateTime? pooledAt;
 
+  /// Stop number in the pool's driving order (1..n); null when not pooled
+  /// (or from an agent that doesn't number them).
+  final int? poolSeq;
+
   const OrderStatus({
     required this.state,
     this.arrivalDate,
@@ -138,6 +142,7 @@ class OrderStatus {
     this.driverName,
     this.poolDriverId,
     this.pooledAt,
+    this.poolSeq,
   });
 
   factory OrderStatus.fromJson(Map<String, dynamic> json) => OrderStatus(
@@ -157,6 +162,7 @@ class OrderStatus {
     driverName: jStrOrNull(json['driver_name']),
     poolDriverId: jStrOrNull(json['pool_driver_id']),
     pooledAt: jDate(json['pooled_at']),
+    poolSeq: jIntOrNull(json['pool_seq']),
   );
 
   /// The same status in [driverId]'s pool (null = unassigned) — the
@@ -178,6 +184,8 @@ class OrderStatus {
     driverName: driverName,
     poolDriverId: driverId,
     pooledAt: driverId == null ? null : (at ?? DateTime.now().toUtc()),
+    // Unnumbered until the Pi answers: sorts after the numbered stops.
+    poolSeq: driverId == poolDriverId ? poolSeq : null,
   );
 }
 

@@ -197,24 +197,38 @@ class FloorState {
   /// unassigned too, so it never vanishes from both columns.
   List<StoredOrder> get unassignedDeliveries {
     final available = {for (final d in drivers) if (d.isAvailable) d.id};
-    return _sorted(
-      orders.values.where((o) {
-        if (!o.isPoolable) return false;
-        final pool = o.status.poolDriverId;
-        return pool == null || !available.contains(pool);
-      }),
-      (o) => o.placedTime,
-    );
+    final list = orders.values.where((o) {
+      if (!o.isPoolable) return false;
+      final pool = o.status.poolDriverId;
+      return pool == null || !available.contains(pool);
+    }).toList();
+    // Oldest placed first; the same placed time → lower kitchen # first.
+    list.sort((a, b) {
+      final c = _cmpDate(a.placedTime, b.placedTime);
+      return c != 0 ? c : _cmpKitchen(a, b);
+    });
+    return list;
   }
 
-  /// The deliveries in [driverId]'s pool, in the order they were added.
+  /// The deliveries in [driverId]'s pool in driving order (`pool_seq`, from
+  /// the Pi), then kitchen number; unnumbered ones last.
   List<StoredOrder> poolFor(String driverId) {
     final list = orders.values.where((o) => o.isPoolable && o.status.poolDriverId == driverId).toList();
     list.sort((a, b) {
-      final c = _cmpDate(a.status.pooledAt, b.status.pooledAt);
-      return c != 0 ? c : _cmpDate(a.placedTime, b.placedTime);
+      final sa = a.status.poolSeq, sb = b.status.poolSeq;
+      if (sa != null && sb != null && sa != sb) return sa.compareTo(sb);
+      if ((sa == null) != (sb == null)) return sa == null ? 1 : -1;
+      return _cmpKitchen(a, b);
     });
     return list;
+  }
+
+  static int _cmpKitchen(StoredOrder a, StoredOrder b) {
+    final ka = a.status.kitchenNumber ?? a.order.kitchenOrderNumber;
+    final kb = b.status.kitchenNumber ?? b.order.kitchenOrderNumber;
+    if (ka != null && kb != null && ka != kb) return ka.compareTo(kb);
+    if ((ka == null) != (kb == null)) return ka == null ? 1 : -1;
+    return a.id.compareTo(b.id);
   }
 
   /// Orders out with [driverId], oldest run first.

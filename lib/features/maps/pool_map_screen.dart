@@ -185,7 +185,9 @@ class _PoolMapScreenState extends ConsumerState<PoolMapScreen> {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final route = (!approximate && _trip != null) ? decodePolyline(_trip!.polyline) : const <GeoPoint>[];
     final line = route.length >= 2 ? routeLine(route) : (pts.length >= 2 ? routeLine(pts, dashed: true) : null);
-    final fit = fitPoints(pts);
+    // Generous room so no stop (or the store) sits under an edge, the
+    // recenter button or a toast.
+    final fit = fitPoints(pts, padding: const EdgeInsets.fromLTRB(64, 64, 64, 112));
     return ClipRRect(
       borderRadius: BorderRadius.circular(QuiccRadius.md),
       child: Stack(

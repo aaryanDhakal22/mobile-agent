@@ -114,6 +114,7 @@ void main() {
       expect(find.textContaining('ready in ~'), findsOneWidget);
       expect(find.text('SEND OUT'), findsNWidgets(2));
 
+
       // AUTO preview at this size too.
       (c.read(floorProvider.notifier) as FakeDeliveryFloor).plan = samplePlan();
       await tester.tap(find.byKey(const ValueKey('auto')));
@@ -121,6 +122,14 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(tester.takeException(), isNull);
       expect(find.text('CONFIRM'), findsOneWidget);
+
+      // Scrolled to the end, the last Out card's I HAVE RETURNED sits clear
+      // of the driver button (104 px + ring, 24 px from the bottom-right).
+      final right = find.ancestor(of: box('d-ana'), matching: find.byType(Scrollable)).first;
+      await tester.drag(right, const Offset(0, -3000));
+      await tester.pump(const Duration(seconds: 1));
+      final returned = tester.getRect(find.widgetWithText(FilledButton, 'I HAVE RETURNED'));
+      expect(returned.bottom, lessThanOrEqualTo(size.height - 146), reason: 'clear of the driver button');
       await tester.pumpWidget(const SizedBox());
     });
   }
@@ -328,6 +337,29 @@ void main() {
       expect((deco.border as Border).top.color, QuiccColors.statusFiring);
       expect((deco.border as Border).top.width, 2);
       expect(deco.boxShadow!.single.color.toARGB32() & 0x00FFFFFF, QuiccColors.statusFiring.toARGB32() & 0x00FFFFFF);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets("a box lists pooled + yellow stops in the plan's driving order", (tester) async {
+      final fake = FakeDeliveryFloor(deliveryFloor())
+        ..plan = AutoPlan.fromJson({
+          'plan_id': 'plan-2',
+          'runs': [
+            {
+              'driver_id': 'd-ana',
+              'order_ids': ['d1', 'd3'],
+              'suggested_ids': ['d1'],
+            },
+          ],
+        });
+      await pumpPane(tester, fake: fake);
+      expect(find.byKey(const ValueKey('chip-d3')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('auto')));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      final yellowY = tester.getTopLeft(find.byKey(const ValueKey('yellow-d1'))).dy;
+      final pooledY = tester.getTopLeft(find.byKey(const ValueKey('chip-d3'))).dy;
+      expect(yellowY, lessThan(pooledY), reason: 'd1 is the first stop of the run');
       await tester.pumpWidget(const SizedBox());
     });
 

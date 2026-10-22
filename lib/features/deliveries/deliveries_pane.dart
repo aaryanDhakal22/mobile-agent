@@ -16,6 +16,10 @@ import 'delivery_widgets.dart';
 /// Keeps toasts clear of the bottom-right driver button.
 const double _toastInset = 160;
 
+/// Room under each column's last card so it scrolls clear of the driver
+/// button (104 px + its ring, 24 px from the edge).
+const double _fabClearance = 170;
+
 /// Deliveries (1.4.0): unassigned deliveries on the left; on the right one
 /// box per available driver in queue order (NEXT on top), each with the pool
 /// staff build up by drag and drop (long-press) or Select ✓ + tap, and SEND
@@ -268,14 +272,15 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     }
   }
 
-  void _openPoolMap(Driver d, List<StoredOrder> pooled, List<String> yellow) {
+  /// [orderIds] in the box's driving order (pooled + yellow).
+  void _openPoolMap(Driver d, List<String> orderIds, Set<String> yellow) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => PoolMapScreen(
           driverId: d.id,
           driverName: d.name,
-          orderIds: [...pooled.map((o) => o.id), ...yellow],
-          yellowIds: yellow.toSet(),
+          orderIds: orderIds,
+          yellowIds: yellow,
         ),
       ),
     );
@@ -402,7 +407,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                   child: RefreshIndicator(
                     onRefresh: () => _floor.refresh(),
                     child: ListView(
-                      padding: const EdgeInsets.only(bottom: 120),
+                      padding: const EdgeInsets.only(bottom: _fabClearance),
                       children: [
                         if (left.isEmpty)
                           Padding(
@@ -457,7 +462,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     List<_Run> runs,
   ) {
     return ListView(
-      padding: const EdgeInsets.only(bottom: 120),
+      padding: const EdgeInsets.only(bottom: _fabClearance),
       children: [
         if (preview != null) _previewBar(context, preview),
         if (drivers.isEmpty)
@@ -519,6 +524,24 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     ];
     final stops = pooled.length + yellow.length;
     final tips = [...pooled, ...yellow].fold<int>(0, (n, o) => n + o.order.money.tipCents);
+    // One list in driving order: the pool by pool_seq; with an AUTO preview
+    // up, pooled + yellow stops follow the plan run's order (stops the run
+    // doesn't name keep their place after it).
+    final chips = [for (final o in pooled) (order: o, yellow: false), for (final o in yellow) (order: o, yellow: true)];
+    final run = preview?.plan.runs.where((r) => r.driverId == d.id).firstOrNull;
+    if (run != null && yellow.isNotEmpty) {
+      int rank(int i) {
+        final r = run.orderIds.indexOf(chips[i].order.id);
+        return r < 0 ? run.orderIds.length + i : r;
+      }
+
+      final idx = List<int>.generate(chips.length, (i) => i)..sort((x, y) => rank(x).compareTo(rank(y)));
+      final sorted = [for (final i in idx) chips[i]];
+      chips
+        ..clear()
+        ..addAll(sorted);
+    }
+    var yellowIndex = 0;
     final sending = _sending.contains(d.id);
     final moveHere = _selectMode && _selected.isNotEmpty;
 
@@ -553,7 +576,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                         child: InkWell(
                           key: ValueKey('driver-header-${d.id}'),
                           borderRadius: BorderRadius.circular(QuiccRadius.sm),
-                          onTap: moveHere ? () => _move(_selected.toList(), d.id) : () => _openPoolMap(d, pooled, yellowIds),
+                          onTap: moveHere ? () => _move(_selected.toList(), d.id) : () => _openPoolMap(d, [for (final c in chips) c.order.id], yellowIds.toSet()),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 6),
                             child: Text.rich(
@@ -578,7 +601,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                       IconButton(
                         tooltip: 'Show the run on the map',
                         icon: const Icon(Icons.map_outlined, color: QuiccColors.brand400),
-                        onPressed: stops == 0 ? null : () => _openPoolMap(d, pooled, yellowIds),
+                        onPressed: stops == 0 ? null : () => _openPoolMap(d, [for (final c in chips) c.order.id], yellowIds.toSet()),
                       ),
                     ],
                   ),
@@ -591,35 +614,36 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                         style: TextStyle(color: context.palette.textMuted),
                       ),
                     ),
-                  for (final o in pooled)
-                    DeliveryDraggable(
-                      key: ValueKey('chip-${o.id}'),
-                      data: _dragData(o, fromDriver: d.id),
-                      child: PoolStopChip(
-                        order: o,
-                        selectMode: _selectMode,
-                        selected: _selected.contains(o.id),
-                        onTap: () => _tapOrder(o),
-                        onRemove: () => _move([o.id], null),
-                      ),
-                    ),
-                  for (var i = 0; i < yellow.length; i++)
-                    SlideIn(
-                      key: ValueKey('slide-$_previewSeq-${yellow[i].id}'),
-                      index: i,
-                      child: DeliveryDraggable(
-                        key: ValueKey('yellow-${yellow[i].id}'),
-                        data: _dragData(yellow[i], fromDriver: d.id, suggestion: true),
+                  for (final c in chips)
+                    if (!c.yellow)
+                      DeliveryDraggable(
+                        key: ValueKey('chip-${c.order.id}'),
+                        data: _dragData(c.order, fromDriver: d.id),
                         child: PoolStopChip(
-                          order: yellow[i],
-                          yellow: true,
+                          order: c.order,
                           selectMode: _selectMode,
-                          selected: _selected.contains(yellow[i].id),
-                          onTap: () => _tapOrder(yellow[i]),
-                          onRemove: () => _preview.forget([yellow[i].id]),
+                          selected: _selected.contains(c.order.id),
+                          onTap: () => _tapOrder(c.order),
+                          onRemove: () => _move([c.order.id], null),
+                        ),
+                      )
+                    else
+                      SlideIn(
+                        key: ValueKey('slide-$_previewSeq-${c.order.id}'),
+                        index: yellowIndex++,
+                        child: DeliveryDraggable(
+                          key: ValueKey('yellow-${c.order.id}'),
+                          data: _dragData(c.order, fromDriver: d.id, suggestion: true),
+                          child: PoolStopChip(
+                            order: c.order,
+                            yellow: true,
+                            selectMode: _selectMode,
+                            selected: _selected.contains(c.order.id),
+                            onTap: () => _tapOrder(c.order),
+                            onRemove: () => _preview.forget([c.order.id]),
+                          ),
                         ),
                       ),
-                    ),
                   const SizedBox(height: 6),
                   Align(
                     alignment: Alignment.centerRight,
