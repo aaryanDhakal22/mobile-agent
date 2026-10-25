@@ -429,7 +429,9 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
     return Ticker(
       interval: const Duration(seconds: 5),
       builder: (context, now) {
-        final since = arrived == null ? Duration.zero : now.difference(arrived);
+        // Clamped: a tablet clock a little behind the Pi's would count below zero.
+        final raw = arrived == null ? Duration.zero : now.difference(arrived);
+        final since = raw.isNegative ? Duration.zero : raw;
         final tone = lateColor(since, widget.greenTill);
         final body = Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),

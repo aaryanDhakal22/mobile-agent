@@ -246,7 +246,7 @@ class _Age extends StatelessWidget {
   Widget build(BuildContext context) {
     final placed = order.placedTime;
     if (placed == null) return const SizedBox.shrink();
-    final m = now.difference(placed).inMinutes;
+    final m = now.difference(placed).inMinutes.clamp(0, 1 << 30);
     final color = m >= targetMinutes
         ? QuiccColors.statusVoided
         : (m >= targetMinutes - 10 ? QuiccColors.statusFiring : context.palette.textMuted);
@@ -450,7 +450,7 @@ class OutRunCard extends StatelessWidget {
                     builder: (context, now) {
                       final t = outAt;
                       if (t == null) return const SizedBox.shrink();
-                      final d = now.difference(t);
+                      final d = now.isBefore(t) ? Duration.zero : now.difference(t);
                       return Text(
                         'out ${duration(d)}',
                         maxLines: 1,
