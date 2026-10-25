@@ -31,6 +31,7 @@ String? driveLabel(OrderGeo? g) {
 String? geoHint(OrderGeo? g) => switch (g?.state) {
   null || GeoState.pending => 'locating…',
   GeoState.notFound || GeoState.unavailable => 'no location',
+  GeoState.check => 'check address',
   GeoState.located => null,
 };
 

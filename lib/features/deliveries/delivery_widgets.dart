@@ -4,6 +4,7 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../theme/quicc_colors.dart';
 import '../common/widgets.dart';
+import '../maps/check_address_sheet.dart';
 import '../maps/geo_format.dart';
 
 /// What a drag on the Deliveries screen carries: the order ids, the driver
@@ -128,13 +129,19 @@ class UnassignedRow extends StatelessWidget {
                   ),
                 SizedBox(
                   width: 70,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      order.displayNumber,
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          order.displayNumber,
+                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
+                        ),
+                      ),
+                      if (order.isPos) const PosTag(size: 10),
+                    ],
                   ),
                 ),
                 Expanded(
@@ -161,7 +168,9 @@ class UnassignedRow extends StatelessWidget {
                         children: [
                           if (drive != null)
                             Text(drive, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                          if (hint != null)
+                          if (g != null && g.needsCheck)
+                            CheckAddressTag(order: order)
+                          else if (hint != null)
                             Text(
                               hint,
                               style: TextStyle(
@@ -181,14 +190,17 @@ class UnassignedRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      o.isPrepaid ? 'PAID' : 'CASH ${money(o.cashDueCents)}',
+                      order.isPaid ? 'PAID' : 'CASH ${money(order.cashDueCents)}',
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
-                        color: o.isPrepaid ? context.palette.textMuted : QuiccColors.statusFiring,
+                        color: order.isPaid ? context.palette.textMuted : QuiccColors.statusFiring,
                       ),
                     ),
-                    if (o.money.tipCents > 0)
-                      Text('tip ${money(o.money.tipCents)}', style: TextStyle(color: context.palette.textSecondary)),
+                    if ((order.status.tipCents ?? o.money.tipCents) > 0)
+                      Text(
+                        'tip ${money(order.status.tipCents ?? o.money.tipCents)}',
+                        style: TextStyle(color: context.palette.textSecondary),
+                      ),
                     Ticker(
                       interval: const Duration(seconds: 15),
                       builder: (context, now) => cooking
@@ -309,6 +321,7 @@ class PoolStopChip extends StatelessWidget {
                       order.displayNumber,
                       style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
                     ),
+                    if (order.isPos) ...[const SizedBox(width: 6), const PosTag(size: 9)],
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(

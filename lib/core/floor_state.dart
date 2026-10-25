@@ -35,6 +35,15 @@ class FloorState {
   /// Bumped once per distinct dispatch — the name flash listens for it.
   final int dispatches;
 
+  /// Bumped once per new POS delivery that asked for the soft chime (SSE
+  /// `order.added` with `chime:true`) — the ring bridge plays it.
+  final int chimes;
+
+  /// The latest SSE `integration.toast`, and a counter bumped per toast —
+  /// the top-right toast host listens for it.
+  final IntegrationToast? toast;
+  final int toasts;
+
   const FloorState({
     this.floor,
     this.orders = const {},
@@ -47,6 +56,9 @@ class FloorState {
     this.waitingSeconds = const {},
     this.dispatch,
     this.dispatches = 0,
+    this.chimes = 0,
+    this.toast,
+    this.toasts = 0,
   });
 
   FloorState copyWith({
@@ -61,6 +73,9 @@ class FloorState {
     Map<String, int>? waitingSeconds,
     DriverDispatch? dispatch,
     int? dispatches,
+    int? chimes,
+    IntegrationToast? toast,
+    int? toasts,
   }) {
     return FloorState(
       floor: floor ?? this.floor,
@@ -74,6 +89,9 @@ class FloorState {
       waitingSeconds: waitingSeconds ?? this.waitingSeconds,
       dispatch: dispatch ?? this.dispatch,
       dispatches: dispatches ?? this.dispatches,
+      chimes: chimes ?? this.chimes,
+      toast: toast ?? this.toast,
+      toasts: toasts ?? this.toasts,
     );
   }
 
@@ -146,23 +164,38 @@ class FloorState {
 
   /// We hold [id] in a state after `arrived` (accepted … delivered /
   /// cancelled). A late or repeated `order.arrived` / `order.escalated` for it
-  /// is stale and must not flip it back (and ring).
-  bool isPastArrived(String id) {
+  /// is stale and must not flip it back (and ring) — except a scheduled
+  /// future order coming back to ring again ([incoming] has `rerung`).
+  bool isPastArrived(String id, {StoredOrder? incoming}) {
     final st = orders[id]?.state;
+    if (st == OrderState.scheduled && incoming != null && incoming.status.rerung) return false;
     return st != null && st != OrderState.arrived && st != OrderState.unknown;
   }
 
+  /// The floor settings (feature switches, ticket switches, default times).
+  FloorSettings get settings => floor?.settings ?? const FloorSettings();
+
   int? get currentBatchId => floor?.batch.id;
+
+  /// The orders the floor screens show: every order, or — with the POS
+  /// pull-in switch off — every order except the POS ones (the Pi keeps
+  /// them; they come back when the switch is on again).
+  Iterable<StoredOrder> get _shown =>
+      settings.features.posPull ? orders.values : orders.values.where((o) => !o.isPos);
 
   /// Awaiting acceptance, oldest first.
   List<StoredOrder> get arrived => _sorted(
-    orders.values.where((o) => o.state == OrderState.arrived),
+    _shown.where((o) => o.state == OrderState.arrived),
     (o) => o.status.arrivalDate ?? o.order.receivedAt,
   );
 
+  /// Cooking and shown on the Kitchen board: accepted, minus POS counter
+  /// checks with nothing for the kitchen (`board_hidden`).
+  static bool _onBoard(StoredOrder o) => o.state == OrderState.accepted && !o.status.boardHidden;
+
   /// In the kitchen, in kitchen-number order.
   List<StoredOrder> get kitchen {
-    final list = orders.values.where((o) => o.state == OrderState.accepted).toList();
+    final list = _shown.where(_onBoard).toList();
     list.sort((a, b) {
       final ka = a.status.kitchenNumber, kb = b.status.kitchenNumber;
       if (ka != null && kb != null && ka != kb) return ka.compareTo(kb);
@@ -174,7 +207,7 @@ class FloorState {
   /// In the kitchen, most urgent first: the earliest promised ready time
   /// (late ones first), then kitchen number. Orders without an estimate go last.
   List<StoredOrder> get kitchenByUrgency {
-    final list = orders.values.where((o) => o.state == OrderState.accepted).toList();
+    final list = _shown.where(_onBoard).toList();
     list.sort((a, b) {
       final ea = a.status.estimatedReadyAt, eb = b.status.estimatedReadyAt;
       if (ea != null && eb != null && ea != eb) return ea.compareTo(eb);
@@ -186,9 +219,16 @@ class FloorState {
     return list;
   }
 
+  /// Future orders waiting for their time (the greyed "Later" strip at the
+  /// end of Kitchen), soonest ring first.
+  List<StoredOrder> get later => _sorted(
+    _shown.where((o) => o.state == OrderState.scheduled),
+    (o) => o.status.ringAt ?? o.dueAt,
+  );
+
   /// Ready delivery orders waiting for a driver, oldest-ready first.
   List<StoredOrder> get readyDeliveries =>
-      _sorted(orders.values.where((o) => o.state == OrderState.ready && o.isDelivery), (o) => o.status.readyAt);
+      _sorted(_shown.where((o) => o.state == OrderState.ready && o.isDelivery), (o) => o.status.readyAt);
 
   /// Deliveries waiting for a driver's pool (2.0.9): accepted (cooking) or
   /// ready, in nobody's pool, oldest placed first. An order still pooled to a
@@ -197,7 +237,7 @@ class FloorState {
   /// unassigned too, so it never vanishes from both columns.
   List<StoredOrder> get unassignedDeliveries {
     final available = {for (final d in drivers) if (d.isAvailable) d.id};
-    final list = orders.values.where((o) {
+    final list = _shown.where((o) {
       if (!o.isPoolable) return false;
       final pool = o.status.poolDriverId;
       return pool == null || !available.contains(pool);
@@ -213,7 +253,7 @@ class FloorState {
   /// The deliveries in [driverId]'s pool in driving order (`pool_seq`, from
   /// the Pi), then kitchen number; unnumbered ones last.
   List<StoredOrder> poolFor(String driverId) {
-    final list = orders.values.where((o) => o.isPoolable && o.status.poolDriverId == driverId).toList();
+    final list = _shown.where((o) => o.isPoolable && o.status.poolDriverId == driverId).toList();
     list.sort((a, b) {
       final sa = a.status.poolSeq, sb = b.status.poolSeq;
       if (sa != null && sb != null && sa != sb) return sa.compareTo(sb);
@@ -233,13 +273,13 @@ class FloorState {
 
   /// Orders out with [driverId], oldest run first.
   List<StoredOrder> outWith(String driverId) => _sorted(
-    orders.values.where((o) => o.state == OrderState.onDelivery && o.status.driverId == driverId),
+    _shown.where((o) => o.state == OrderState.onDelivery && o.status.driverId == driverId),
     (o) => o.status.outAt,
   );
 
   /// Every order currently on delivery (incl. ones whose driver was removed).
   List<StoredOrder> get onDelivery =>
-      _sorted(orders.values.where((o) => o.state == OrderState.onDelivery), (o) => o.status.outAt);
+      _sorted(_shown.where((o) => o.state == OrderState.onDelivery), (o) => o.status.outAt);
 
   /// The current batch, newest first.
   List<StoredOrder> get currentBatchOrders {
@@ -303,8 +343,34 @@ FloorUpdate applySseEvent(FloorState s, SseEvent ev) {
       if (payload is! Map) return FloorUpdate(s);
       final o = StoredOrder.fromJson(jMap(payload));
       if (o.id.isEmpty) return FloorUpdate(s);
-      if (ev.event == 'order.arrived' && s.isPastArrived(o.id)) return FloorUpdate(s);
+      if (ev.event == 'order.arrived' && s.isPastArrived(o.id, incoming: o)) return FloorUpdate(s);
       return FloorUpdate(s.withOrder(o));
+    case 'order.added': // 2.1.0: a POS order from the hub — never rings
+      if (payload is! Map) return FloorUpdate(s);
+      final m = jMap(payload);
+      // `{order: StoredOrder, chime}` per the contract; a flat StoredOrder
+      // with a `chime` extra (the order.arrived style) reads the same.
+      final inner = jMap(m['order']);
+      final o = StoredOrder.fromJson(inner['order'] is Map ? inner : m);
+      if (o.id.isEmpty) return FloorUpdate(s);
+      // The soft chime plays once per new order (not for a replayed frame).
+      final chime = jBool(m['chime']) && !s.orders.containsKey(o.id) && !o.status.boardHidden;
+      final next = s.withOrder(o);
+      return FloorUpdate(chime ? next.copyWith(chimes: s.chimes + 1) : next);
+    case 'settings.updated':
+      if (payload is! Map) return FloorUpdate(s, refetch: true);
+      final floor = s.floor;
+      if (floor == null) return FloorUpdate(s, refetch: true);
+      return FloorUpdate(s.copyWith(floor: floor.copyWith(settings: FloorSettings.fromJson(jMap(payload)))));
+    case 'integration.status':
+      final st = IntegrationStatus.fromJson(payload);
+      final floor = s.floor;
+      if (st == null || floor == null) return FloorUpdate(s, refetch: st != null);
+      return FloorUpdate(s.copyWith(floor: floor.copyWith(integration: st)));
+    case 'integration.toast':
+      final t = IntegrationToast.fromJson(payload);
+      if (t == null) return FloorUpdate(s);
+      return FloorUpdate(s.copyWith(toast: t, toasts: s.toasts + 1));
     case 'order.escalated':
       if (payload is! Map) return FloorUpdate(s);
       final m = jMap(payload);
@@ -312,7 +378,7 @@ FloorUpdate applySseEvent(FloorState s, SseEvent ev) {
       if (o.id.isEmpty) return FloorUpdate(s);
       // A stale escalation for an order already taken must neither flip it
       // back nor make the alarm loud.
-      if (s.isPastArrived(o.id)) return FloorUpdate(s);
+      if (s.isPastArrived(o.id, incoming: o)) return FloorUpdate(s);
       final next = s.withOrder(o);
       final waits = Map<String, int>.of(next.waitingSeconds);
       if (o.state == OrderState.arrived) waits[o.id] = jInt(m['waiting_seconds']);

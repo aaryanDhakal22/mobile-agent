@@ -73,6 +73,11 @@ class KitchenResend {
   );
 }
 
+/// [AgentException.code] for a 2.1.0 route an older Pi doesn't have
+/// (features / kitchen tickets / default times, schedule, geo choose): "This
+/// Pi needs an update".
+const String kSettingsUnsupported = 'settings_unsupported';
+
 /// [AgentException.code] when adding a printer: the store already has a
 /// printer with that name (409).
 const String kPrinterNameTaken = 'name_taken';
@@ -312,6 +317,25 @@ class AgentClient {
     return StoredOrder.fromJson(jMap(body));
   }
 
+  /// `POST /api/orders/{id}/schedule {lead_minutes}` — the first confirm of
+  /// a future order (nothing prints; it waits in the Later strip), or a new
+  /// lead for one already scheduled. 409 when the order isn't a future one.
+  Future<StoredOrder?> schedule(String id, int leadMinutes) => _v210Route(() async {
+    final body = await _send(
+      'POST',
+      '/api/orders/${Uri.encodeComponent(id)}/schedule',
+      body: {'lead_minutes': leadMinutes},
+    );
+    return body is Map ? StoredOrder.fromJson(jMap(body)) : null;
+  });
+
+  /// `POST /api/orders/{id}/geo/choose {index}` — staff picked candidate
+  /// [index] of an ambiguous address; main's answer arrives later as an
+  /// order update (202).
+  Future<void> chooseGeo(String id, int index) => _v210Route(() async {
+    await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/geo/choose', body: {'index': index});
+  });
+
   Future<StoredOrder> ready(String id) async =>
       StoredOrder.fromJson(jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/ready')));
 
@@ -547,11 +571,29 @@ class AgentClient {
 
   Future<List<Driver>> listDrivers() async => jList(await _get('/api/drivers'), Driver.fromJson);
 
-  Future<Driver> createDriver(String name) async =>
-      Driver.fromJson(jMap(await _send('POST', '/api/drivers', body: {'name': name.trim()})));
+  /// [posNumber]: their SoftTouch login # (2.1.0), sent only when given.
+  Future<Driver> createDriver(String name, {String? posNumber}) async => Driver.fromJson(
+    jMap(
+      await _send(
+        'POST',
+        '/api/drivers',
+        body: {'name': name.trim(), if (posNumber != null && posNumber.trim().isNotEmpty) 'pos_number': posNumber.trim()},
+      ),
+    ),
+  );
 
   Future<void> renameDriver(String id, String name) async {
     await _send('PATCH', '/api/drivers/${Uri.encodeComponent(id)}', body: {'name': name.trim()});
+  }
+
+  /// `PATCH /api/drivers/{id}` with only what changed: [name] and / or
+  /// [posNumber] ('' clears it).
+  Future<void> updateDriver(String id, {String? name, String? posNumber}) async {
+    await _send(
+      'PATCH',
+      '/api/drivers/${Uri.encodeComponent(id)}',
+      body: {'name': ?name?.trim(), 'pos_number': ?posNumber?.trim()},
+    );
   }
 
   Future<void> removeDriver(String id) async {
@@ -684,6 +726,48 @@ class AgentClient {
     } on AgentException catch (e) {
       if (!e.isMissingRoute) rethrow;
       throw AgentException(e.message, statusCode: e.statusCode, code: kReceiptUnsupported, body: e.body);
+    }
+  }
+
+  // --- 2.1.0 settings: features, kitchen tickets, default times ---------------
+
+  Future<FeatureToggles> getFeatures() =>
+      _v210Route(() async => FeatureToggles.fromJson(jMap(await _get('/api/settings/features'))), settings: true);
+
+  /// `PUT /api/settings/features` → what the Pi saved.
+  Future<FeatureToggles> putFeatures(FeatureToggles f) => _v210Route(
+    () async => FeatureToggles.fromJson(jMap(await _send('PUT', '/api/settings/features', body: f.toJson()))),
+    settings: true,
+  );
+
+  Future<TicketToggles> getTickets() =>
+      _v210Route(() async => TicketToggles.fromJson(jMap(await _get('/api/settings/tickets'))), settings: true);
+
+  Future<TicketToggles> putTickets(TicketToggles t) => _v210Route(
+    () async => TicketToggles.fromJson(jMap(await _send('PUT', '/api/settings/tickets', body: t.toJson()))),
+    settings: true,
+  );
+
+  Future<DefaultTimes> getTimes() =>
+      _v210Route(() async => DefaultTimes.fromJson(jMap(await _get('/api/settings/times'))), settings: true);
+
+  /// 400 when a value is outside 1–240.
+  Future<DefaultTimes> putTimes(DefaultTimes t) => _v210Route(
+    () async => DefaultTimes.fromJson(jMap(await _send('PUT', '/api/settings/times', body: t.toJson()))),
+    settings: true,
+  );
+
+  /// An older Pi has none of the 2.1.0 routes (405, or a plain-text 404):
+  /// [kSettingsUnsupported]. A JSON 404 (unknown order) is kept — except on
+  /// the settings routes ([settings]), where any 404 means "no such route"
+  /// (an older Pi's web UI answers unknown `/api/*` GETs with one).
+  static Future<T> _v210Route<T>(Future<T> Function() call, {bool settings = false}) async {
+    try {
+      return await call();
+    } on AgentException catch (e) {
+      final missing = settings ? e.isMissingRoute : (e.statusCode == 405 || (e.statusCode == 404 && e.body.isEmpty));
+      if (!missing) rethrow;
+      throw AgentException(e.message, statusCode: e.statusCode, code: kSettingsUnsupported, body: e.body);
     }
   }
 

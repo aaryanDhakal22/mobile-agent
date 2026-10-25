@@ -287,6 +287,51 @@ class FloorController extends Notifier<FloorState> {
     }
   }
 
+  /// First confirm of a future order (or a new lead for a scheduled one):
+  /// nothing prints; it waits in the Later strip until it rings again.
+  Future<void> schedule(String id, int leadMinutes) async {
+    try {
+      final o = await _requireClient(ref).schedule(id, leadMinutes);
+      if (o != null && o.id.isNotEmpty) {
+        _upsert([o]);
+      } else {
+        unawaited(refresh());
+      }
+    } on AgentException catch (e) {
+      if (!e.isNetwork) unawaited(refresh());
+      rethrow;
+    }
+  }
+
+  /// Staff picked candidate [index] of an ambiguous address; the located
+  /// address arrives later as an order update.
+  Future<void> chooseGeo(String orderId, int index) => _requireClient(ref).chooseGeo(orderId, index);
+
+  // --- 2.1.0 settings (saved on the Pi, shown at once) -----------------------
+
+  void _setSettings(FloorSettings Function(FloorSettings) change) {
+    final f = state.floor;
+    if (f != null) _set(state.copyWith(floor: f.copyWith(settings: change(f.settings))));
+  }
+
+  Future<FeatureToggles> saveFeatures(FeatureToggles next) async {
+    final saved = await _requireClient(ref).putFeatures(next);
+    _setSettings((s) => s.copyWith(features: saved));
+    return saved;
+  }
+
+  Future<TicketToggles> saveTickets(TicketToggles next) async {
+    final saved = await _requireClient(ref).putTickets(next);
+    _setSettings((s) => s.copyWith(tickets: saved));
+    return saved;
+  }
+
+  Future<DefaultTimes> saveTimes(DefaultTimes next) async {
+    final saved = await _requireClient(ref).putTimes(next);
+    _setSettings((s) => s.copyWith(times: saved));
+    return saved;
+  }
+
   Future<void> ready(String id) async {
     try {
       _upsert([await _requireClient(ref).ready(id)]);
@@ -468,8 +513,14 @@ class FloorController extends Notifier<FloorState> {
     }
   }
 
-  Future<void> createDriver(String name) async {
-    await _requireClient(ref).createDriver(name);
+  Future<void> createDriver(String name, {String? posNumber}) async {
+    await _requireClient(ref).createDriver(name, posNumber: posNumber);
+    await _reloadDrivers();
+  }
+
+  /// Name and / or Driver # (POS login #; '' clears it).
+  Future<void> updateDriver(String id, {String? name, String? posNumber}) async {
+    await _requireClient(ref).updateDriver(id, name: name, posNumber: posNumber);
     await _reloadDrivers();
   }
 

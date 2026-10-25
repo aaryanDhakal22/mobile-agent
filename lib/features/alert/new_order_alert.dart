@@ -193,6 +193,7 @@ class _NewOrderAlertState extends ConsumerState<NewOrderAlert> with SingleTicker
                                     money(o.money.totalCents),
                                     '${o.itemCount} item${o.itemCount == 1 ? '' : 's'}',
                                     if (o.sourceEventId.isNotEmpty) '#${o.sourceEventId}',
+                                    if (first.status.future && first.dueAt != null) 'for ${clock(first.dueAt)}',
                                     if (since != null) 'waiting ${duration(now.difference(since))}',
                                   ].join(' · '),
                                   style: TextStyle(fontSize: 22, color: onBrand.withValues(alpha: 0.8)),

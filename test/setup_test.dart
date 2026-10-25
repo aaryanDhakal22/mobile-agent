@@ -201,6 +201,7 @@ void main() {
       SetupStep.tabletChecks,
       SetupStep.testRing,
       SetupStep.testPrint,
+      SetupStep.times,
       SetupStep.chime,
       SetupStep.done,
     ]) {

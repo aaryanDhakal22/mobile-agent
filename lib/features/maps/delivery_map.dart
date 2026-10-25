@@ -163,8 +163,11 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
 
   /// "Not found on the map" (main looked and found nothing) / "No map
   /// location" (main gave up / never located it).
-  static String _lostTitle(OrderGeo g) =>
-      g.state == GeoState.unavailable ? 'No map location' : 'Not found on the map';
+  static String _lostTitle(OrderGeo g) => switch (g.state) {
+    GeoState.unavailable => 'No map location',
+    GeoState.check => 'Address needs a check',
+    _ => 'Not found on the map',
+  };
 
   static GeoPoint? _bboxCenter(List<double>? b) =>
       (b == null || b.length != 4) ? null : (lat: (b[1] + b[3]) / 2, lng: (b[0] + b[2]) / 2);

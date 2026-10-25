@@ -169,9 +169,11 @@ void main() {
       await tester.pump();
       expect(find.text('NEW ORDER'), findsOneWidget);
       expect(find.text('Erik Davis'), findsOneWidget);
-      expect(find.text('ACCEPT · 20 MIN'), findsOneWidget);
-      for (final m in [10, 15, 20, 30, 45, 60]) {
-        expect(find.text('$m'), findsOneWidget);
+      // 1.5.0: the time picker starts at the default pickup time (15).
+      expect(find.text('ACCEPT · 15 MIN'), findsOneWidget);
+      // X, X+5, X+10 with the −5 / +5 steppers.
+      for (final k in ['pick-x', 'pick-x5', 'pick-x10', 'pick-minus', 'pick-plus']) {
+        expect(find.byKey(ValueKey(k)), findsOneWidget);
       }
       await tester.pumpWidget(const SizedBox());
     });

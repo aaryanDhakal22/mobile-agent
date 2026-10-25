@@ -11,6 +11,10 @@ import 'polyline.dart';
 
 enum OrderState {
   arrived('arrived', 'ARRIVED'),
+
+  /// A future order after its first confirm (1.5.0): greyed in the Kitchen
+  /// "Later" strip until it rings again at `ring_at`. Nothing printed yet.
+  scheduled('scheduled', 'LATER'),
   accepted('accepted', 'IN KITCHEN'),
   ready('ready', 'READY'),
   onDelivery('on_delivery', 'OUT'),
@@ -92,11 +96,76 @@ class StoredOrder {
   bool get isFinished =>
       state == OrderState.delivered || state == OrderState.cancelled || (state == OrderState.ready && !isDelivery);
 
-  /// Big number for screens: kitchen number once accepted, else the vendor id.
+  /// Big number for screens: the plain POS check # for a SoftTouch order,
+  /// the kitchen number once accepted, else the vendor id.
   String get displayNumber {
+    final pos = status.displayNumber;
+    if (pos != null) return '$pos';
     final k = status.kitchenNumber ?? order.kitchenOrderNumber;
     if (k != null) return '$k';
     return order.sourceEventId.isEmpty ? '—' : '#${order.sourceEventId}';
+  }
+
+  /// Pulled from the store's old POS (SoftTouch) by the hub (2.1.0).
+  bool get isPos => status.extSource.isNotEmpty;
+
+  /// Cash still to collect: a POS order's `cash_due_cents` (what the hub
+  /// read off the check), else the online order's cash payments.
+  int get cashDueCents {
+    if (isPos) return status.cashDueCents ?? (status.paid ? 0 : order.money.totalCents);
+    return order.cashDueCents;
+  }
+
+  /// Nothing to collect: settled (POS / an inserted cash pickup) or prepaid.
+  bool get isPaid => status.paid || cashDueCents == 0;
+
+  /// Earns the paid-not-ready wave on the Kitchen board (while cooking): a
+  /// paid pickup (`paid`, or an online order with no cash due) or a shown
+  /// POS counter (dine-in) order, which is paid up front.
+  bool get paidNotReady {
+    if (state != OrderState.accepted || status.boardHidden) return false;
+    final type = order.fulfillment.type;
+    if (type == FulfillmentType.pickup) return status.paid || (!isPos && order.cashDueCents == 0);
+    return isPos && type == FulfillmentType.dineIn;
+  }
+
+  /// A future order waiting for its lead time to be picked (first ring).
+  bool get needsLead => state == OrderState.arrived && status.future && !status.rerung;
+
+  /// When the customer wants it (future orders): the vendor's promised time.
+  DateTime? get dueAt => order.fulfillment.promisedAt;
+}
+
+/// How bad an integration problem / order flag is.
+enum Severity {
+  info('info'),
+  warn('warn'),
+  serious('serious');
+
+  final String wire;
+  const Severity(this.wire);
+
+  /// Unknown values read as `warn`: shown, but not as a blocking banner.
+  static Severity parse(Object? v) => switch (jStr(v)) {
+    'info' => info,
+    'serious' => serious,
+    _ => warn,
+  };
+}
+
+/// `status.flag` — e.g. "Settle manually: unmapped item X" on an online
+/// order the hub could not insert into the POS.
+class OrderFlag {
+  final String text;
+  final Severity severity;
+  const OrderFlag({required this.text, this.severity = Severity.warn});
+
+  static OrderFlag? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final m = jMap(raw);
+    final text = jStr(m['text']).trim();
+    if (text.isEmpty) return null;
+    return OrderFlag(text: text, severity: Severity.parse(m['severity']));
   }
 }
 
@@ -125,6 +194,52 @@ class OrderStatus {
   /// (or from an agent that doesn't number them).
   final int? poolSeq;
 
+  // --- 2.1.0: POS (SoftTouch) orders, the hub, future orders ---------------
+
+  /// `"softtouch"` on an order pulled from the POS; '' otherwise.
+  final String extSource;
+
+  /// The SoftTouch CHECKNUMBER.
+  final String extRef;
+
+  /// The POS check # (shown in place of the kitchen number).
+  final int? displayNumber;
+
+  /// Settled at the POS terminal (or an inserted online cash pickup settled).
+  final bool paid;
+
+  /// What the driver collects (POS); the agent's figure for online orders.
+  final int? cashDueCents;
+  final int? tipCents;
+
+  /// A POS counter check with no kitchen item: kept, never on Kitchen.
+  final bool boardHidden;
+
+  /// POS: when the cashier pressed Send.
+  final DateTime? sentAt;
+
+  /// Never synced to main (every POS order).
+  final bool localOnly;
+  final OrderFlag? flag;
+
+  /// An online order the hub inserted into the POS: its check #.
+  final int? posCheckNumber;
+
+  /// "POS says #12 (not clocked in)".
+  final String? posDriverNote;
+
+  /// An online order for later (`fulfillment.promised_at` beyond its time).
+  final bool future;
+
+  /// The lead time picked at the first confirm.
+  final int? scheduledLeadMinutes;
+
+  /// promised_at − lead: when it rings again.
+  final DateTime? ringAt;
+
+  /// A scheduled order back in `arrived`: confirmed with no time dialog.
+  final bool rerung;
+
   const OrderStatus({
     required this.state,
     this.arrivalDate,
@@ -143,6 +258,22 @@ class OrderStatus {
     this.poolDriverId,
     this.pooledAt,
     this.poolSeq,
+    this.extSource = '',
+    this.extRef = '',
+    this.displayNumber,
+    this.paid = false,
+    this.cashDueCents,
+    this.tipCents,
+    this.boardHidden = false,
+    this.sentAt,
+    this.localOnly = false,
+    this.flag,
+    this.posCheckNumber,
+    this.posDriverNote,
+    this.future = false,
+    this.scheduledLeadMinutes,
+    this.ringAt,
+    this.rerung = false,
   });
 
   factory OrderStatus.fromJson(Map<String, dynamic> json) => OrderStatus(
@@ -163,6 +294,22 @@ class OrderStatus {
     poolDriverId: jStrOrNull(json['pool_driver_id']),
     pooledAt: jDate(json['pooled_at']),
     poolSeq: jIntOrNull(json['pool_seq']),
+    extSource: jStr(json['ext_source']),
+    extRef: jStr(json['ext_ref']),
+    displayNumber: jIntOrNull(json['display_number']),
+    paid: jBool(json['paid']),
+    cashDueCents: jIntOrNull(json['cash_due_cents']),
+    tipCents: jIntOrNull(json['tip_cents']),
+    boardHidden: jBool(json['board_hidden']),
+    sentAt: jDate(json['sent_at']),
+    localOnly: jBool(json['local_only']),
+    flag: OrderFlag.fromJson(json['flag']),
+    posCheckNumber: jIntOrNull(json['pos_check_number']),
+    posDriverNote: jStrOrNull(jStr(json['pos_driver_note']).trim()),
+    future: jBool(json['future']),
+    scheduledLeadMinutes: jIntOrNull(json['scheduled_lead_minutes']),
+    ringAt: jDate(json['ring_at']),
+    rerung: jBool(json['rerung']),
   );
 
   /// The same status in [driverId]'s pool (null = unassigned) — the
@@ -186,6 +333,22 @@ class OrderStatus {
     pooledAt: driverId == null ? null : (at ?? DateTime.now().toUtc()),
     // Unnumbered until the Pi answers: sorts after the numbered stops.
     poolSeq: driverId == poolDriverId ? poolSeq : null,
+    extSource: extSource,
+    extRef: extRef,
+    displayNumber: displayNumber,
+    paid: paid,
+    cashDueCents: cashDueCents,
+    tipCents: tipCents,
+    boardHidden: boardHidden,
+    sentAt: sentAt,
+    localOnly: localOnly,
+    flag: flag,
+    posCheckNumber: posCheckNumber,
+    posDriverNote: posDriverNote,
+    future: future,
+    scheduledLeadMinutes: scheduledLeadMinutes,
+    ringAt: ringAt,
+    rerung: rerung,
   );
 }
 
@@ -202,7 +365,11 @@ enum GeoState {
   unavailable('unavailable'),
 
   /// Main is still looking (the order arrived recently).
-  pending('pending');
+  pending('pending'),
+
+  /// The address is ambiguous (2.1.0): staff pick one of the candidates or
+  /// drop a pin.
+  check('check');
 
   final String wire;
   const GeoState(this.wire);
@@ -211,8 +378,47 @@ enum GeoState {
     'located' => located,
     'not_found' => notFound,
     'unavailable' => unavailable,
+    'check' => check,
     _ => pending,
   };
+}
+
+/// One possible match for an ambiguous address (`geo.candidates`).
+class GeoCandidate {
+  /// The formatted address.
+  final String label;
+  final String line1;
+  final String city;
+  final String state;
+  final String postalCode;
+  final double? lat;
+  final double? lng;
+
+  const GeoCandidate({
+    this.label = '',
+    this.line1 = '',
+    this.city = '',
+    this.state = '',
+    this.postalCode = '',
+    this.lat,
+    this.lng,
+  });
+
+  factory GeoCandidate.fromJson(Map<String, dynamic> json) => GeoCandidate(
+    label: jStr(json['label']),
+    line1: jStr(json['line1']),
+    city: jStr(json['city']),
+    state: jStr(json['state']),
+    postalCode: jStr(json['postal_code']),
+    lat: _jDouble(json['lat']),
+    lng: _jDouble(json['lng']),
+  );
+
+  /// What staff read: the label, else the parts.
+  String get title {
+    if (label.trim().isNotEmpty) return label.trim();
+    return Address(line1: line1, city: city, state: state, postalCode: postalCode).oneLine;
+  }
 }
 
 class OrderGeo {
@@ -235,6 +441,12 @@ class OrderGeo {
   final bool outsideArea;
   final DateTime? updatedAt;
 
+  /// Up to 3 possible matches while [state] is `check`.
+  final List<GeoCandidate> candidates;
+
+  /// The address staff confirmed (set after a choose).
+  final Address? confirmedAddress;
+
   const OrderGeo({
     required this.state,
     this.lat,
@@ -245,6 +457,8 @@ class OrderGeo {
     this.polyline = '',
     this.outsideArea = false,
     this.updatedAt,
+    this.candidates = const [],
+    this.confirmedAddress,
   });
 
   factory OrderGeo.fromJson(Map<String, dynamic> json) => OrderGeo(
@@ -257,15 +471,20 @@ class OrderGeo {
     polyline: jStr(json['polyline']),
     outsideArea: jBool(json['outside_area']),
     updatedAt: jDate(json['updated_at']),
+    candidates: jList(json['candidates'], GeoCandidate.fromJson).take(3).toList(growable: false),
+    confirmedAddress: json['confirmed_address'] is Map ? Address.fromJson(jMap(json['confirmed_address'])) : null,
   );
 
   /// Located with a usable point.
   bool get hasPoint => state == GeoState.located && lat != null && lng != null && !(lat == 0 && lng == 0);
   bool get isApprox => state == GeoState.located && quality == 'approx';
 
-  /// No usable point and main isn't looking any more: the map offers to drop
-  /// a pin.
-  bool get needsPin => state == GeoState.notFound || state == GeoState.unavailable;
+  /// The address is ambiguous: staff check it (a candidate or a pin).
+  bool get needsCheck => state == GeoState.check;
+
+  /// No usable point and main isn't looking any more (or the address needs a
+  /// check): the map offers to drop a pin.
+  bool get needsPin => state == GeoState.notFound || state == GeoState.unavailable || state == GeoState.check;
   bool get isPinned => quality == 'pinned';
   bool get hasDrive => distanceM > 0 || durationS > 0;
   GeoPoint? get point => hasPoint ? (lat: lat!, lng: lng!) : null;
@@ -574,6 +793,10 @@ class Driver {
   final DateTime? lastReturnedAt;
   final int deliveries;
 
+  /// Their SoftTouch login # (2.1.0) — the hub writes it on the POS checks
+  /// of a run. Null when not set.
+  final String? posNumber;
+
   const Driver({
     required this.id,
     required this.name,
@@ -582,6 +805,7 @@ class Driver {
     this.clockedInAt,
     this.lastReturnedAt,
     this.deliveries = 0,
+    this.posNumber,
   });
 
   /// Clocked in and in the queue — can be sent out.
@@ -600,6 +824,7 @@ class Driver {
     clockedInAt: jDate(json['clocked_in_at']),
     lastReturnedAt: jDate(json['last_returned_at']),
     deliveries: jInt(json['deliveries']),
+    posNumber: jStrOrNull(jStr(json['pos_number']).trim()),
   );
 }
 
@@ -746,6 +971,250 @@ class MapInfo {
   int get hashCode => Object.hash(version, url);
 }
 
+// ---------------------------------------------------------------------------
+// 2.1.0 settings on the Pi: feature toggles, kitchen-ticket toggles, default
+// times — `GET/PUT /api/settings/{features,tickets,times}` and
+// `/api/floor.settings`.
+// ---------------------------------------------------------------------------
+
+/// The six feature switches (Settings → Features). Defaults per the
+/// contract; missing keys keep their default.
+class FeatureToggles {
+  /// The hub pulls POS orders onto the tablet.
+  final bool posPull;
+
+  /// Online cash pickups are inserted into the POS on accept.
+  final bool orderInsert;
+  final bool driverWriteback;
+  final bool addressHeal;
+  final bool futureOrders;
+
+  /// The slow gradient sweep on paid tickets that aren't ready yet.
+  final bool paidWave;
+
+  const FeatureToggles({
+    this.posPull = true,
+    this.orderInsert = false,
+    this.driverWriteback = true,
+    this.addressHeal = true,
+    this.futureOrders = true,
+    this.paidWave = true,
+  });
+
+  factory FeatureToggles.fromJson(Map<String, dynamic> j) => FeatureToggles(
+    posPull: jBool(j['pos_pull'], true),
+    orderInsert: jBool(j['order_insert']),
+    driverWriteback: jBool(j['driver_writeback'], true),
+    addressHeal: jBool(j['address_heal'], true),
+    futureOrders: jBool(j['future_orders'], true),
+    paidWave: jBool(j['paid_wave'], true),
+  );
+
+  Map<String, bool> toJson() => {
+    'pos_pull': posPull,
+    'order_insert': orderInsert,
+    'driver_writeback': driverWriteback,
+    'address_heal': addressHeal,
+    'future_orders': futureOrders,
+    'paid_wave': paidWave,
+  };
+
+  /// A copy with the wire key [key] set to [on] (unknown keys are ignored).
+  FeatureToggles withKey(String key, bool on) => FeatureToggles.fromJson({...toJson(), key: on});
+
+  @override
+  bool operator ==(Object other) => other is FeatureToggles && _mapEq(other.toJson(), toJson());
+
+  @override
+  int get hashCode => Object.hashAll(toJson().values);
+}
+
+/// The six kitchen station ticket switches (Settings → Kitchen tickets).
+class TicketToggles {
+  final bool posDelivery;
+  final bool posTakeout;
+  final bool posCounter;
+  final bool onlineCashPickup;
+  final bool onlineCashDelivery;
+  final bool onlineCard;
+
+  const TicketToggles({
+    this.posDelivery = false,
+    this.posTakeout = false,
+    this.posCounter = false,
+    this.onlineCashPickup = true,
+    this.onlineCashDelivery = true,
+    this.onlineCard = true,
+  });
+
+  factory TicketToggles.fromJson(Map<String, dynamic> j) => TicketToggles(
+    posDelivery: jBool(j['pos_delivery']),
+    posTakeout: jBool(j['pos_takeout']),
+    posCounter: jBool(j['pos_counter']),
+    onlineCashPickup: jBool(j['online_cash_pickup'], true),
+    onlineCashDelivery: jBool(j['online_cash_delivery'], true),
+    onlineCard: jBool(j['online_card'], true),
+  );
+
+  Map<String, bool> toJson() => {
+    'pos_delivery': posDelivery,
+    'pos_takeout': posTakeout,
+    'pos_counter': posCounter,
+    'online_cash_pickup': onlineCashPickup,
+    'online_cash_delivery': onlineCashDelivery,
+    'online_card': onlineCard,
+  };
+
+  TicketToggles withKey(String key, bool on) => TicketToggles.fromJson({...toJson(), key: on});
+
+  @override
+  bool operator ==(Object other) => other is TicketToggles && _mapEq(other.toJson(), toJson());
+
+  @override
+  int get hashCode => Object.hashAll(toJson().values);
+}
+
+bool _mapEq(Map<String, bool> a, Map<String, bool> b) => a.length == b.length && a.keys.every((k) => a[k] == b[k]);
+
+/// The store's default times (X = pickup / dine-in, Y = delivery) that the
+/// accept time picker starts from.
+class DefaultTimes {
+  static const int minMinutes = 1;
+  static const int maxMinutes = 240;
+
+  final int defaultPickupMinutes;
+  final int defaultDeliveryMinutes;
+
+  const DefaultTimes({this.defaultPickupMinutes = 15, this.defaultDeliveryMinutes = 35});
+
+  factory DefaultTimes.fromJson(Map<String, dynamic> j) {
+    int read(String k, int fallback) {
+      final v = jIntOrNull(j[k]);
+      return (v == null || v < minMinutes || v > maxMinutes) ? fallback : v;
+    }
+
+    return DefaultTimes(
+      defaultPickupMinutes: read('default_pickup_minutes', 15),
+      defaultDeliveryMinutes: read('default_delivery_minutes', 35),
+    );
+  }
+
+  Map<String, int> toJson() => {
+    'default_pickup_minutes': defaultPickupMinutes,
+    'default_delivery_minutes': defaultDeliveryMinutes,
+  };
+
+  /// X for pickup / dine-in, Y for delivery.
+  int forType(FulfillmentType t) => t == FulfillmentType.delivery ? defaultDeliveryMinutes : defaultPickupMinutes;
+
+  @override
+  bool operator ==(Object other) =>
+      other is DefaultTimes &&
+      other.defaultPickupMinutes == defaultPickupMinutes &&
+      other.defaultDeliveryMinutes == defaultDeliveryMinutes;
+
+  @override
+  int get hashCode => Object.hash(defaultPickupMinutes, defaultDeliveryMinutes);
+}
+
+/// `/api/floor.settings` and SSE `settings.updated`.
+class FloorSettings {
+  final FeatureToggles features;
+  final TicketToggles tickets;
+  final DefaultTimes times;
+
+  const FloorSettings({
+    this.features = const FeatureToggles(),
+    this.tickets = const TicketToggles(),
+    this.times = const DefaultTimes(),
+  });
+
+  factory FloorSettings.fromJson(Map<String, dynamic> j) => FloorSettings(
+    features: FeatureToggles.fromJson(jMap(j['features'])),
+    tickets: TicketToggles.fromJson(jMap(j['tickets'])),
+    times: DefaultTimes.fromJson(jMap(j['times'])),
+  );
+
+  FloorSettings copyWith({FeatureToggles? features, TicketToggles? tickets, DefaultTimes? times}) => FloorSettings(
+    features: features ?? this.features,
+    tickets: tickets ?? this.tickets,
+    times: times ?? this.times,
+  );
+}
+
+/// One problem the store hub reported (`integration.problems[]`).
+class IntegrationProblem {
+  final String code;
+  final String text;
+  final Severity severity;
+  const IntegrationProblem({this.code = '', required this.text, this.severity = Severity.warn});
+
+  factory IntegrationProblem.fromJson(Map<String, dynamic> j) =>
+      IntegrationProblem(code: jStr(j['code']), text: jStr(j['text']).trim(), severity: Severity.parse(j['severity']));
+
+  /// Identifies the problem for "show once" (code, else the text).
+  String get key => code.isNotEmpty ? '$code|${severity.wire}' : '${text.toLowerCase()}|${severity.wire}';
+
+  bool get isSerious => severity == Severity.serious;
+}
+
+/// The store hub's link to the Pi (`/api/floor.integration`, SSE
+/// `integration.status`). Null on the floor when no hub was ever paired.
+class IntegrationStatus {
+  final bool connected;
+  final bool ok;
+
+  /// off | shadow | live — the hub's insert mode.
+  final String insertMode;
+
+  /// Online cash pickups are really being inserted into the POS now.
+  final bool insertLive;
+  final List<IntegrationProblem> problems;
+  final DateTime? lastSeenAt;
+
+  const IntegrationStatus({
+    this.connected = false,
+    this.ok = false,
+    this.insertMode = 'off',
+    this.insertLive = false,
+    this.problems = const [],
+    this.lastSeenAt,
+  });
+
+  static IntegrationStatus? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final j = jMap(raw);
+    return IntegrationStatus(
+      connected: jBool(j['connected']),
+      ok: jBool(j['ok']),
+      insertMode: jStr(j['insert_mode'], 'off'),
+      insertLive: jBool(j['insert_live']),
+      problems: jList(j['problems'], IntegrationProblem.fromJson).where((p) => p.text.isNotEmpty).toList(),
+      lastSeenAt: jDate(j['last_seen_at']),
+    );
+  }
+
+  List<IntegrationProblem> get serious => problems.where((p) => p.isSerious).toList(growable: false);
+  List<IntegrationProblem> get minor => problems.where((p) => !p.isSerious).toList(growable: false);
+}
+
+/// SSE `integration.toast` → `{text, severity, code?}`: a one-off message
+/// from the Pi about the POS link (e.g. "POS says #12 — not clocked in").
+class IntegrationToast {
+  final String code;
+  final String text;
+  final Severity severity;
+  const IntegrationToast({this.code = '', required this.text, this.severity = Severity.warn});
+
+  static IntegrationToast? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final j = jMap(raw);
+    final text = jStr(j['text'] ?? j['message']).trim();
+    if (text.isEmpty) return null;
+    return IntegrationToast(code: jStr(j['code']), text: text, severity: Severity.parse(j['severity']));
+  }
+}
+
 /// Delivery settings defaults (agent settings table).
 const int kDefaultSoonReadyMinutes = 5;
 const int kDefaultDeliveryTargetMinutes = 45;
@@ -783,6 +1252,13 @@ class Floor {
   final StoreGeo? store;
   final MapInfo? map;
 
+  /// Feature / kitchen-ticket switches and default times (2.1.0; defaults
+  /// from an older Pi).
+  final FloorSettings settings;
+
+  /// The store hub's link (null when the Pi has none).
+  final IntegrationStatus? integration;
+
   const Floor({
     required this.batch,
     this.kitchenNext = 0,
@@ -796,6 +1272,8 @@ class Floor {
     this.deliveryTargetMinutes = kDefaultDeliveryTargetMinutes,
     this.store,
     this.map,
+    this.settings = const FloorSettings(),
+    this.integration,
   });
 
   factory Floor.fromJson(Map<String, dynamic> json) {
@@ -820,10 +1298,18 @@ class Floor {
           : kDefaultDeliveryTargetMinutes,
       store: StoreGeo.fromJson(json['store']),
       map: MapInfo.fromJson(json['map']),
+      settings: FloorSettings.fromJson(jMap(json['settings'])),
+      integration: IntegrationStatus.fromJson(json['integration']),
     );
   }
 
-  Floor copyWith({Batch? batch, int? soonReadyMinutes, int? deliveryTargetMinutes}) => Floor(
+  Floor copyWith({
+    Batch? batch,
+    int? soonReadyMinutes,
+    int? deliveryTargetMinutes,
+    FloorSettings? settings,
+    IntegrationStatus? integration,
+  }) => Floor(
     batch: batch ?? this.batch,
     kitchenNext: kitchenNext,
     lastPrepMinutes: lastPrepMinutes,
@@ -836,7 +1322,12 @@ class Floor {
     deliveryTargetMinutes: deliveryTargetMinutes ?? this.deliveryTargetMinutes,
     store: store,
     map: map,
+    settings: settings ?? this.settings,
+    integration: integration ?? this.integration,
   );
+
+  FeatureToggles get features => settings.features;
+  DefaultTimes get times => settings.times;
 
   /// The prep time to preselect at accept: last used, if it is one of the
   /// picks; otherwise the closest pick.
