@@ -12,6 +12,7 @@ import '../deliveries/deliveries_pane.dart';
 import '../drivers/driver_fab.dart';
 import '../drivers/drivers_pane.dart';
 import '../history/history_pane.dart';
+import '../integration/integration_alerts.dart';
 import '../kitchen/kitchen_pane.dart';
 import '../printers/printers_pane.dart';
 import '../settings/settings_screen.dart';
@@ -62,9 +63,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onDestinationSelected: (i) => setState(() => _section = HomeSection.values[i]),
               header: Column(
                 children: [
-                  _ThemeToggleLogo(
-                    onTap: () => ref.read(themeModeProvider.notifier).toggle(),
-                  ),
+                  _ThemeToggleLogo(onTap: () => ref.read(themeModeProvider.notifier).toggle()),
                   const SizedBox(height: 10),
                   const _ConnectionDot(),
                 ],
@@ -104,22 +103,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 children: [
                   const PiUnreachableBanner(),
                   const WarningBars(),
+                  const IntegrationBanner(),
                   Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 260),
-                      reverseDuration: const Duration(milliseconds: 140),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      layoutBuilder: (current, previous) =>
-                          Stack(fit: StackFit.expand, alignment: Alignment.center, children: [...previous, ?current]),
-                      transitionBuilder: (child, anim) => FadeTransition(
-                        opacity: anim,
-                        child: SlideTransition(
-                          position: Tween<Offset>(begin: const Offset(0, 0.015), end: Offset.zero).animate(anim),
-                          child: child,
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 260),
+                            reverseDuration: const Duration(milliseconds: 140),
+                            switchInCurve: Curves.easeOutCubic,
+                            switchOutCurve: Curves.easeInCubic,
+                            layoutBuilder: (current, previous) => Stack(
+                              fit: StackFit.expand,
+                              alignment: Alignment.center,
+                              children: [...previous, ?current],
+                            ),
+                            transitionBuilder: (child, anim) => FadeTransition(
+                              opacity: anim,
+                              child: SlideTransition(
+                                position: Tween<Offset>(begin: const Offset(0, 0.015), end: Offset.zero).animate(anim),
+                                child: child,
+                              ),
+                            ),
+                            child: KeyedSubtree(key: ValueKey<HomeSection>(_section), child: _buildSection(_section)),
+                          ),
                         ),
-                      ),
-                      child: KeyedSubtree(key: ValueKey<HomeSection>(_section), child: _buildSection(_section)),
+                        // Hub info / warnings, top-right over every pane.
+                        const Positioned(top: 12, right: 16, child: IntegrationToastHost()),
+                      ],
                     ),
                   ),
                 ],

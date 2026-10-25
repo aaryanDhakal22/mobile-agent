@@ -559,3 +559,92 @@ class _TextDialogState extends State<_TextDialog> {
     );
   }
 }
+
+/// The small "POS" tag on an order pulled from the store's old POS (1.5.0).
+class PosTag extends StatelessWidget {
+  final Color? color;
+  final double size;
+  const PosTag({super.key, this.color, this.size = 11});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? context.palette.textSecondary;
+    return Container(
+      key: const ValueKey('pos-tag'),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: c, width: 1.5),
+      ),
+      child: Text(
+        'POS',
+        style: TextStyle(fontSize: size, fontWeight: FontWeight.w800, letterSpacing: 1.2, color: c, height: 1.2),
+      ),
+    );
+  }
+}
+
+/// "PAID": settled at the POS (or an inserted online cash pickup settled).
+class PaidBadge extends StatelessWidget {
+  final double size;
+  const PaidBadge({super.key, this.size = 11});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey('paid-badge'),
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+    decoration: BoxDecoration(color: QuiccColors.statusPaid, borderRadius: BorderRadius.circular(6)),
+    child: Text(
+      'PAID',
+      style: TextStyle(
+        fontSize: size,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 1.2,
+        color: QuiccColors.brand900,
+        height: 1.2,
+      ),
+    ),
+  );
+}
+
+/// Colour for a hub severity: info blue, warn amber, serious red.
+Color severityColor(Severity s) => switch (s) {
+  Severity.info => QuiccColors.statusOpen,
+  Severity.warn => QuiccColors.statusFiring,
+  Severity.serious => QuiccColors.statusVoided,
+};
+
+/// An order's `flag` (e.g. "Settle manually: unmapped item X"): an icon and
+/// the text in the severity colour, on a tinted strip.
+class OrderFlagLine extends StatelessWidget {
+  final OrderFlag flag;
+  final double fontSize;
+  const OrderFlagLine(this.flag, {super.key, this.fontSize = 13});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = severityColor(flag.severity);
+    return Container(
+      key: const ValueKey('order-flag'),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(QuiccRadius.sm),
+        border: Border.all(color: c.withValues(alpha: 0.7)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(flag.severity == Severity.info ? Icons.info_outline : Icons.warning_amber, size: fontSize + 5, color: c),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              flag.text,
+              style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

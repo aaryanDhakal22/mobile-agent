@@ -12,9 +12,13 @@ const String kReprintReceiptLabel = 'Reprint receipt';
 const String kResendKitchenLabel = 'Resend to kitchen';
 
 /// Resend makes sense once the order has a kitchen number (accepted, ready,
-/// out, delivered) — not while it is waiting or after it was cancelled.
+/// out, delivered) — or is a POS order, which has its check # instead — not
+/// while it is waiting (or scheduled for later) or after it was cancelled.
 bool canResendToKitchen(StoredOrder so) =>
-    so.status.kitchenNumber != null && so.state != OrderState.arrived && so.state != OrderState.cancelled;
+    (so.status.kitchenNumber != null || so.isPos) &&
+    so.state != OrderState.arrived &&
+    so.state != OrderState.scheduled &&
+    so.state != OrderState.cancelled;
 
 /// "Send to the kitchen again?" — always asked before resending.
 Future<bool> confirmResendKitchen(BuildContext context, StoredOrder so) => confirmDialog(

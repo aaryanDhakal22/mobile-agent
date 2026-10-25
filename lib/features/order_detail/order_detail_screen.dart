@@ -6,8 +6,10 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../arrived/accept_controls.dart';
+import '../arrived/time_picker.dart';
 import '../common/widgets.dart';
 import '../kitchen/resend_kitchen.dart';
+import '../maps/check_address_sheet.dart';
 import '../maps/delivery_map.dart';
 
 /// Full order: items (size / modifiers / notes), customer, address, kitchen
@@ -34,8 +36,10 @@ class OrderDetailScreen extends ConsumerWidget {
               so.displayNumber,
               style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
             ),
+            if (so.isPos) ...[const SizedBox(width: 10), const PosTag(size: 14)],
             const SizedBox(width: 16),
             StatePill(so.state, large: true),
+            if (so.status.paid) ...[const SizedBox(width: 12), const PaidBadge(size: 14)],
             const SizedBox(width: 16),
             FulfillmentTag(o.fulfillment.type, size: 15),
           ],
@@ -63,7 +67,7 @@ class OrderDetailScreen extends ConsumerWidget {
                 ],
                 const SizedBox(height: 20),
                 const Divider(),
-                _Totals(o),
+                _Totals(so),
               ],
             ),
           ),
@@ -73,6 +77,23 @@ class OrderDetailScreen extends ConsumerWidget {
             child: ListView(
               padding: const EdgeInsets.all(28),
               children: [
+                if (so.status.flag != null) ...[OrderFlagLine(so.status.flag!, fontSize: 16), const SizedBox(height: 14)],
+                if (so.status.posDriverNote != null) ...[
+                  Row(
+                    key: const ValueKey('pos-driver-note'),
+                    children: [
+                      const Icon(Icons.badge_outlined, color: QuiccColors.statusFiring),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          so.status.posDriverNote!,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 _Actions(order: so),
                 const SizedBox(height: 24),
                 const Eyebrow('Customer'),
@@ -81,6 +102,10 @@ class OrderDetailScreen extends ConsumerWidget {
                 if (o.customer.phone.isNotEmpty) Text(o.customer.phone, style: const TextStyle(fontSize: 16)),
                 if (o.customer.email.isNotEmpty)
                   Text(o.customer.email, style: TextStyle(color: context.palette.textSecondary)),
+                if (so.isDelivery && so.geo?.needsCheck == true) ...[
+                  const SizedBox(height: 18),
+                  CheckAddressButton(order: so),
+                ],
                 if (so.isDelivery && o.fulfillment.address != null && !o.fulfillment.address!.isEmpty) ...[
                   const SizedBox(height: 18),
                   DeliveryMap(key: ValueKey('map-${so.id}'), order: so),
@@ -90,6 +115,11 @@ class OrderDetailScreen extends ConsumerWidget {
                   const Eyebrow('Delivery address'),
                   const SizedBox(height: 6),
                   for (final l in o.fulfillment.address!.lines) Text(l, style: const TextStyle(fontSize: 16)),
+                  if (so.geo?.confirmedAddress != null && !so.geo!.confirmedAddress!.isEmpty)
+                    Text(
+                      'Confirmed: ${so.geo!.confirmedAddress!.oneLine}',
+                      style: const TextStyle(color: QuiccColors.statusPaid, fontWeight: FontWeight.w600),
+                    ),
                   if (o.fulfillment.address!.notes.isNotEmpty)
                     Text(
                       o.fulfillment.address!.notes,
@@ -104,10 +134,16 @@ class OrderDetailScreen extends ConsumerWidget {
                 const SizedBox(height: 18),
                 const Eyebrow('Floor'),
                 const SizedBox(height: 6),
-                _kv(context, 'Kitchen #', so.status.kitchenNumber?.toString() ?? '—'),
+                if (so.isPos)
+                  _kv(context, 'POS check #', so.status.displayNumber?.toString() ?? '—')
+                else
+                  _kv(context, 'Kitchen #', so.status.kitchenNumber?.toString() ?? '—'),
+                if (so.status.posCheckNumber != null) _kv(context, 'POS check #', '${so.status.posCheckNumber}'),
                 _kv(context, 'Prep', so.status.prepMinutes == null ? '—' : '${so.status.prepMinutes} min'),
                 _kv(context, 'Batch', so.status.batchId == 0 ? '—' : '#${so.status.batchId}'),
                 if (so.status.driverName != null) _kv(context, 'Driver', so.status.driverName!),
+                if (so.status.scheduledLeadMinutes != null)
+                  _kv(context, 'Lead', '${so.status.scheduledLeadMinutes} min before due'),
                 if (o.sourceEventId.isNotEmpty) _kv(context, 'Vendor #', o.sourceEventId),
                 const SizedBox(height: 18),
                 const Eyebrow('Timeline'),
@@ -138,7 +174,10 @@ class OrderDetailScreen extends ConsumerWidget {
     final st = so.status;
     final rows = <(String, DateTime?)>[
       ('Placed', so.order.placedAt),
+      ('Sent (POS)', st.sentAt),
       ('Arrived', st.arrivalDate),
+      if (st.future || st.scheduledLeadMinutes != null) ('Due', so.dueAt),
+      ('Rings again', st.ringAt),
       ('Accepted', st.acceptedAt),
       ('Printed', st.printedDate),
       ('Est. ready', st.estimatedReadyAt),
@@ -219,11 +258,12 @@ class _ItemBlock extends StatelessWidget {
 }
 
 class _Totals extends StatelessWidget {
-  final OrderSnapshot o;
-  const _Totals(this.o);
+  final StoredOrder so;
+  const _Totals(this.so);
 
   @override
   Widget build(BuildContext context) {
+    final o = so.order;
     final m = o.money;
     Widget row(String k, int cents, {bool bold = false}) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -265,11 +305,13 @@ class _Totals extends StatelessWidget {
               style: TextStyle(color: context.palette.textMuted),
             ),
           ),
-        if (!o.isPrepaid)
+        if (so.status.paid)
+          const Align(alignment: Alignment.centerRight, child: PaidBadge(size: 14))
+        else if (!so.isPaid)
           Align(
             alignment: Alignment.centerRight,
             child: Text(
-              'CASH DUE ${money(o.cashDueCents)}',
+              'CASH DUE ${money(so.cashDueCents)}',
               style: const TextStyle(color: QuiccColors.statusFiring, fontWeight: FontWeight.w700),
             ),
           ),
@@ -311,6 +353,7 @@ class _ActionsState extends ConsumerState<_Actions> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (so.state == OrderState.arrived) AcceptControls(key: ValueKey('accept-${so.id}'), order: so),
+        if (so.state == OrderState.scheduled) _LaterPanel(order: so),
         if (so.state == OrderState.accepted)
           SizedBox(
             height: 60,
@@ -324,7 +367,7 @@ class _ActionsState extends ConsumerState<_Actions> {
               label: const Text('READY'),
             ),
           ),
-        if (so.state != OrderState.arrived) ...[
+        if (so.state != OrderState.arrived && so.state != OrderState.scheduled) ...[
           const SizedBox(height: 10),
           Row(
             children: [
@@ -373,6 +416,69 @@ class _ActionsState extends ConsumerState<_Actions> {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// A scheduled future order: when it is due, when it rings again, and
+/// CHANGE LEAD TIME (the same picker).
+class _LaterPanel extends ConsumerWidget {
+  final StoredOrder order;
+  const _LaterPanel({required this.order});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final so = order;
+    final due = so.dueAt;
+    final lead = so.status.scheduledLeadMinutes;
+    final ring = so.status.ringAt ?? (due != null && lead != null ? due.subtract(Duration(minutes: lead)) : null);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: context.palette.bgElevated,
+        borderRadius: BorderRadius.circular(QuiccRadius.md),
+        border: Border.all(color: context.palette.borderSoft),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Eyebrow('Later order'),
+          const SizedBox(height: 6),
+          Text(
+            due == null ? 'Waiting for its time' : 'Due ${clock(due)}',
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+          ),
+          if (ring != null)
+            Text(
+              'Rings again at ${clock(ring)}${lead == null ? '' : ' ($lead min before)'}. Nothing has printed yet.',
+              style: TextStyle(color: context.palette.textSecondary),
+            ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 56,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final times = ref.read(floorProvider).settings.times;
+                final next = await showLeadTimeDialog(
+                  context,
+                  base: defaultMinutesFor(so, times),
+                  current: lead,
+                  subtitle: due == null ? null : 'Due ${clock(due)}',
+                );
+                if (next == null || next == lead || !context.mounted) return;
+                try {
+                  await ref.read(floorProvider.notifier).schedule(so.id, next);
+                  if (context.mounted) toast(context, 'Lead time $next min');
+                } catch (e) {
+                  if (context.mounted) toastError(context, e, lead: 'Lead time not changed', area: 'order');
+                }
+              },
+              icon: const Icon(Icons.schedule),
+              label: const Text('CHANGE LEAD TIME'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

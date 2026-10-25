@@ -8,6 +8,7 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../common/info_button.dart';
 import '../common/widgets.dart';
+import 'driver_dialog.dart';
 import 'drivers_texts.dart';
 
 /// The agent refuses (409 `driver_not_available`) to remove a driver who is
@@ -43,16 +44,23 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
   }
 
   Future<void> _add() async {
-    final name = await textDialog(context, title: 'Add driver', hint: 'Name', confirm: 'ADD');
-    if (name == null || name.isEmpty || !mounted) return;
-    final ok = await _run(() => _floor.createDriver(name), 'Could not add $name');
-    if (ok && mounted) toast(context, '$name added — clock them in when they start');
+    final r = await driverDialog(context, title: 'Add driver', confirm: 'ADD');
+    if (r == null || r.name.isEmpty || !mounted) return;
+    final ok = await _run(
+      () => _floor.createDriver(r.name, posNumber: r.posNumber.isEmpty ? null : r.posNumber),
+      'Could not add ${r.name}',
+    );
+    if (ok && mounted) toast(context, '${r.name} added — clock them in when they start');
   }
 
-  Future<void> _rename(Driver d) async {
-    final name = await textDialog(context, title: 'Rename driver', initial: d.name);
-    if (name == null || name.isEmpty || name == d.name || !mounted) return;
-    await _run(() => _floor.renameDriver(d.id, name), 'Could not rename');
+  /// Name and Driver # (their SoftTouch login #); only what changed is sent.
+  Future<void> _edit(Driver d) async {
+    final r = await driverDialog(context, title: 'Edit driver', name: d.name, posNumber: d.posNumber ?? '');
+    if (r == null || r.name.isEmpty || !mounted) return;
+    final name = r.name == d.name ? null : r.name;
+    final number = r.posNumber == (d.posNumber ?? '') ? null : r.posNumber;
+    if (name == null && number == null) return;
+    await _run(() => _floor.updateDriver(d.id, name: name, posNumber: number), 'Could not save ${d.name}');
   }
 
   Future<void> _remove(Driver d) async {
@@ -230,7 +238,7 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
                           busy: _busy.contains(d.id),
                           onClockIn: () => _clockIn(d),
                           onClockOut: () => _clockOut(d),
-                          onRename: () => _rename(d),
+                          onEdit: () => _edit(d),
                           onRemove: () => _remove(d),
                         ),
                       );
@@ -252,7 +260,7 @@ class _DriverRow extends StatelessWidget {
   final bool busy;
   final VoidCallback onClockIn;
   final VoidCallback onClockOut;
-  final VoidCallback onRename;
+  final VoidCallback onEdit;
   final VoidCallback onRemove;
 
   const _DriverRow({
@@ -262,7 +270,7 @@ class _DriverRow extends StatelessWidget {
     required this.busy,
     required this.onClockIn,
     required this.onClockOut,
-    required this.onRename,
+    required this.onEdit,
     required this.onRemove,
   });
 
@@ -270,6 +278,7 @@ class _DriverRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final d = driver;
     final details = [
+      ?driverNumberLabel(d.posNumber),
       if (d.isOff) 'Clocked out' else if (d.clockedInAt != null) 'In since ${clock(d.clockedInAt)}',
       '${d.deliveries} run${d.deliveries == 1 ? '' : 's'} this batch',
       if (d.lastReturnedAt != null && !d.isOff) 'back ${clock(d.lastReturnedAt)}',
@@ -329,7 +338,7 @@ class _DriverRow extends StatelessWidget {
                       ),
               ),
               const SizedBox(width: 4),
-              IconButton(tooltip: 'Rename', onPressed: onRename, icon: const Icon(Icons.edit_outlined)),
+              IconButton(tooltip: 'Edit name / Driver #', onPressed: onEdit, icon: const Icon(Icons.edit_outlined)),
               IconButton(
                 tooltip: 'Remove',
                 onPressed: onRemove,

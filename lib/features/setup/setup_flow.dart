@@ -3,7 +3,7 @@ import '../../core/models.dart';
 
 /// The setup wizard's steps, in order. Everything up to [signIn] happens
 /// before the tablet is paired; everything after needs the pairing.
-enum SetupStep { welcome, findPi, signIn, tabletChecks, piReady, testRing, testPrint, drivers, chime, done }
+enum SetupStep { welcome, findPi, signIn, tabletChecks, piReady, testRing, testPrint, drivers, times, chime, done }
 
 extension SetupStepX on SetupStep {
   bool get beforePairing => index <= SetupStep.signIn.index;
@@ -18,6 +18,7 @@ extension SetupStepX on SetupStep {
     SetupStep.testRing => 'Test ring',
     SetupStep.testPrint => 'Test print',
     SetupStep.drivers => 'Drivers',
+    SetupStep.times => 'Default times',
     SetupStep.chime => 'Order chime',
     SetupStep.done => 'Done',
   };

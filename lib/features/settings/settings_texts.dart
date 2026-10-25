@@ -144,3 +144,35 @@ const kDeliveriesInfo = InfoText(
       'Soon ready: AUTO also plans deliveries still cooking that should be ready within this many '
       'minutes, so a driver can wait for them.',
 );
+
+const kFeaturesInfo = InfoText(
+  'Features',
+  'Switches for the newer parts of Quicc. Each one takes effect at once on the Pi, this tablet and '
+      'the store hub (the box that links Quicc to the old POS).\n\n'
+      'POS orders pull-in: phone and counter orders keyed on the old POS show up here.\n'
+      'Online order insert: online cash pickups are put into the old POS when you accept them, so '
+      'they can be paid at the terminal.\n'
+      'Driver write-back: the old POS learns which driver took its deliveries.\n'
+      'Address heal: a delivery address you fix here is fixed in the old POS too.\n'
+      'Future orders: an order for later rings once to pick a lead time, then again when it is time '
+      'to cook. Off: it is treated like any other order.\n'
+      'Paid wave: paid tickets that aren\'t ready yet get a slow green wave on the Kitchen board.',
+);
+
+const kTicketsInfo = InfoText(
+  'Kitchen tickets',
+  'Which orders print kitchen (station) tickets by themselves.\n\n'
+      'POS orders are printed by the old POS when the cashier sends them, so their switches start '
+      'off. Turn one on only if the old POS stops printing that kind.\n\n'
+      'Online cash pickups print tickets only while the store hub is really putting them into the '
+      'old POS; otherwise they print just the receipt, as before.\n\n'
+      'Reprint and Resend on a ticket always work.',
+);
+
+const kTimesInfo = InfoText(
+  'Default times',
+  'The time picker you see when you accept an order starts from these: the pickup time for pickup '
+      'and counter orders, the delivery time for deliveries. You can pick that time, 5 more, or 10 '
+      'more (and step it up from there).\n\n'
+      'POS orders use them too: their "ready by" counts from when the cashier sent them.',
+);

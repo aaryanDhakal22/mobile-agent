@@ -74,7 +74,7 @@ class _DeliveriesSettingsCardState extends ConsumerState<DeliveriesSettingsCard>
             style: TextStyle(color: context.palette.textSecondary, fontSize: 16),
           )
         else ...[
-          _Stepper(
+          SettingsStepper(
             key: const ValueKey('delivery-target'),
             label: 'Delivery target',
             help: 'Most minutes from order to door',
@@ -85,7 +85,7 @@ class _DeliveriesSettingsCardState extends ConsumerState<DeliveriesSettingsCard>
             onChanged: (v) => setState(() => _target = v),
           ),
           const SizedBox(height: 8),
-          _Stepper(
+          SettingsStepper(
             key: const ValueKey('soon-ready'),
             label: 'Soon ready',
             help: 'Also plan food ready within',
@@ -126,8 +126,8 @@ class _DeliveriesSettingsCardState extends ConsumerState<DeliveriesSettingsCard>
   }
 }
 
-/// A big − value + control.
-class _Stepper extends StatelessWidget {
+/// A big − value + control (Deliveries, Default times).
+class SettingsStepper extends StatelessWidget {
   final String label;
   final String help;
   final int value;
@@ -135,7 +135,7 @@ class _Stepper extends StatelessWidget {
   final int min;
   final int max;
   final ValueChanged<int> onChanged;
-  const _Stepper({
+  const SettingsStepper({
     super.key,
     required this.label,
     required this.help,

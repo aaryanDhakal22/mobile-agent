@@ -16,6 +16,7 @@ import '../diagnose/diagnose_entry.dart';
 import '../setup/setup_entry.dart';
 import 'chime_picker.dart';
 import 'deliveries_settings_card.dart';
+import 'pos_settings_cards.dart';
 import 'receipt_settings_card.dart';
 import 'settings_card.dart';
 import 'settings_texts.dart';
@@ -50,6 +51,9 @@ class SettingsScreen extends ConsumerWidget {
         ),
         ReceiptSettingsCard(),
         DeliveriesSettingsCard(),
+        DefaultTimesSettingsCard(),
+        FeaturesSettingsCard(),
+        KitchenTicketsSettingsCard(),
         _ChecksCard(),
         _ThemeCard(),
         AboutDiagnosticsCard(),

@@ -4,12 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/alert_player.dart';
+import '../../core/api_client.dart';
 import '../../core/device_platform.dart';
+import '../../core/friendly_error.dart';
 import '../../core/local_log.dart';
+import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../common/widgets.dart';
 import '../diagnose/diagnose_entry.dart';
+import '../settings/pos_settings_cards.dart';
 import 'setup_controller.dart';
 import 'setup_flow.dart';
 import 'setup_texts.dart';
@@ -24,7 +28,7 @@ import 'steps/test_ring_step.dart';
 
 /// First-time setup, step by step: welcome → find the Pi → sign in (manager
 /// login for a new Pi, a 6-digit code otherwise) → tablet checks → Pi ready →
-/// test ring → test print → drivers → chime → done. Progress is saved on
+/// test ring → test print → drivers → default times → chime → done. Progress is saved on
 /// every step (see SetupController); after pairing, "Finish later" lets the
 /// counter take orders and Settings offers CONTINUE.
 class SetupWizard extends ConsumerWidget {
@@ -135,6 +139,7 @@ class SetupWizard extends ConsumerWidget {
           child: const Text('SKIP', style: TextStyle(fontSize: 17)),
         ),
       ),
+      SetupStep.times => const _TimesStep(),
       SetupStep.chime => StepLayout(
         title: 'Pick the order chime',
         subtitle: 'The sound a new order makes. Tap PLAY to hear it.',
@@ -144,6 +149,73 @@ class SetupWizard extends ConsumerWidget {
       ),
       SetupStep.done => const _DoneStep(),
     };
+  }
+}
+
+/// "How long do orders usually take?": the default pickup and delivery
+/// times (X / Y) the accept time picker starts from, saved on CONTINUE.
+class _TimesStep extends ConsumerStatefulWidget {
+  const _TimesStep();
+
+  @override
+  ConsumerState<_TimesStep> createState() => _TimesStepState();
+}
+
+class _TimesStepState extends ConsumerState<_TimesStep> {
+  DefaultTimes? _t;
+  bool _saving = false;
+  String? _error;
+
+  Future<void> _continue(DefaultTimes t) async {
+    final ctl = ref.read(setupProvider.notifier);
+    if (t == ref.read(floorProvider).settings.times) {
+      ctl.next();
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref.read(floorProvider.notifier).saveTimes(t);
+      ctl.next();
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => _error = e is AgentException && e.code == kSettingsUnsupported
+              ? 'This Pi needs an update for default times — tap SKIP and set them later.'
+              : FriendlyError.from(e).short,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final saved = ref.watch(floorProvider.select((s) => s.settings.times));
+    final t = _t ?? saved;
+    return StepLayout(
+      title: 'How long do orders usually take?',
+      subtitle: 'The time picker starts here when you accept an order.',
+      info: SetupInfo.times,
+      body: ListView(
+        children: [
+          DefaultTimesFields(value: t, onChanged: (v) => setState(() => _t = v)),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(_error!, style: const TextStyle(color: QuiccColors.statusVoided, fontSize: 16)),
+            ),
+        ],
+      ),
+      primary: BigButton('CONTINUE', busy: _saving, onPressed: _saving ? null : () => _continue(t)),
+      secondary: TextButton(
+        onPressed: _saving ? null : ref.read(setupProvider.notifier).next,
+        child: const Text('SKIP', style: TextStyle(fontSize: 17)),
+      ),
+    );
   }
 }
 

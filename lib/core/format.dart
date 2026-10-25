@@ -60,6 +60,7 @@ String minutes(Duration d) {
 
 Color stateColor(OrderState s) => switch (s) {
   OrderState.arrived => QuiccColors.statusFiring,
+  OrderState.scheduled => Colors.grey,
   OrderState.accepted => QuiccColors.statusOpen,
   OrderState.ready => QuiccColors.statusPaid,
   OrderState.onDelivery => QuiccColors.brand400,

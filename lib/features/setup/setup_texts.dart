@@ -98,6 +98,13 @@ class SetupInfo {
         'another, so you know exactly which printers work.',
   );
 
+  static const times = InfoText(
+    'Default times',
+    'How long a pickup and a delivery usually take. When you accept an order the time picker starts '
+        'from these — you can pick that time, 5 more or 10 more. You can change them later in '
+        'Settings → Default times.',
+  );
+
   static const drivers = InfoText(
     'Drivers',
     'Add the drivers who work tonight. Clocked-in drivers are offered when you send a delivery '

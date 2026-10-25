@@ -5,6 +5,7 @@ import '../../../core/friendly_error.dart';
 import '../../../core/models.dart';
 import '../../../core/providers.dart';
 import '../../../theme/quicc_colors.dart';
+import '../../drivers/driver_dialog.dart';
 
 /// "Who drives tonight?": the roster (restored from the Pi, or empty for a
 /// new store), a quick add box, a clock-in switch per driver, drag to reorder.
@@ -21,6 +22,7 @@ class DriversPanel extends ConsumerStatefulWidget {
 
 class _DriversPanelState extends ConsumerState<DriversPanel> {
   final _name = TextEditingController();
+  final _number = TextEditingController();
   bool _busy = false;
   String? _error;
 
@@ -40,6 +42,7 @@ class _DriversPanelState extends ConsumerState<DriversPanel> {
   @override
   void dispose() {
     _name.dispose();
+    _number.dispose();
     super.dispose();
   }
 
@@ -60,8 +63,21 @@ class _DriversPanelState extends ConsumerState<DriversPanel> {
   Future<void> _add() async {
     final n = _name.text.trim();
     if (n.isEmpty) return;
-    await _do(() => ref.read(floorProvider.notifier).createDriver(n));
-    if (mounted && _error == null) _name.clear();
+    final number = _number.text.trim();
+    await _do(() => ref.read(floorProvider.notifier).createDriver(n, posNumber: number.isEmpty ? null : number));
+    if (mounted && _error == null) {
+      _name.clear();
+      _number.clear();
+    }
+  }
+
+  Future<void> _edit(Driver d) async {
+    final r = await driverDialog(context, title: 'Edit driver', name: d.name, posNumber: d.posNumber ?? '');
+    if (r == null || r.name.isEmpty || !mounted) return;
+    final name = r.name == d.name ? null : r.name;
+    final number = r.posNumber == (d.posNumber ?? '') ? null : r.posNumber;
+    if (name == null && number == null) return;
+    await _do(() => ref.read(floorProvider.notifier).updateDriver(d.id, name: name, posNumber: number));
   }
 
   @override
@@ -84,6 +100,11 @@ class _DriversPanelState extends ConsumerState<DriversPanel> {
             ),
             const SizedBox(width: 12),
             SizedBox(
+              width: 150,
+              child: DriverNumberField(controller: _number, dense: true, onSubmitted: (_) => _add()),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
               height: 56,
               child: FilledButton.icon(
                 onPressed: _busy ? null : _add,
@@ -92,6 +113,10 @@ class _DriversPanelState extends ConsumerState<DriversPanel> {
               ),
             ),
           ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(kDriverNumberHelp, style: TextStyle(color: context.palette.textMuted, fontSize: 14)),
         ),
         if (_error != null)
           Padding(
@@ -129,9 +154,18 @@ class _DriversPanelState extends ConsumerState<DriversPanel> {
                             child: const Icon(Icons.drag_indicator, size: 30),
                           ),
                           title: Text(drivers[i].name, style: const TextStyle(fontSize: 20)),
+                          subtitle: Text(
+                            driverNumberLabel(drivers[i].posNumber) ?? 'No Driver # yet',
+                            style: TextStyle(color: context.palette.textSecondary),
+                          ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              IconButton(
+                                tooltip: 'Edit name / Driver #',
+                                onPressed: _busy ? null : () => _edit(drivers[i]),
+                                icon: const Icon(Icons.edit_outlined),
+                              ),
                               Text(_clockLabel(drivers[i]), style: const TextStyle(fontSize: 16)),
                               Switch(
                                 value: drivers[i].status != DriverStatus.off,

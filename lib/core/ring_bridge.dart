@@ -7,6 +7,7 @@ import 'alarm.dart';
 import 'alert_player.dart';
 import 'providers.dart';
 import 'ring_platform.dart';
+import 'soft_chime.dart';
 import 'sse.dart';
 
 /// Overridden in tests with a fake.
@@ -20,7 +21,8 @@ final ringPlatformProvider = Provider<RingPlatform>((_) => RingPlatform());
 /// * the alarm state drives the chime (AlertPlayer) and the full-screen
 ///   new-order notification;
 /// * being paired runs the "Listening for new orders" foreground service,
-///   whose text follows the connection to the Pi.
+///   whose text follows the connection to the Pi;
+/// * a new POS delivery plays the soft chime once (no ring).
 ///
 /// Returns a function that undoes it (tests).
 VoidCallback startRingBridge(ProviderContainer c) {
@@ -72,6 +74,14 @@ VoidCallback startRingBridge(ProviderContainer c) {
   subs.add(
     c.listen<SseStatus>(floorProvider.select((s) => s.connection), (prev, next) {
       if (c.read(pairingProvider) != null && prev != next) unawaited(ring.updateService(serviceText(next)));
+    }),
+  );
+
+  // A new POS delivery (SSE `order.added` with `chime`): the soft chime,
+  // once — unless the new-order alarm is already ringing over it.
+  subs.add(
+    c.listen<int>(floorProvider.select((s) => s.chimes), (prev, next) {
+      if (prev != null && next > prev && !AlertPlayer.alarmActive) unawaited(c.read(softChimeProvider).play());
     }),
   );
 
