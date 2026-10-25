@@ -194,7 +194,8 @@ class _NewOrderAlertState extends ConsumerState<NewOrderAlert> with SingleTicker
                                     '${o.itemCount} item${o.itemCount == 1 ? '' : 's'}',
                                     if (o.sourceEventId.isNotEmpty) '#${o.sourceEventId}',
                                     if (first.status.future && first.dueAt != null) 'for ${clock(first.dueAt)}',
-                                    if (since != null) 'waiting ${duration(now.difference(since))}',
+                                    // A tablet clock a little behind the Pi's would show a negative wait.
+                                    if (since != null) 'waiting ${duration(now.difference(since).isNegative ? Duration.zero : now.difference(since))}',
                                   ].join(' · '),
                                   style: TextStyle(fontSize: 22, color: onBrand.withValues(alpha: 0.8)),
                                 );
