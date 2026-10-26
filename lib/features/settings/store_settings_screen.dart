@@ -7,8 +7,10 @@ import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
+import '../home/idle_kitchen.dart';
 import '../setup/setup_entry.dart';
 import 'auto_accept_card.dart';
+import 'auto_assign_card.dart';
 import 'chime_picker.dart';
 import 'delivery_area_card.dart';
 import 'deliveries_settings_card.dart';
@@ -35,8 +37,8 @@ class StoreSettingsScreen extends StatelessWidget {
         SettingsGroup(
           key: ValueKey('group-deliveries'),
           title: 'Deliveries',
-          caption: 'How AUTO plans runs, and which deliveries count as close to a run.',
-          children: [DeliveryAreaCard(), DeliveriesSettingsCard()],
+          caption: 'How AUTO plans runs, which deliveries count as close to a run, and auto-assign.',
+          children: [DeliveryAreaCard(), DeliveriesSettingsCard(), AutoAssignCard()],
         ),
         SettingsGroup(
           key: ValueKey('group-times'),
@@ -69,6 +71,7 @@ class StoreSettingsScreen extends StatelessWidget {
             ),
             ThemeSettingsCard(),
             MotionSettingsCard(),
+            IdleKitchenCard(),
           ],
         ),
       ],

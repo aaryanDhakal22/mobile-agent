@@ -96,10 +96,35 @@ StoredOrder _located(StoredOrder o) {
   return StoredOrder.fromJson(m);
 }
 
+/// A delivery the driver brought back (1.7.1): TRY AGAIN put it in "Came
+/// back" [backMin] minutes ago.
+StoredOrder _cameBack(String id, int k, String street, {int backMin = 6}) {
+  final m = jsonDecode(onDeliveryJson) as Map<String, dynamic>;
+  final now = clock.now().toUtc();
+  (m['order'] as Map)
+    ..['id'] = id
+    ..['kitchen_order_number'] = k
+    ..['placed_at'] = now.subtract(const Duration(minutes: 50)).toIso8601String();
+  (((m['order'] as Map)['fulfillment'] as Map)['address'] as Map)['line1'] = street;
+  m['status'] = {
+    'state': 'ready',
+    'kitchen_number': k,
+    'batch_id': 7,
+    'came_back': true,
+    'not_delivered': {
+      'action': 'retry',
+      'at': now.subtract(Duration(minutes: backMin)).toIso8601String(),
+      'driver_id': 'd-sam',
+    },
+  };
+  m['geo'] = locatedGeo();
+  return StoredOrder.fromJson(m);
+}
+
 /// The delivery floor plus a few pickups cooking, and [arrived] ringing.
 /// Ana (NEXT) has #1103 in her box; d2 and d5 sit in Joe's, so one delivery
 /// waits and NEXT can send her out.
-FloorState _floor({List<StoredOrder> arrived = const [], bool quiet = false}) {
+FloorState _floor({List<StoredOrder> arrived = const [], bool quiet = false, bool cameBack = false}) {
   final base = deliveryFloor();
   if (quiet) {
     return base.withSnapshot(floor: base.floor!, current: const [], arrived: const [], drivers: base.drivers, at: clock.now());
@@ -115,6 +140,7 @@ FloorState _floor({List<StoredOrder> arrived = const [], bool quiet = false}) {
     _cooking('p1', 1107, 'Maria Lopez', ago: 4, readyIn: 16),
     _cooking('p2', 1108, 'Tom Becker', ago: 14, readyIn: 3),
     _cooking('p3', 1109, 'Priya Shah', ago: 27, readyIn: -6),
+    if (cameBack) ...[_cameBack('cb1', 1100, '18 Linden Terrace', backMin: 9), _cameBack('cb2', 1104, '5 Elm Ct')],
   ];
   return base.withSnapshot(floor: base.floor!, current: current, arrived: arrived, drivers: base.drivers, at: clock.now());
 }
@@ -125,12 +151,13 @@ Future<ProviderContainer> _pump(
   List<StoredOrder> arrived = const [],
   bool ringing = false,
   bool quiet = false,
+  bool cameBack = false,
   UpdateState? update,
 }) async {
   tester.view.physicalSize = const Size(1280, 800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final fake = FakeDeliveryFloor(_floor(arrived: arrived, quiet: quiet));
+  final fake = FakeDeliveryFloor(_floor(arrived: arrived, quiet: quiet, cameBack: cameBack));
   final c = await deliveryContainer(
     fake,
     prefs: const {
@@ -214,6 +241,14 @@ void main() {
       c.read(homeNavProvider.notifier).go(HomeDestination.deliveries);
       await _settle(tester);
       await _golden(tester, 'deliveries_$theme');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    golden('deliveries with came back', (tester) async {
+      final c = await _pump(tester, dark: dark, cameBack: true);
+      c.read(homeNavProvider.notifier).go(HomeDestination.deliveries);
+      await _settle(tester);
+      await _golden(tester, 'deliveries_came_back_$theme');
       await tester.pumpWidget(const SizedBox());
     });
 

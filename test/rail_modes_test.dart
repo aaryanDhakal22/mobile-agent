@@ -23,6 +23,7 @@ import 'package:mobile_agent/features/dev/tests_screen.dart';
 import 'package:mobile_agent/features/diagnose/diagnose_entry.dart';
 import 'package:mobile_agent/features/drivers/driver_fab.dart';
 import 'package:mobile_agent/features/home/home_nav.dart';
+import 'package:mobile_agent/features/home/idle_kitchen.dart';
 import 'package:mobile_agent/features/home/home_screen.dart';
 import 'package:mobile_agent/features/home/rail_blob.dart';
 import 'package:mobile_agent/features/home/rail_motion.dart';
@@ -224,6 +225,8 @@ void main() {
 
     testWidgets('developer mode relocks after 15 min idle; touches push it back', (tester) async {
       final c = await _pumpHome(tester);
+      // The 1 min back to Kitchen (1.7.1) would come first: off for this one.
+      c.read(idleKitchenProvider.notifier).set(false);
       await _unlock(tester);
       expect(c.read(devGateProvider), isTrue);
 
@@ -388,10 +391,10 @@ void main() {
       );
       await tester.pump();
       final list = find.byType(Scrollable).first;
-      for (final key in ['group-deliveries', 'coming-radius', 'coming-nearby', 'group-times', 'group-tickets', 'group-receipts', 'group-look']) {
+      for (final key in ['group-deliveries', 'coming-radius', 'coming-nearby', 'coming-auto-assign', 'group-times', 'group-tickets', 'group-receipts', 'group-look']) {
         await tester.scrollUntilVisible(find.byKey(ValueKey(key)), 200, scrollable: list);
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
-        if (key == 'coming-nearby') expect(find.text('Coming with the next Pi update'), findsNWidgets(2));
+        if (key == 'coming-nearby') expect(find.text('Coming with the next Pi update'), findsAtLeastNWidgets(2));
       }
       expect(find.text('THE PI'), findsNothing, reason: 'the Pi moved to developer mode');
       expect(find.text('FEATURES'), findsNothing, reason: 'features moved to developer mode');

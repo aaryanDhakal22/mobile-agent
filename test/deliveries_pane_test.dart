@@ -162,7 +162,7 @@ void main() {
     });
   }
 
-  testWidgets('a single tap on a row, a pooled chip and an out chip opens the order', (tester) async {
+  testWidgets('a single tap on a row, a pooled chip and an out stop opens the order', (tester) async {
     await pumpPane(tester);
     await tester.tap(find.byKey(const ValueKey('row-d1')));
     await tester.pumpAndSettle();
@@ -177,7 +177,10 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(ActionChip, '1104'));
+    // 1.7.1: the Out section lists the run's addresses (stop order), not chips.
+    final outStop = find.byKey(const ValueKey('out-stop-01963a40-7c1e-7a51-9d2b-5d1f0c2a0002'));
+    expect(find.descendant(of: outStop, matching: find.text('931 Taylor Avenue')), findsOneWidget);
+    await tester.tap(outStop);
     await settle(tester); // its map says Locating… (a spinner never settles)
     expect(find.byType(OrderDetailScreen), findsOneWidget);
     await tester.pumpWidget(const SizedBox());

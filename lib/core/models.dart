@@ -86,8 +86,18 @@ class StoredOrder {
   OrderState get state => status.state;
   bool get isDelivery => order.fulfillment.type == FulfillmentType.delivery;
 
-  /// A delivery that can sit in a driver's pool: accepted (cooking) or ready.
-  bool get isPoolable => isDelivery && (state == OrderState.accepted || state == OrderState.ready);
+  /// A delivery that can sit in a driver's pool: accepted (cooking) or ready
+  /// — and not one that came back (1.7.1), which waits in "Came back" until
+  /// staff send it to Unassigned.
+  bool get isPoolable =>
+      isDelivery && !status.cameBack && (state == OrderState.accepted || state == OrderState.ready);
+
+  /// A delivery the driver brought back that staff chose to TRY AGAIN with
+  /// (1.7.1, Pi 2.2.1): it waits in the Deliveries screen's "Came back"
+  /// section — out of Unassigned, the pools, NEXT and AUTO — until someone
+  /// holds it to send it to Unassigned.
+  bool get isCameBack =>
+      isDelivery && status.cameBack && state != OrderState.delivered && state != OrderState.cancelled;
 
   /// When the customer placed it (the clock the delivery target runs on);
   /// falls back to when it reached us for orders without a placed time.
@@ -129,6 +139,16 @@ class StoredOrder {
     final type = order.fulfillment.type;
     if (type == FulfillmentType.pickup) return status.paid || (!isPos && order.cashDueCents == 0);
     return isPos && type == FulfillmentType.dineIn;
+  }
+
+  /// Since when the customer has been waiting on a paid, not-ready ticket
+  /// (1.7.1): the later of settled ([OrderStatus.paidAt], when the Pi has
+  /// it) and accepted — else since accepted / arrived.
+  DateTime? get waitingSince {
+    final paidAt = status.paidAt, accepted = status.acceptedAt ?? status.sentAt ?? status.arrivalDate;
+    if (paidAt == null) return accepted;
+    if (accepted == null) return paidAt;
+    return paidAt.isAfter(accepted) ? paidAt : accepted;
   }
 
   /// A future order waiting for its lead time to be picked (first ring).
@@ -210,6 +230,10 @@ class OrderStatus {
   /// Settled at the POS terminal (or an inserted online cash pickup settled).
   final bool paid;
 
+  /// When it was settled, if the Pi says (`paid_at`) — the "customer
+  /// waiting" clock on the Kitchen ticket (1.7.1).
+  final DateTime? paidAt;
+
   /// What the driver collects (POS); the agent's figure for online orders.
   final int? cashDueCents;
   final int? tipCents;
@@ -245,6 +269,13 @@ class OrderStatus {
   /// Accepted by the Pi's auto-accept (2.2.0), not by staff.
   final bool autoAccepted;
 
+  /// 1.7.1 (Pi 2.2.1): the driver came back with it and staff picked TRY
+  /// AGAIN — it waits in "Came back" until released to Unassigned.
+  final bool cameBack;
+
+  /// The latest NOT DELIVERED on it (retry or cancel), if any.
+  final NotDelivered? notDelivered;
+
   const OrderStatus({
     required this.state,
     this.arrivalDate,
@@ -267,6 +298,7 @@ class OrderStatus {
     this.extRef = '',
     this.displayNumber,
     this.paid = false,
+    this.paidAt,
     this.cashDueCents,
     this.tipCents,
     this.boardHidden = false,
@@ -280,6 +312,8 @@ class OrderStatus {
     this.ringAt,
     this.rerung = false,
     this.autoAccepted = false,
+    this.cameBack = false,
+    this.notDelivered,
   });
 
   factory OrderStatus.fromJson(Map<String, dynamic> json) => OrderStatus(
@@ -304,6 +338,7 @@ class OrderStatus {
     extRef: jStr(json['ext_ref']),
     displayNumber: jIntOrNull(json['display_number']),
     paid: jBool(json['paid']),
+    paidAt: jDate(json['paid_at']),
     cashDueCents: jIntOrNull(json['cash_due_cents']),
     tipCents: jIntOrNull(json['tip_cents']),
     boardHidden: jBool(json['board_hidden']),
@@ -317,6 +352,8 @@ class OrderStatus {
     ringAt: jDate(json['ring_at']),
     rerung: jBool(json['rerung']),
     autoAccepted: jBool(json['auto_accepted']),
+    cameBack: jBool(json['came_back']),
+    notDelivered: NotDelivered.fromJson(json['not_delivered']),
   );
 
   /// The same status in [driverId]'s pool (null = unassigned) — the
@@ -344,6 +381,7 @@ class OrderStatus {
     extRef: extRef,
     displayNumber: displayNumber,
     paid: paid,
+    paidAt: paidAt,
     cashDueCents: cashDueCents,
     tipCents: tipCents,
     boardHidden: boardHidden,
@@ -357,7 +395,48 @@ class OrderStatus {
     ringAt: ringAt,
     rerung: rerung,
     autoAccepted: autoAccepted,
+    cameBack: cameBack,
+    notDelivered: notDelivered,
   );
+}
+
+/// What NOT DELIVERED does with a delivery the driver brought back.
+enum NotDeliveredAction {
+  /// Back on Deliveries, in "Came back".
+  retry('retry'),
+
+  /// Off the floor; History shows it cancelled.
+  cancel('cancel');
+
+  final String wire;
+  const NotDeliveredAction(this.wire);
+
+  static NotDeliveredAction? parse(Object? v) {
+    final s = jStr(v);
+    for (final a in values) {
+      if (a.wire == s) return a;
+    }
+    return null;
+  }
+}
+
+/// `status.not_delivered` (Pi 2.2.1): the driver came back with the order —
+/// what staff chose, when, and whose run it was.
+class NotDelivered {
+  final NotDeliveredAction? action;
+  final DateTime? at;
+  final String? driverId;
+  const NotDelivered({this.action, this.at, this.driverId});
+
+  static NotDelivered? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final m = jMap(raw);
+    return NotDelivered(
+      action: NotDeliveredAction.parse(m['action']),
+      at: jDate(m['at']),
+      driverId: jStrOrNull(m['driver_id']),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -805,6 +884,10 @@ class Driver {
   /// of a run. Null when not set.
   final String? posNumber;
 
+  /// While out (Pi 2.2.1): his run's order ids in stop order ([kDriverRunOrderField]).
+  /// Empty from an older Pi — the screens keep the run's own order then.
+  final List<String> runOrderIds;
+
   const Driver({
     required this.id,
     required this.name,
@@ -814,6 +897,7 @@ class Driver {
     this.lastReturnedAt,
     this.deliveries = 0,
     this.posNumber,
+    this.runOrderIds = const [],
   });
 
   /// Clocked in and in the queue — can be sent out.
@@ -833,7 +917,29 @@ class Driver {
     lastReturnedAt: jDate(json['last_returned_at']),
     deliveries: jInt(json['deliveries']),
     posNumber: jStrOrNull(jStr(json['pos_number']).trim()),
+    runOrderIds: [
+      if (json[kDriverRunOrderField] is List)
+        for (final x in json[kDriverRunOrderField] as List)
+          if (jStr(x).isNotEmpty) jStr(x),
+    ],
   );
+}
+
+/// The driver field with an out driver's run in stop order (Pi 2.2.1).
+const String kDriverRunOrderField = 'run_order_ids';
+
+/// [stops] in [d]'s stop order (`run_order_ids`); stops the Pi didn't list
+/// keep their order after the listed ones.
+List<StoredOrder> inStopOrder(List<StoredOrder> stops, Driver? d) {
+  final order = d?.runOrderIds ?? const <String>[];
+  if (order.isEmpty || stops.length < 2) return stops;
+  int rank(int i) {
+    final r = order.indexOf(stops[i].id);
+    return r < 0 ? order.length + i : r;
+  }
+
+  final idx = List<int>.generate(stops.length, (i) => i)..sort((a, b) => rank(a).compareTo(rank(b)));
+  return [for (final i in idx) stops[i]];
 }
 
 /// One clock-in → clock-out record (`GET /api/drivers/shifts`). For reports,
@@ -1262,6 +1368,10 @@ class Floor {
   final int nearbyDetourMinutes;
   final double nearbyDistanceMi;
 
+  /// Simple auto-assign (2.2.1): a driver back or a delivery ready → the
+  /// Pi pools up to 3 for the NEXT driver. Null from an older Pi.
+  final bool? autoAssign;
+
   final StoreGeo? store;
   final MapInfo? map;
 
@@ -1286,6 +1396,7 @@ class Floor {
     this.nearbyRule,
     this.nearbyDetourMinutes = DeliverySettings.defaultDetour,
     this.nearbyDistanceMi = DeliverySettings.defaultDistanceMi,
+    this.autoAssign,
     this.store,
     this.map,
     this.settings = const FloorSettings(),
@@ -1317,6 +1428,7 @@ class Floor {
       nearbyDistanceMi: json['nearby_distance_mi'] is num
           ? (json['nearby_distance_mi'] as num).toDouble()
           : DeliverySettings.defaultDistanceMi,
+      autoAssign: json['auto_assign'] is bool ? json['auto_assign'] as bool : null,
       store: StoreGeo.fromJson(json['store']),
       map: MapInfo.fromJson(json['map']),
       settings: FloorSettings.fromJson(jMap(json['settings'])),
@@ -1331,6 +1443,7 @@ class Floor {
     NearbyRule? nearbyRule,
     int? nearbyDetourMinutes,
     double? nearbyDistanceMi,
+    bool? autoAssign,
     StoreGeo? store,
     FloorSettings? settings,
     IntegrationStatus? integration,
@@ -1348,6 +1461,7 @@ class Floor {
     nearbyRule: nearbyRule ?? this.nearbyRule,
     nearbyDetourMinutes: nearbyDetourMinutes ?? this.nearbyDetourMinutes,
     nearbyDistanceMi: nearbyDistanceMi ?? this.nearbyDistanceMi,
+    autoAssign: autoAssign ?? this.autoAssign,
     store: store ?? this.store,
     map: map,
     settings: settings ?? this.settings,

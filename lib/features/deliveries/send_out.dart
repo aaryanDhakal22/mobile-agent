@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../core/auto_preview.dart';
+import '../../core/delivery_models.dart';
 import '../../core/floor_state.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
@@ -16,6 +18,10 @@ import 'delivery_widgets.dart';
 
 /// Toasts from a send-out stay left of the bottom-right driver button.
 const double kSendOutToastInset = 160;
+
+/// A pool / send-out named a delivery that came back (409 `came_back`).
+const String kCameBackFirst =
+    'A delivery in there came back — hold it under Came back to send it to Unassigned first. List refreshed.';
 
 /// One stop a send-out takes: a pooled delivery, or an AUTO suggestion
 /// (yellow, still unassigned on the Pi) that rides along with it.
@@ -40,8 +46,64 @@ Future<bool> confirmCooking(BuildContext context, List<String> numbers, String d
   );
 }
 
+/// "1634 Gleneagle Rd is the other way — hold it for Abdul (back ~6 min)?"
+/// (2.2.1). Resolves true on HOLD (send without them), false on SEND BOTH /
+/// SEND ALL, null when dismissed (send nothing).
+Future<bool?> confirmHold(BuildContext context, List<HeldStop> held, Map<String, StoredOrder> orders, int stops) {
+  final now = timeNow();
+  String where(HeldStop h) =>
+      h.address.isNotEmpty ? h.address : (orders[h.orderId] == null ? 'A delivery' : orderNumber(orders[h.orderId]!));
+  String forWhom(HeldFor? f) {
+    if (f == null) return 'a driver on his way back';
+    final back = f.backIn(now);
+    return back == null ? f.name : '${f.name} (back $back)';
+  }
+
+  final one = held.length == 1;
+  return showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(
+        one
+            ? '${where(held.single)} is the other way — hold it for ${forWhom(held.single.heldFor)}?'
+            : '${held.length} stops are the other way — hold them for the drivers on their way back?',
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!one)
+            for (final h in held)
+              Padding(
+                padding: const EdgeInsets.only(bottom: QuiccSpace.xs),
+                child: Text('${where(h)} — ${forWhom(h.heldFor)}'),
+              ),
+          Text(
+            'HOLD sends the rest now; ${one ? 'it goes' : 'they go'} back to Unassigned.',
+            style: QuiccType.text(QuiccType.label, color: ctx.palette.textSecondary),
+          ),
+        ],
+      ),
+      actions: [
+        OutlinedButton(
+          key: const ValueKey('send-all'),
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: Text(stops == 2 ? 'SEND BOTH' : 'SEND ALL'),
+        ),
+        FilledButton(
+          key: const ValueKey('hold'),
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: const Text('HOLD'),
+        ),
+      ],
+    ),
+  );
+}
+
 /// The one send-out flow (the driver button's NEXT card and the Deliveries
-/// bar both use it): asks "send anyway?" when something is cooking, sends the
+/// bar both use it): asks (2.2.1) whether to hold a stop that is the other
+/// way for a driver on his way back, then "send anyway?" when something is
+/// cooking, sends the
 /// pool plus the driver's AUTO yellow stops (with the plan id), asks again if
 /// the Pi finds something not ready, and explains failures in plain words.
 /// Resolves true when the driver went out. [onSending] fires once the
@@ -67,8 +129,36 @@ Future<bool> sendOutDriver(
     if (context.mounted) toast(context, msg, error: error, rightInset: toastInset);
   }
 
+  // 2.2.1: the far one first. An older Pi (null), an error or a slow answer
+  // never blocks the send-out.
+  var held = const <HeldStop>[];
+  try {
+    held = await floor.sendCheck(d.id, [for (final s in stops) s.order.id]).timeout(const Duration(seconds: 4)) ??
+        const <HeldStop>[];
+  } catch (_) {}
+  final ids = {for (final s in stops) s.order.id};
+  held = held.where((h) => ids.contains(h.orderId)).toList();
+  if (!context.mounted) return false;
+  var exclude = const <String>{};
+  if (held.isNotEmpty) {
+    final hold = await confirmHold(context, held, c.read(floorProvider).orders, stops.length);
+    if (hold == null || !context.mounted) return false;
+    if (hold) exclude = {for (final h in held) h.orderId};
+  }
+  final going = stops.where((s) => !exclude.contains(s.order.id)).toList();
+  if (going.isEmpty) {
+    say('Nothing left to send — every stop is held.');
+    return false;
+  }
+  // Held pooled stops go back to Unassigned on the Pi; held yellow ones just
+  // aren't sent (they were never pooled).
+  final excludePooled = [
+    for (final s in stops)
+      if (!s.suggested && exclude.contains(s.order.id)) s.order.id,
+  ];
+
   var markReady = false;
-  final cooking = stops.where((s) => s.order.state != OrderState.ready).toList();
+  final cooking = going.where((s) => s.order.state != OrderState.ready).toList();
   if (cooking.isNotEmpty) {
     if (!await confirmCooking(context, [for (final s in cooking) orderNumber(s.order)], d.name)) return false;
     markReady = true;
@@ -81,14 +171,16 @@ Future<bool> sendOutDriver(
   // echo isn't taken for someone else's change.
   final hasYellow = stops.any((s) => s.suggested);
   final taken = hasYellow ? previews.takeRun(d.id) : const <String>[];
+  final include = [for (final id in taken) if (!exclude.contains(id)) id];
   try {
     while (true) {
       try {
         final out = await floor.sendOut(
           d.id,
           markReady: markReady,
-          includeOrderIds: taken.isEmpty ? null : taken,
-          planId: taken.isEmpty ? null : preview?.planId,
+          includeOrderIds: include.isEmpty ? null : include,
+          excludeOrderIds: excludePooled.isEmpty ? null : excludePooled,
+          planId: include.isEmpty ? null : preview?.planId,
         );
         say('${out.length} order${out.length == 1 ? '' : 's'} out with ${d.name}');
         return true;
@@ -115,6 +207,7 @@ Future<bool> sendOutDriver(
       AgentException(code: 'invalid_state') || AgentException(code: 'not_ready') =>
         "Something in ${d.name}'s pool changed — list refreshed.",
       AgentException(code: kPoolsUnsupported) => 'This Pi needs an update for driver pools.',
+      AgentException(code: kCameBack) => kCameBackFirst,
       _ => null,
     };
     msg == null

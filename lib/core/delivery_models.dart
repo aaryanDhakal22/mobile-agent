@@ -2,6 +2,7 @@
 // contract/agent.md — pools / AUTO plan / pool trip).
 
 import 'json.dart';
+import 'models.dart';
 
 /// One stop of an AUTO run.
 class PlanStop {
@@ -56,11 +57,62 @@ class PlanLeftover {
   final String orderId;
 
   /// no_location | not_ready_soon | no_driver | no_feasible_run | over_limit
+  /// | held_for_returning_driver (2.2.1)
   final String reason;
-  const PlanLeftover({required this.orderId, this.reason = ''});
 
-  factory PlanLeftover.fromJson(Map<String, dynamic> json) =>
-      PlanLeftover(orderId: jStr(json['order_id']), reason: jStr(json['reason']));
+  /// 2.2.1: kept for a driver on his way back (`held_for_returning_driver`).
+  final HeldFor? heldFor;
+  const PlanLeftover({required this.orderId, this.reason = '', this.heldFor});
+
+  factory PlanLeftover.fromJson(Map<String, dynamic> json) => PlanLeftover(
+    orderId: jStr(json['order_id']),
+    reason: jStr(json['reason']),
+    heldFor: HeldFor.fromJson(json['held_for']),
+  );
+}
+
+/// The driver on his way back a delivery is better kept for (Pi 2.2.1): it
+/// is the other way from the run going out now.
+class HeldFor {
+  final String driverId;
+  final String name;
+
+  /// When the Pi expects him back.
+  final DateTime? returnAt;
+  const HeldFor({required this.driverId, required this.name, this.returnAt});
+
+  static HeldFor? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final m = jMap(raw);
+    final id = jStr(m['driver_id']);
+    final name = jStr(m['name']).trim();
+    if (id.isEmpty && name.isEmpty) return null;
+    return HeldFor(driverId: id, name: name.isEmpty ? 'the driver' : name, returnAt: jDate(m['return_at']));
+  }
+
+  /// "~6 min" until he is back (from [now]); "any minute" once due; null
+  /// without a time.
+  String? backIn(DateTime now) {
+    final t = returnAt;
+    if (t == null) return null;
+    final m = (t.difference(now).inSeconds / 60).ceil();
+    return m <= 0 ? 'any minute' : '~$m min';
+  }
+}
+
+/// One stop the send-out would be better without (`GET
+/// /api/drivers/{id}/send-check`, Pi 2.2.1).
+class HeldStop {
+  final String orderId;
+  final String address;
+  final HeldFor? heldFor;
+  const HeldStop({required this.orderId, this.address = '', this.heldFor});
+
+  factory HeldStop.fromJson(Map<String, dynamic> json) => HeldStop(
+    orderId: jStr(json['order_id']),
+    address: jStr(json['address']).trim(),
+    heldFor: HeldFor.fromJson(json['held_for']),
+  );
 }
 
 /// `POST /api/deliveries/auto-plan` → a suggestion; nothing changed yet.
@@ -173,6 +225,9 @@ class DeliverySettings {
   /// Synced to main (RPC `location.radius`); main pushes the store back.
   final int? deliveryRadiusM;
 
+  /// Simple auto-assign (2.2.1); sent only when set.
+  final bool? autoAssign;
+
   const DeliverySettings({
     required this.soonReadyMinutes,
     required this.deliveryTargetMinutes,
@@ -180,6 +235,7 @@ class DeliverySettings {
     this.nearbyDetourMinutes,
     this.nearbyDistanceMi,
     this.deliveryRadiusM,
+    this.autoAssign,
   });
 
   static const int minSoonReady = 0, maxSoonReady = 30;
@@ -195,6 +251,7 @@ class DeliverySettings {
     nearbyDetourMinutes: jIntOrNull(json['nearby_detour_minutes']),
     nearbyDistanceMi: json['nearby_distance_mi'] is num ? (json['nearby_distance_mi'] as num).toDouble() : null,
     deliveryRadiusM: jIntOrNull(json['delivery_radius_m']),
+    autoAssign: json['auto_assign'] is bool ? json['auto_assign'] as bool : null,
   );
 
   Map<String, Object> toJson() => {
@@ -204,6 +261,7 @@ class DeliverySettings {
     'nearby_detour_minutes': ?nearbyDetourMinutes,
     'nearby_distance_mi': ?nearbyDistanceMi,
     'delivery_radius_m': ?deliveryRadiusM,
+    'auto_assign': ?autoAssign,
   };
 }
 
@@ -247,3 +305,54 @@ class PiEvent {
 List<String> _ids(Object? raw) => raw is List
     ? raw.map((e) => jStr(e)).where((s) => s.isNotEmpty).toList(growable: false)
     : const <String>[];
+
+/// The Pi's simple auto-assign (2.2.1) pooled [orderIds] for the NEXT
+/// driver (SSE `deliveries.auto_assigned`, or the "returned" answer). It
+/// never sends anyone out: the driver button pops open on the NEXT card.
+class AutoAssignment {
+  final String driverId;
+  final String driverName;
+  final List<String> orderIds;
+  const AutoAssignment({this.driverId = '', this.driverName = '', this.orderIds = const []});
+
+  static AutoAssignment? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final m = jMap(raw);
+    final ids = idList(m['order_ids']);
+    if (ids.isEmpty) return null;
+    return AutoAssignment(driverId: jStr(m['driver_id']), driverName: jStr(m['driver_name']), orderIds: ids);
+  }
+}
+
+/// `POST /api/drivers/{id}/returned`: the run's orders, and (2.2.1) what
+/// auto-assign pooled for the next driver right after.
+class ReturnedResult {
+  final List<StoredOrder> orders;
+  final AutoAssignment? autoAssigned;
+  const ReturnedResult({this.orders = const [], this.autoAssigned});
+
+  /// A list (≤ 2.2.0) or `{orders, auto_assigned_order_ids,
+  /// auto_assigned_driver_id?, auto_assigned_driver_name?}` (2.2.1).
+  factory ReturnedResult.fromJson(Object? body) {
+    if (body is List) return ReturnedResult(orders: jList(body, StoredOrder.fromJson));
+    final m = jMap(body);
+    final ids = idList(m['auto_assigned_order_ids']);
+    return ReturnedResult(
+      orders: jList(m['orders'], StoredOrder.fromJson),
+      autoAssigned: ids.isEmpty
+          ? null
+          : AutoAssignment(
+              driverId: jStr(m['auto_assigned_driver_id']),
+              driverName: jStr(m['auto_assigned_driver_name']),
+              orderIds: ids,
+            ),
+    );
+  }
+}
+
+/// Non-empty strings of a JSON list.
+List<String> idList(Object? raw) => [
+  if (raw is List)
+    for (final x in raw)
+      if (jStr(x).isNotEmpty) jStr(x),
+];

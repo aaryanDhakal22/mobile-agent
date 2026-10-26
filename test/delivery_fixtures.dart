@@ -149,6 +149,9 @@ class FakeDeliveryFloor extends FloorController {
   /// The next delivery-settings save throws this (then is cleared).
   AgentException? settingsError;
 
+  /// What the send-check (2.2.1) answers: null = an older Pi, empty = send.
+  List<HeldStop>? holds = const [];
+
   @override
   FloorState build() => initial;
 
@@ -171,13 +174,14 @@ class FakeDeliveryFloor extends FloorController {
     String driverId, {
     bool markReady = false,
     List<String>? includeOrderIds,
+    List<String>? excludeOrderIds,
     String? planId,
   }) async {
     calls.add((
       op: 'sendOut',
       ids: includeOrderIds ?? const [],
       driver: driverId,
-      extra: {'markReady': markReady, 'planId': planId},
+      extra: {'markReady': markReady, 'planId': planId, 'exclude': excludeOrderIds},
     ));
     final err = sendOutError;
     if (err != null) {
@@ -185,6 +189,12 @@ class FakeDeliveryFloor extends FloorController {
       throw err;
     }
     return const [];
+  }
+
+  @override
+  Future<List<HeldStop>?> sendCheck(String driverId, List<String> orderIds) async {
+    calls.add((op: 'sendCheck', ids: orderIds, driver: driverId, extra: const {}));
+    return holds;
   }
 
   @override
@@ -232,6 +242,7 @@ class FakeDeliveryFloor extends FloorController {
         nearbyRule: s.nearbyRule,
         nearbyDetourMinutes: s.nearbyDetourMinutes,
         nearbyDistanceMi: s.nearbyDistanceMi,
+        autoAssign: s.autoAssign,
         store: s.deliveryRadiusM == null || f.store == null
             ? null
             : StoreGeo(lat: f.store!.lat, lng: f.store!.lng, deliveryRadiusM: s.deliveryRadiusM!),

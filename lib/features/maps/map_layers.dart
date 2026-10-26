@@ -63,6 +63,11 @@ class PmTilesBaseLayer extends StatefulWidget {
   final bool dark;
   const PmTilesBaseLayer({super.key, required this.source, required this.dark});
 
+  /// Drops the opened archive for [s] (the Map pane's refresh): the next
+  /// layer built for it opens the file again — header and root directory
+  /// re-read from the Pi. Tiles cached on disk stay (same file version).
+  static void forget(MapSource s) => _PmTilesBaseLayerState._archives.remove(s);
+
   @override
   State<PmTilesBaseLayer> createState() => _PmTilesBaseLayerState();
 }
