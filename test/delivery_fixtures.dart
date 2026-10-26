@@ -3,6 +3,7 @@
 
 import 'dart:convert';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_agent/core/api_client.dart';
@@ -60,7 +61,7 @@ StoredOrder delivery(
   int tipCents = 500,
 }) {
   final m = jsonDecode(onDeliveryJson) as Map<String, dynamic>;
-  final now = DateTime.now().toUtc();
+  final now = clock.now().toUtc();
   (m['order'] as Map)
     ..['id'] = id
     ..['placed_at'] = now.subtract(Duration(minutes: placedMinutesAgo)).toIso8601String()
@@ -123,7 +124,7 @@ FloorState deliveryFloor({Map<String, dynamic>? floorExtra}) {
     ],
     arrived: const [],
     drivers: roster(),
-    at: DateTime.now(),
+    at: clock.now(),
   );
 }
 
@@ -233,18 +234,21 @@ const stubTilesKey = ValueKey('stub-tiles');
 Future<ProviderContainer> deliveryContainer(
   FakeDeliveryFloor fake, {
   MapSource? map = const MapSource(url: 'http://pi:8080/api/map.pmtiles', version: '20261022'),
+  Map<String, Object> prefs = const {},
+  List<Override> extra = const [],
 }) async {
-  SharedPreferences.setMockInitialValues({});
-  final prefs = await SharedPreferences.getInstance();
+  SharedPreferences.setMockInitialValues(prefs);
+  final sp = await SharedPreferences.getInstance();
   return ProviderContainer(
     overrides: [
-      sharedPrefsProvider.overrideWithValue(prefs),
+      sharedPrefsProvider.overrideWithValue(sp),
       floorProvider.overrideWith(() => fake),
       printerStatusProvider.overrideWith((ref) => Stream.value(const <PrinterStatus>[])),
       batchesProvider.overrideWith((ref) async => const [Batch(id: 7)]),
       driverShiftsProvider.overrideWith((ref) async => const []),
       mapSourceProvider.overrideWithValue(map),
       mapBaseLayerProvider.overrideWithValue((context, source, dark) => const SizedBox.expand(key: stubTilesKey)),
+      ...extra,
     ],
   );
 }

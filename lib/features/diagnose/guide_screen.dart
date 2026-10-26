@@ -9,6 +9,7 @@ import '../../core/diag_models.dart';
 import '../../core/format.dart';
 import '../../core/friendly_error.dart';
 import '../../core/providers.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 import '../common/info_button.dart';
 import '../common/widgets.dart';
@@ -251,8 +252,8 @@ class _StepCard extends ConsumerWidget {
     );
 
     if (step.kind == StepKind.wait || s.settling) {
-      final since = s.waitStartedAt ?? DateTime.now();
-      final elapsed = DateTime.now().difference(since);
+      final since = s.waitStartedAt ?? timeNow();
+      final elapsed = timeNow().difference(since);
       final label = s.settling ? GuideText.checking.replaceAll('…', ' again…') : '${step.title}…';
       return _WaitStatus(label: label, elapsed: elapsed, max: step.timeout);
     }

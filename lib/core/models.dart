@@ -4,6 +4,7 @@
 
 import 'json.dart';
 import 'polyline.dart';
+import 'time.dart';
 
 // ---------------------------------------------------------------------------
 // Order state
@@ -330,7 +331,7 @@ class OrderStatus {
     driverId: this.driverId,
     driverName: driverName,
     poolDriverId: driverId,
-    pooledAt: driverId == null ? null : (at ?? DateTime.now().toUtc()),
+    pooledAt: driverId == null ? null : (at ?? timeNow().toUtc()),
     // Unnumbered until the Pi answers: sorts after the numbered stops.
     poolSeq: driverId == poolDriverId ? poolSeq : null,
     extSource: extSource,

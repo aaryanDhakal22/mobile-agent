@@ -6,6 +6,7 @@ import '../../core/diag_models.dart';
 import '../../core/format.dart';
 import '../../core/friendly_error.dart';
 import '../../core/providers.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 import '../common/info_button.dart';
 import '../common/widgets.dart';
@@ -86,7 +87,7 @@ class _AboutDiagnosticsCardState extends ConsumerState<AboutDiagnosticsCard> {
     final pairing = ref.read(pairingProvider);
     final d = ref.read(piDiagProvider).diag ?? readLastPiDiag(ref.read(storageProvider));
     final lines = [
-      'Quibase diagnostics — ${DateTime.now().toUtc().toIso8601String()}',
+      'Quibase diagnostics — ${timeNow().toUtc().toIso8601String()}',
       for (final (k, v) in _rows(version)) '$k: $v',
       'Tablet: ${pairing?.deviceName ?? ''} (${pairing?.deviceId ?? ''})',
       if (d != null) ...[

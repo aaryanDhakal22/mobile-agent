@@ -7,6 +7,7 @@ import '../../core/friendly_error.dart';
 import '../../core/local_log.dart';
 import '../../core/providers.dart';
 import '../../core/storage.dart';
+import '../../core/time.dart';
 import 'checks.dart';
 import 'guides.dart';
 import 'report.dart';
@@ -102,7 +103,7 @@ class GuideSession {
       id: '${m['id'] ?? uuidV4()}',
       guide: g,
       path: [for (final p in (m['path'] as List? ?? const [])) ?_guide(p)],
-      startedAt: DateTime.tryParse('${m['started_at']}') ?? DateTime.now(),
+      startedAt: DateTime.tryParse('${m['started_at']}') ?? timeNow(),
       history: [
         for (final r in (m['history'] as List? ?? const []))
           if (r is Map) StepRecord.fromJson(Map<String, dynamic>.from(r)),
@@ -135,7 +136,7 @@ GuideSession? readGuideSession(AppStorage storage) {
 GuideSession? resumableGuideSession(AppStorage storage, {DateTime? now}) {
   final s = readGuideSession(storage);
   if (s == null || s.concluded) return null;
-  if ((now ?? DateTime.now()).difference(s.startedAt) > const Duration(hours: 6)) return null;
+  if ((now ?? timeNow()).difference(s.startedAt) > const Duration(hours: 6)) return null;
   return s;
 }
 
@@ -175,7 +176,7 @@ class GuideView {
 /// step, and reports every conclusion to the owner.
 class GuideController extends Notifier<GuideView> {
   bool _busy = false;
-  DateTime Function() now = DateTime.now;
+  DateTime Function() now = timeNow;
 
   @override
   GuideView build() => GuideView(session: readGuideSession(ref.read(storageProvider)));

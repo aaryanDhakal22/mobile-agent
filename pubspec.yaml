@@ -1,7 +1,7 @@
 name: mobile_agent
 description: "Quibase — the QuiccPOS counter tablet app."
 publish_to: 'none'
-version: 1.5.0+1
+version: 1.6.0+1
 
 environment:
   sdk: ^3.11.1
@@ -17,6 +17,7 @@ dependencies:
   shared_preferences: ^2.5.6
   wakelock_plus: ^1.7.0
   crypto: ^3.0.7
+  clock: ^1.1.1
   # Maps (1.4.0): the Pi's offline PMTiles file drawn as vector tiles with
   # the Protomaps theme. vector_map_tiles 8 (latest stable) needs
   # flutter_map 7 + latlong2 0.9 — move them together.

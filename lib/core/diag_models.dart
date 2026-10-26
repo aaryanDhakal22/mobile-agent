@@ -1,4 +1,5 @@
 import 'json.dart';
+import 'time.dart';
 
 /// `GET /api/diag` — the Pi's view of itself (contract/agent.md §2.6).
 class PiDiag {
@@ -72,7 +73,7 @@ class PiDiag {
       waiting: jInt(orders['waiting']),
       openNow: json['open_now'] is bool ? json['open_now'] as bool : null,
       quietAlertMinutes: json['quiet_alert_minutes'] == null ? 90 : jInt(json['quiet_alert_minutes']),
-      fetchedAt: fetchedAt ?? DateTime.now(),
+      fetchedAt: fetchedAt ?? timeNow(),
     );
   }
 

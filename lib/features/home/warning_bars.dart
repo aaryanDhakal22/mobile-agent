@@ -7,6 +7,7 @@ import '../../core/friendly_error.dart';
 import '../../core/providers.dart';
 import '../../core/sse.dart';
 import '../../core/storage.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 import '../common/info_button.dart';
 import '../diagnose/diagnose_entry.dart';
@@ -57,7 +58,7 @@ class _WarningBarsState extends ConsumerState<WarningBars> {
         .read(storageProvider)
         .setJson(
           AppStorage.kNoOrdersSnoozedUntil,
-          DateTime.now().add(const Duration(hours: 1)).toUtc().toIso8601String(),
+          timeNow().add(const Duration(hours: 1)).toUtc().toIso8601String(),
         );
     if (mounted) setState(() {});
   }
@@ -67,7 +68,7 @@ class _WarningBarsState extends ConsumerState<WarningBars> {
     final piUp = ref.watch(floorProvider.select((s) => s.connection)) == SseStatus.connected;
     final diag = ref.watch(piDiagProvider);
     final device = ref.watch(deviceChecksProvider);
-    final now = DateTime.now();
+    final now = timeNow();
     final bars = <Widget>[];
 
     final d = diag.diag;

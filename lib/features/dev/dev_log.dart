@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/floor_state.dart';
 import '../../core/models.dart';
 import '../../core/sse.dart';
+import '../../core/time.dart';
 
 /// What a line in the developer log is about.
 enum DevLogKind { connection, floor, error, app }
@@ -30,7 +31,7 @@ class DevLog extends Notifier<List<DevLogEntry>> {
   static const maxOrderLines = 12;
 
   final DateTime Function() _now;
-  DevLog({DateTime Function()? now}) : _now = now ?? DateTime.now;
+  DevLog({DateTime Function()? now}) : _now = now ?? timeNow;
 
   String? _lastRefresh;
 

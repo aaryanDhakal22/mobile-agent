@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'time.dart';
+
 /// Header carrying this tablet's Quibase version ("1.6.0+160") on every
 /// request to the agent and on the `/api/events` stream (1.6.0). The agent
 /// ignores it until 2.2.0, which records it per device.
@@ -42,7 +44,7 @@ class QuibaseVersion {
 
   static void _kick() {
     if (_value != null || _loading) return;
-    final now = DateTime.now();
+    final now = timeNow();
     final last = _lastTry;
     if (last != null && now.difference(last) < retryEvery) return;
     _loading = true;
@@ -74,6 +76,6 @@ class QuibaseVersion {
   static void debugSet(String? v) {
     _value = v;
     _loading = false;
-    _lastTry = DateTime.now();
+    _lastTry = timeNow();
   }
 }

@@ -5,6 +5,7 @@ import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_type.dart';
 import '../common/info_button.dart';
@@ -437,7 +438,7 @@ class _ShiftRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = shift;
     final span = s.isOpen ? '${clock(s.clockIn)} – now' : '${clock(s.clockIn)} – ${clock(s.clockOut)}';
-    final len = s.length(DateTime.now());
+    final len = s.length(timeNow());
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(

@@ -5,12 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mobile_agent/core/alarm.dart';
 import 'package:mobile_agent/core/floor_state.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/motion.dart';
 import 'package:mobile_agent/core/printer_models.dart';
 import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
+import 'package:mobile_agent/features/alert/new_order_alert.dart';
 import 'package:mobile_agent/features/dev/config_screen.dart';
 import 'package:mobile_agent/features/dev/connections_screen.dart';
 import 'package:mobile_agent/features/dev/dev_gate.dart';
@@ -67,6 +69,7 @@ Future<ProviderContainer> _pumpHome(
   Map<String, Object> prefs = const {},
   bool motion = true,
   List<String>? logins,
+  bool ringingHidden = false,
 }) async {
   tester.view.physicalSize = const Size(1280, 800);
   tester.view.devicePixelRatio = 1;
@@ -83,6 +86,7 @@ Future<ProviderContainer> _pumpHome(
       ),
       batchesProvider.overrideWith((ref) async => const [Batch(id: 7)]),
       driverShiftsProvider.overrideWith((ref) async => const []),
+      if (ringingHidden) alarmProvider.overrideWith(_HiddenRing.new),
       managerLoginProvider.overrideWithValue(({required address, required username, required password}) async {
         logins?.add('$username:$password@$address');
         if ((username, password) != _good) throw const DevLoginException('Wrong username or password.');
@@ -96,12 +100,18 @@ Future<ProviderContainer> _pumpHome(
       child: MaterialApp(
         theme: _theme(),
         home: const HomeScreen(),
-        builder: (context, child) => DevActivityListener(child: child!),
+        builder: (context, child) => DevActivityListener(child: AlarmHost(child: child!)),
       ),
     ),
   );
   await tester.pump(const Duration(milliseconds: 100));
   return c;
+}
+
+/// An order is ringing but staff hid the alert: only the strip shows.
+class _HiddenRing extends AlarmNotifier {
+  @override
+  AlarmState build() => const AlarmState(ringing: true, visible: false);
 }
 
 final _q = find.byKey(const ValueKey('q-button'));
@@ -273,6 +283,20 @@ void main() {
       await tester.tap(find.text('Printers').last);
       await tester.pump(const Duration(milliseconds: 300));
       expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the "orders waiting" strip sits above the rail, not over the q', (tester) async {
+      final c = await _pumpHome(tester, ringingHidden: true);
+      final strip = find.textContaining('tap to show');
+      expect(strip, findsOneWidget);
+      expect(
+        tester.getRect(_q).top,
+        greaterThanOrEqualTo(tester.getRect(find.ancestor(of: strip, matching: find.byType(Material)).first).bottom),
+      );
+      await tester.tap(_q);
+      await _switchDone(tester);
+      expect(c.read(homeNavProvider), HomeDestination.batch, reason: 'the q still switches modes while ringing');
       await tester.pumpWidget(const SizedBox());
     });
 

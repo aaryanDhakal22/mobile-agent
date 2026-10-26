@@ -22,11 +22,26 @@ class AlarmHost extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final alarm = ref.watch(alarmProvider);
+    final strip = alarm.ringing && !alarm.visible;
     return Stack(
       children: [
-        Positioned.fill(child: child),
+        // The "still ringing" strip pushes the app down rather than covering
+        // it, so the rail's q (mode switch) stays reachable while it rings.
+        // The child keeps one fixed position in the tree (a keyed Expanded
+        // under the same wrapper) so the Navigator keeps its state when the
+        // strip comes and goes.
+        Positioned.fill(
+          child: Column(
+            children: [
+              if (strip) const _RingingBanner(),
+              Expanded(
+                key: const ValueKey('alarm-host-child'),
+                child: MediaQuery.removePadding(context: context, removeTop: strip, child: child),
+              ),
+            ],
+          ),
+        ),
         const Positioned.fill(child: DispatchFlash()),
-        if (alarm.ringing && !alarm.visible) const Positioned(top: 0, left: 0, right: 0, child: _RingingBanner()),
         if (alarm.ringing && alarm.visible) const Positioned.fill(child: NewOrderAlert()),
       ],
     );

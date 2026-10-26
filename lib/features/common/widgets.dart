@@ -7,6 +7,7 @@ import '../../core/format.dart';
 import '../../core/friendly_error.dart';
 import '../../core/local_log.dart';
 import '../../core/models.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 
 /// Pane title row: big title on the left, optional subtitle + trailing.
@@ -120,7 +121,7 @@ class _TickerState extends State<Ticker> {
   }
 
   @override
-  Widget build(BuildContext context) => widget.builder(context, DateTime.now());
+  Widget build(BuildContext context) => widget.builder(context, timeNow());
 }
 
 /// Colored pill naming the order's floor state.
