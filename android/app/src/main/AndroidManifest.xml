@@ -7,6 +7,10 @@
     <!-- Self-update: the app installs the APK its agent serves, silently
          once Quibase is its own installer (InstallChannel.kt). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 12+: lets a self-update session skip the "Do you want to
+         update this app?" screen once Quibase is its own installer
+         (USER_ACTION_NOT_REQUIRED). Granted at install, no prompt. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <!-- "Display over other apps", asked for on Store → Updates: the only way
          Android lets RestartReceiver bring the screen back after a
          self-update or a reboot (a background activity start). -->

@@ -145,7 +145,15 @@ class _PiReleaseCardState extends ConsumerState<PiReleaseCard> {
   }
 
   @override
-  Widget build(BuildContext context) => SettingsCard(
+  Widget build(BuildContext context) {
+    // Ask the Pi again whenever the tablet checked (CHECK NOW, every 10 min).
+    ref.listen(updaterProvider.select((u) => u.lastCheck), (_, _) {
+      setState(() => _onPi = ref.read(agentClientProvider)?.appLatest());
+    });
+    return _card();
+  }
+
+  Widget _card() => SettingsCard(
     title: 'The Pi',
     info: kUpdatesInfo,
     subtitle: 'The newest Quibase the Pi has for this store\'s tablets.',

@@ -192,6 +192,15 @@ void main() {
       expect(platform.calls, ['session:quibase-20.apk']);
     });
 
+    test('one install even when the floor and the alarm both change at once', () async {
+      final (c, platform, floor) = await start();
+      floor.push(_floor(batch: 8));
+      floor.push(_floor(batch: 8).copyWith(lastSyncAt: DateTime.now()));
+      await c.read(updaterProvider.notifier).installNow();
+      await _drain();
+      expect(platform.calls, ['session:quibase-20.apk'], reason: 'two commits made Android ask twice');
+    });
+
     test('not while an order rings, even after close', () async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();

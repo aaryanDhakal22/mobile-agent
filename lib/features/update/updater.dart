@@ -356,12 +356,15 @@ class Updater extends Notifier<UpdateState> {
     final path = state.apkPath;
     if (state.target == null) return;
     if (path == null) return _download();
+    if (state.phase == UpdatePhase.installing) return; // one install at a time
+    // Installing from here on, before any await: the floor and the alarm can
+    // both ask for the install in the same moment.
+    state = state.copyWith(phase: UpdatePhase.installing, clearError: true);
     final platform = ref.read(updatePlatformProvider);
     if (!await platform.canInstall()) {
       state = state.copyWith(phase: UpdatePhase.needPermission);
       return;
     }
-    state = state.copyWith(phase: UpdatePhase.installing, clearError: true);
     _installTimer?.cancel();
     _installTimer = Timer(kInstallTimeout, () {
       if (state.phase == UpdatePhase.installing) {
