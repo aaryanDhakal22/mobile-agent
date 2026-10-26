@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api_client.dart';
 import '../../../core/diag_models.dart';
 import '../../../core/providers.dart';
+import '../../../core/time.dart';
 import '../../../theme/quicc_colors.dart';
 import '../found_printers.dart';
 import '../setup_flow.dart';
@@ -37,7 +38,7 @@ class _PiReadyPanelState extends ConsumerState<PiReadyPanel> {
   @override
   void initState() {
     super.initState();
-    _start = DateTime.now();
+    _start = timeNow();
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _read());
     scheduleMicrotask(_read);
   }
@@ -79,7 +80,7 @@ class _PiReadyPanelState extends ConsumerState<PiReadyPanel> {
       }
       setState(() => _restarting = e.isNetwork);
     }
-    if (!_waitedOut && DateTime.now().difference(_start) > kPiReadyWait && mounted) {
+    if (!_waitedOut && timeNow().difference(_start) > kPiReadyWait && mounted) {
       // Show what's missing, but keep looking (slower): a printer switched
       // on or added now still turns green.
       _poll?.cancel();

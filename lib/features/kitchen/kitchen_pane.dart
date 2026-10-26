@@ -6,14 +6,17 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_spacing.dart';
+import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
 import '../order_detail/order_detail_screen.dart';
 import '../arrived/time_picker.dart';
 import 'resend_kitchen.dart';
 
-/// Ticket column width and gap (compact tickets, ~6 across on the tablet).
-const double kTicketWidth = 280;
-const double kTicketGap = 12;
+/// The narrowest ticket column and the gap between tickets. 1.6.0: fewer,
+/// larger tickets — 3 columns on the 1280×800 tablet, about 6 on screen.
+const double kTicketWidth = 340;
+const double kTicketGap = QuiccSpace.lg;
 
 /// How late a ticket looks: green until [greenTill] minutes after the order
 /// arrived, then amber, fully red at twice [greenTill].
@@ -54,12 +57,12 @@ class KitchenPane extends ConsumerWidget {
       onRefresh: () => ref.read(floorProvider.notifier).refresh(),
       child: LayoutBuilder(
         builder: (context, box) {
-          const pad = 24.0;
+          const pad = QuiccSpace.pane;
           final cols = ((box.maxWidth - 2 * pad + kTicketGap) / (kTicketWidth + kTicketGap)).floor().clamp(1, 12);
           final columns = dealIntoColumns(kitchen, cols);
           return SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(pad, 28, pad, 120), // room for the driver button
+            padding: const EdgeInsets.fromLTRB(pad, pad, pad, 120), // room for the driver button
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -78,10 +81,10 @@ class KitchenPane extends ConsumerWidget {
                   )
                 else if (kitchen.isEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    padding: const EdgeInsets.symmetric(vertical: QuiccSpace.xl),
                     child: Text(
                       'Nothing cooking right now.',
-                      style: TextStyle(fontSize: 18, color: context.palette.textSecondary),
+                      style: QuiccType.text(QuiccType.heading, color: context.palette.textSecondary),
                     ),
                   )
                 else
@@ -153,27 +156,27 @@ class LaterStrip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Padding(
       key: const ValueKey('later-strip'),
-      padding: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.only(top: QuiccSpace.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               Icon(Icons.schedule, size: 18, color: context.palette.textMuted),
-              const SizedBox(width: 8),
+              QuiccSpace.gapSm,
               Eyebrow('Later · ${orders.length}'),
-              const SizedBox(width: 12),
+              QuiccSpace.gapMd,
               Expanded(
                 child: Text(
                   'They ring again when it is time to cook. Tap one to change its lead time.',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: context.palette.textMuted, fontSize: 13),
+                  style: QuiccType.text(QuiccType.caption, color: context.palette.textMuted),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          QuiccSpace.gapSm,
           Wrap(
             spacing: kTicketGap,
             runSpacing: kTicketGap,
@@ -215,7 +218,7 @@ class _LaterTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(QuiccRadius.md),
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md, vertical: QuiccSpace.md),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -224,10 +227,10 @@ class _LaterTile extends StatelessWidget {
                       Expanded(
                         child: Text(
                           due == null ? 'Later' : 'Due ${clock(due)}',
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                          style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
                         ),
                       ),
-                      FulfillmentTag(so.order.fulfillment.type, size: 11),
+                      FulfillmentTag(so.order.fulfillment.type, size: QuiccType.caption),
                     ],
                   ),
                   const SizedBox(height: 2),
@@ -235,11 +238,11 @@ class _LaterTile extends StatelessWidget {
                     [so.displayNumber, so.order.customerName].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                    style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
                   ),
                   Text(
                     [if (ring != null) 'rings ${clock(ring)}', if (lead != null) '$lead min lead'].join(' · '),
-                    style: TextStyle(color: context.palette.textSecondary, fontSize: 13),
+                    style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
                   ),
                 ],
               ),
@@ -345,6 +348,12 @@ ThemeData paperTheme(ThemeData base) {
 /// Order notes on the white ticket: a darker amber than the dark theme's.
 const Color kPaperNoteColor = Color(0xFFB45309);
 
+/// Item lines on a ticket (1.6.0: a step above body, read from the line).
+const double kTicketItemSize = 18;
+
+/// READY / Reprint / Resend height on a ticket.
+const double kTicketButtonHeight = 52;
+
 /// One ticket on the Kitchen board: a coloured header bar (green → red by
 /// time since arrival) with the number, then a white body. A paid ticket
 /// that isn't ready yet gets the slow wave ([paidWave] = the feature switch).
@@ -401,19 +410,19 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
     },
   );
 
-  /// A 48×44 outlined icon button with a tooltip / screen-reader label.
+  /// A 56×52 outlined icon button with a tooltip / screen-reader label.
   Widget _iconButton({required String label, required IconData icon, required bool busy, VoidCallback? onPressed}) {
     return Tooltip(
       message: label,
       child: SizedBox(
-        width: 48,
-        height: 44,
+        width: 56,
+        height: kTicketButtonHeight,
         child: OutlinedButton(
-          style: OutlinedButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(48, 44)),
+          style: OutlinedButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(56, kTicketButtonHeight)),
           onPressed: busy ? null : onPressed,
           child: busy
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : Icon(icon, size: 20, semanticLabel: label),
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : Icon(icon, size: 24, semanticLabel: label),
         ),
       ),
     );
@@ -434,29 +443,36 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
         final since = raw.isNegative ? Duration.zero : raw;
         final tone = lateColor(since, widget.greenTill);
         final body = Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+          padding: const EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.md, QuiccSpace.lg, QuiccSpace.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _TimerLine(order: so, since: since, tone: tone, now: now),
-              const SizedBox(height: 6),
+              QuiccSpace.gapSm,
               Text(
                 o.customerName,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
               ),
-              if (so.status.flag != null) ...[const SizedBox(height: 6), OrderFlagLine(so.status.flag!, fontSize: 12)],
-              const SizedBox(height: 4),
-              ItemLines(o.items, fontSize: 13),
+              if (so.status.flag != null) ...[
+                QuiccSpace.gapSm,
+                OrderFlagLine(so.status.flag!, fontSize: QuiccType.label),
+              ],
+              QuiccSpace.gapSm,
+              ItemLines(o.items, fontSize: kTicketItemSize),
               if (o.notes.trim().isNotEmpty) ...[
-                const SizedBox(height: 4),
+                QuiccSpace.gapSm,
                 Text(
                   '“${o.notes.trim()}”',
-                  style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: kPaperNoteColor),
+                  style: QuiccType.text(
+                    QuiccType.body,
+                    weight: FontWeight.w500,
+                    color: kPaperNoteColor,
+                  ).copyWith(fontStyle: FontStyle.italic),
                 ),
               ],
-              const SizedBox(height: 8),
+              QuiccSpace.gapMd,
               Row(
                 children: [
                   _iconButton(
@@ -465,29 +481,29 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
                     busy: _reprinting,
                     onPressed: _reprint,
                   ),
-                  const SizedBox(width: 6),
+                  QuiccSpace.gapSm,
                   _iconButton(
                     label: kResendKitchenLabel,
                     icon: Icons.send_outlined,
                     busy: _resending,
                     onPressed: _resend,
                   ),
-                  const SizedBox(width: 8),
+                  QuiccSpace.gapSm,
                   Expanded(
                     child: SizedBox(
-                      height: 44,
+                      height: kTicketButtonHeight,
                       child: FilledButton.icon(
                         // The theme's big-button padding would clip the
-                        // label inside a 44 px ticket button.
+                        // label inside a ticket-height button.
                         style: FilledButton.styleFrom(
                           backgroundColor: QuiccColors.statusPaid,
                           foregroundColor: QuiccColors.brand900,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          minimumSize: const Size(0, 44),
-                          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1),
+                          padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md),
+                          minimumSize: const Size(0, kTicketButtonHeight),
+                          textStyle: QuiccType.text(QuiccType.heading, weight: FontWeight.w700, height: 1),
                         ),
                         onPressed: _busy ? null : _ready,
-                        icon: const Icon(Icons.check_circle_outline, size: 20),
+                        icon: const Icon(Icons.check_circle_outline, size: 24),
                         label: Text(_busy ? '…' : 'READY'),
                       ),
                     ),
@@ -509,6 +525,9 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
+                key: ValueKey('ticket-open-${so.id}'),
+                // The whole ticket opens the order details (the chevron in
+                // the bar says so).
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => OrderDetailScreen(orderId: so.id, initial: so),
@@ -545,7 +564,7 @@ class _CardBar extends StatelessWidget {
     return Container(
       key: const ValueKey('card-bar'),
       color: tone,
-      padding: const EdgeInsets.fromLTRB(12, 7, 10, 7),
+      padding: const EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.sm, QuiccSpace.xs, QuiccSpace.sm),
       // Each side shrinks rather than overflow on a narrow ticket.
       child: Row(
         children: [
@@ -560,14 +579,18 @@ class _CardBar extends StatelessWidget {
                   children: [
                     Text(
                       so.displayNumber,
-                      style: const TextStyle(fontSize: 26, height: 1, fontWeight: FontWeight.w800, color: ink),
+                      style: QuiccType.number(QuiccType.display, weight: FontWeight.w700, color: ink, height: 1),
                     ),
-                    if (so.isPos) ...[const SizedBox(width: 8), const PosTag(color: ink)],
+                    if (so.isPos) ...[QuiccSpace.gapSm, const PosTag(color: ink)],
                     if (!so.isPos && posCheck != null) ...[
-                      const SizedBox(width: 8),
+                      QuiccSpace.gapSm,
                       Text(
                         'POS #$posCheck',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ink.withValues(alpha: 0.75)),
+                        style: QuiccType.number(
+                          QuiccType.label,
+                          weight: FontWeight.w700,
+                          color: ink.withValues(alpha: 0.75),
+                        ),
                       ),
                     ],
                   ],
@@ -575,19 +598,30 @@ class _CardBar extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 6),
-          Flexible(
+          QuiccSpace.gapSm,
+          // Pinned right (not sharing the free space with the number), and
+          // shrinks on a very narrow ticket.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: kTicketWidth * 0.55),
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerRight,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (so.status.paid) ...[const PaidBadge(), const SizedBox(width: 8)],
-                  FulfillmentTag(so.order.fulfillment.type, size: 11, color: ink),
+                  if (so.status.paid) ...[const PaidBadge(), QuiccSpace.gapSm],
+                  FulfillmentTag(so.order.fulfillment.type, size: QuiccType.label, color: ink),
                 ],
               ),
             ),
+          ),
+          // Tap anywhere on the ticket → the order details.
+          Icon(
+            Icons.chevron_right,
+            key: const ValueKey('ticket-details'),
+            size: 32,
+            color: ink.withValues(alpha: 0.7),
+            semanticLabel: 'Open order details',
           ),
         ],
       ),
@@ -610,27 +644,29 @@ class _TimerLine extends StatelessWidget {
     final left = eta?.difference(now);
     final late = left != null && left.isNegative;
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(
           duration(since),
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w800,
-            fontFeatures: const [FontFeature.tabularFigures()],
+          key: const ValueKey('ticket-timer'),
+          style: QuiccType.number(
+            QuiccType.title,
+            weight: FontWeight.w700,
             // Darker than the bar so it reads on the white ticket.
             color: Color.lerp(tone, Colors.black, 0.35),
+            height: 1.1,
           ),
         ),
         if (left != null) ...[
-          const SizedBox(width: 8),
+          QuiccSpace.gapMd,
           Expanded(
             child: Text(
               late ? 'LATE ${minutes(left)}' : '${minutes(left)} left · ${clock(eta)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: late ? FontWeight.w800 : FontWeight.w500,
+              style: QuiccType.text(
+                late ? QuiccType.heading : QuiccType.body,
+                weight: late ? FontWeight.w700 : FontWeight.w500,
                 color: late ? QuiccColors.statusVoided : context.palette.textSecondary,
               ),
             ),

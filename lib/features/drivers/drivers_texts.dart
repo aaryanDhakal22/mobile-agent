@@ -29,9 +29,14 @@ const kRemoveDriverInfo = InfoText(
 
 const kDriverButtonInfo = InfoText(
   'The driver button',
-  'Tap a driver who is out = they\'re back. Their orders are marked delivered and they go to the '
+  'This is the drivers\' corner. The badge shows how many drivers are out on a run.\n\n'
+      'NEXT is the driver at the front of the queue, with the tickets in their box. SEND OUT sends them '
+      'out with all of them (it asks first if something is still cooking).\n\n'
+      'When something needs planning first — their box is empty, or more than one delivery is waiting — '
+      'the button opens Deliveries instead. When nobody can go, it opens Drivers.\n\n'
+      'Tap a driver who is out = they\'re back. Their orders are marked delivered and they go to the '
       'back of the queue.\n\n'
-      'Hold the big NEXT button for 2 seconds = undo the last return (up to 10 minutes after it). '
+      'Hold the round button for 2 seconds = undo the last return (up to 10 minutes after it). '
       'The driver is out again; their orders stay delivered.\n\n'
       'Tap anywhere else to close.',
 );

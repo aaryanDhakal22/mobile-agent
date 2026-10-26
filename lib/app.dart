@@ -8,12 +8,13 @@ import 'core/device_platform.dart';
 import 'core/providers.dart';
 import 'core/storage.dart';
 import 'features/alert/new_order_alert.dart';
+import 'features/dev/dev_gate.dart';
 import 'features/diagnose/diagnose_entry.dart';
 import 'features/home/home_screen.dart';
 import 'features/setup/setup_controller.dart';
 import 'features/setup/setup_entry.dart';
 import 'features/setup/setup_wizard.dart';
-import 'features/update/update_gate.dart';
+import 'features/update/update_prompt.dart';
 import 'theme/quicc_theme.dart';
 
 class MobileAgentApp extends ConsumerStatefulWidget {
@@ -101,15 +102,17 @@ class _MobileAgentAppState extends ConsumerState<MobileAgentApp> {
       home: setup ? const SetupWizard() : const HomeScreen(),
       // The alarm (full-screen alert + "still ringing" banner) rides above
       // every route — the setup wizard included, once paired — so it shows
-      // over order detail screens and dialogs too. A newer Quibase on the
-      // agent locks everything below the alarm until installed (UpdateGate):
-      // the new-order alert stays on top, so orders can always be accepted.
-      builder: (context, child) =>
-          paired ? pairedOverlays(child ?? const SizedBox.shrink()) : (child ?? const SizedBox.shrink()),
+      // over order detail screens and dialogs too. Below it, the "Update
+      // ready — install now?" prompt (UpdatePrompt) when Android wants a tap
+      // for a self-update; it never locks the tablet.
+      // Any touch restarts developer mode's idle clock (it relocks after 15 min).
+      builder: (context, child) => DevActivityListener(
+        child: paired ? pairedOverlays(child ?? const SizedBox.shrink()) : (child ?? const SizedBox.shrink()),
+      ),
     );
   }
 }
 
 /// What rides above every route once paired: the alarm on top of the update
-/// lock (UpdateGate) on top of the app.
-Widget pairedOverlays(Widget child) => AlarmHost(child: UpdateGate(child: child));
+/// prompt (UpdatePrompt) on top of the app.
+Widget pairedOverlays(Widget child) => AlarmHost(child: UpdatePrompt(child: child));

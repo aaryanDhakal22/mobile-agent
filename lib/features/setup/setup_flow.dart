@@ -1,5 +1,6 @@
 import '../../core/json.dart';
 import '../../core/models.dart';
+import '../../core/time.dart';
 
 /// The setup wizard's steps, in order. Everything up to [signIn] happens
 /// before the tablet is paired; everything after needs the pairing.
@@ -97,7 +98,7 @@ class SetupProgress {
   });
 
   factory SetupProgress.start({SetupStep step = SetupStep.welcome, String address = '', DateTime? now}) =>
-      SetupProgress(step: step, piAddress: address, startedAt: now ?? DateTime.now());
+      SetupProgress(step: step, piAddress: address, startedAt: now ?? timeNow());
 
   /// Set up: the last screen was confirmed.
   bool get isDone => finished;
@@ -166,7 +167,7 @@ class SetupProgress {
       finishedLater: j['finished_later'] == true,
       // Older records: reaching the last step counted as finished.
       finished: j['finished'] == true || (j['finished'] == null && step == SetupStep.done),
-      startedAt: jDate(j['started_at']) ?? DateTime.now(),
+      startedAt: jDate(j['started_at']) ?? timeNow(),
     );
   }
 }

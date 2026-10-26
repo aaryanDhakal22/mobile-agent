@@ -1,6 +1,7 @@
 import '../../core/device_platform.dart';
 import '../../core/diag_models.dart';
 import '../../core/friendly_error.dart';
+import '../../core/time.dart';
 import '../common/info_button.dart';
 import '../illustrations/illustration.dart';
 import 'checks.dart';
@@ -158,7 +159,7 @@ class StepRecord {
     '${m['id'] ?? ''}',
     '${m['answer'] ?? ''}',
     result: '${m['result'] ?? ''}',
-    at: DateTime.tryParse('${m['at']}') ?? DateTime.now(),
+    at: DateTime.tryParse('${m['at']}') ?? timeNow(),
   );
 }
 

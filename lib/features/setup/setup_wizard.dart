@@ -40,14 +40,11 @@ class SetupWizard extends ConsumerWidget {
     final ctl = ref.read(setupProvider.notifier);
     final paired = ref.watch(pairingProvider) != null;
     final (pos, total) = SetupFlow.position(p.step);
-    // The "orders waiting" strip (AlarmHost) sits over the top of the screen.
-    final ringingStrip = ref.watch(alarmProvider.select((a) => a.ringing && !a.visible));
 
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            if (ringingStrip) const SizedBox(height: 56),
             Expanded(
               child: Column(
                 children: [

@@ -1,4 +1,5 @@
 import 'json.dart';
+import 'time.dart';
 
 /// `GET /api/diag` — the Pi's view of itself (contract/agent.md §2.6).
 class PiDiag {
@@ -27,6 +28,9 @@ class PiDiag {
   final bool? openNow;
   final int quietAlertMinutes;
 
+  /// Paired tablets and the Quibase each last reported (2.2.0).
+  final List<DiagTablet> tablets;
+
   /// When this snapshot was taken on the tablet (not part of the wire shape).
   final DateTime? fetchedAt;
 
@@ -46,6 +50,7 @@ class PiDiag {
     this.waiting = 0,
     this.openNow,
     this.quietAlertMinutes = 90,
+    this.tablets = const [],
     this.fetchedAt,
   });
 
@@ -72,7 +77,8 @@ class PiDiag {
       waiting: jInt(orders['waiting']),
       openNow: json['open_now'] is bool ? json['open_now'] as bool : null,
       quietAlertMinutes: json['quiet_alert_minutes'] == null ? 90 : jInt(json['quiet_alert_minutes']),
-      fetchedAt: fetchedAt ?? DateTime.now(),
+      tablets: jList(json['tablets'], DiagTablet.fromJson),
+      fetchedAt: fetchedAt ?? timeNow(),
     );
   }
 
@@ -93,10 +99,37 @@ class PiDiag {
     },
     'open_now': openNow,
     'quiet_alert_minutes': quietAlertMinutes,
+    'tablets': [for (final t in tablets) t.toJson()],
     'fetched_at': fetchedAt?.toUtc().toIso8601String(),
   };
 
   factory PiDiag.fromStored(Map<String, dynamic> json) => PiDiag.fromJson(json, fetchedAt: jDate(json['fetched_at']));
+}
+
+/// One paired tablet in `/api/diag` (2.2.0).
+class DiagTablet {
+  final String deviceId;
+  final String name;
+  final String appVersion;
+  final DateTime? lastSeenAt;
+  final bool connected;
+  const DiagTablet({this.deviceId = '', this.name = '', this.appVersion = '', this.lastSeenAt, this.connected = false});
+
+  factory DiagTablet.fromJson(Map<String, dynamic> json) => DiagTablet(
+    deviceId: jStr(json['device_id']),
+    name: jStr(json['name']),
+    appVersion: jStr(json['app_version']),
+    lastSeenAt: jDate(json['last_seen_at']),
+    connected: jBool(json['connected']),
+  );
+
+  Map<String, Object?> toJson() => {
+    'device_id': deviceId,
+    'name': name,
+    'app_version': appVersion,
+    'last_seen_at': lastSeenAt?.toUtc().toIso8601String(),
+    'connected': connected,
+  };
 }
 
 class PiHealth {

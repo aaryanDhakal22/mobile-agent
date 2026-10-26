@@ -11,6 +11,7 @@ import '../../core/device_platform.dart';
 import '../../core/local_log.dart';
 import '../../core/providers.dart';
 import '../../core/storage.dart';
+import '../../core/time.dart';
 import 'checks.dart';
 import 'guides.dart';
 
@@ -100,7 +101,7 @@ DiagReport composeReport({
   return DiagReport({
     'v': 1,
     'id': id ?? uuidV4(),
-    'created_at': (now ?? DateTime.now()).toUtc().toIso8601String(),
+    'created_at': (now ?? timeNow()).toUtc().toIso8601String(),
     'kind': kind,
     'scenario': scenario,
     'outcome': outcome,

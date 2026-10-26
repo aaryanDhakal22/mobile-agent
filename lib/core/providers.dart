@@ -16,6 +16,7 @@ import 'models.dart';
 import 'printer_models.dart';
 import 'sse.dart';
 import 'storage.dart';
+import 'time.dart';
 
 // =============================================================================
 // Storage + pairing
@@ -241,7 +242,7 @@ class FloorController extends Notifier<FloorState> {
         current: results[1] as List<StoredOrder>,
         arrived: results[2] as List<StoredOrder>,
         drivers: results[3] as List<Driver>,
-        at: DateTime.now(),
+        at: timeNow(),
       );
       for (final ev in _bufferedDuringRefresh ?? const <SseEvent>[]) {
         next = applySseEvent(next, ev).state;
@@ -387,7 +388,7 @@ class FloorController extends Notifier<FloorState> {
       for (final id in orderIds)
         if (state.orders[id] != null) state.orders[id]!,
     ];
-    final now = DateTime.now().toUtc();
+    final now = timeNow().toUtc();
     _upsert([for (final o in before) o.copyWith(status: o.status.withPool(driverId, at: now))]);
     try {
       _upsert(await _requireClient(ref).poolOrders(orderIds, driverId: driverId));
@@ -468,6 +469,12 @@ class FloorController extends Notifier<FloorState> {
           floor: f.copyWith(
             soonReadyMinutes: saved.soonReadyMinutes,
             deliveryTargetMinutes: saved.deliveryTargetMinutes,
+            nearbyRule: saved.nearbyRule,
+            nearbyDetourMinutes: saved.nearbyDetourMinutes,
+            nearbyDistanceMi: saved.nearbyDistanceMi,
+            store: saved.deliveryRadiusM == null || f.store == null
+                ? null
+                : StoreGeo(lat: f.store!.lat, lng: f.store!.lng, deliveryRadiusM: saved.deliveryRadiusM!),
           ),
         ),
       );
@@ -480,7 +487,7 @@ class FloorController extends Notifier<FloorState> {
   Future<void> driverReturned(String driverId) async {
     try {
       _upsert(await _requireClient(ref).driverReturned(driverId));
-      ref.read(lastReturnProvider.notifier).state = LastReturn(driverId, DateTime.now());
+      ref.read(lastReturnProvider.notifier).state = LastReturn(driverId, timeNow());
       unawaited(_reloadDrivers());
     } on AgentException catch (e) {
       if (e.isConflict || e.isNotFound) unawaited(refresh());
@@ -518,7 +525,7 @@ class FloorController extends Notifier<FloorState> {
     await _reloadDrivers();
   }
 
-  /// Name and / or Driver # (POS login #; '' clears it).
+  /// Name and / or Driver # (SoftTouch Employee Number; '' clears it).
   Future<void> updateDriver(String id, {String? name, String? posNumber}) async {
     await _requireClient(ref).updateDriver(id, name: name, posNumber: posNumber);
     await _reloadDrivers();
@@ -599,7 +606,7 @@ class LastReturn {
   const LastReturn(this.driverId, this.at);
 
   static const window = Duration(minutes: 10);
-  bool get undoable => DateTime.now().difference(at) < window;
+  bool get undoable => timeNow().difference(at) < window;
 }
 
 final lastReturnProvider = StateProvider<LastReturn?>((_) => null);

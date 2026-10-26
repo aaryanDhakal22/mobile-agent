@@ -25,6 +25,15 @@ class TimePickerMath {
 
   /// +5 on the third button, capped at the Pi's limit (240).
   static int stepUp(int third) => math.min(third + step, DefaultTimes.maxMinutes);
+
+  /// The delivery ACCEPT's lowest time (1.6.0 nudges).
+  static const int nudgeFloor = step;
+
+  /// −5 on the delivery ACCEPT, floored at 5 min.
+  static int nudgeDown(int minutes) => math.max(minutes - step, nudgeFloor);
+
+  /// +5 on the delivery ACCEPT, capped at the Pi's limit (240).
+  static int nudgeUp(int minutes) => math.min(minutes + step, DefaultTimes.maxMinutes);
 }
 
 /// X for [o]: the default pickup time for pickup / dine-in, the default

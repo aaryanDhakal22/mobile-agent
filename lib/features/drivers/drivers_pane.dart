@@ -5,7 +5,9 @@ import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_type.dart';
 import '../common/info_button.dart';
 import '../common/widgets.dart';
 import 'driver_dialog.dart';
@@ -53,7 +55,7 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
     if (ok && mounted) toast(context, '${r.name} added — clock them in when they start');
   }
 
-  /// Name and Driver # (their SoftTouch login #); only what changed is sent.
+  /// Name and Driver # (their SoftTouch Employee Number); only what changed is sent.
   Future<void> _edit(Driver d) async {
     final r = await driverDialog(context, title: 'Edit driver', name: d.name, posNumber: d.posNumber ?? '');
     if (r == null || r.name.isEmpty || !mounted) return;
@@ -176,7 +178,7 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
                     Text(
                       'Clock drivers in when they start — they join the back of the queue, and the first '
                       'available driver is next up. Drag ≡ to reorder.',
-                      style: TextStyle(color: context.palette.textMuted),
+                      style: QuiccType.text(QuiccType.body, color: context.palette.textMuted),
                     ),
                     const Wrap(
                       spacing: 16,
@@ -195,7 +197,7 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
                           Expanded(
                             child: Text(
                               'Everyone is clocked out daily at ${wallTime(resetTime)} (set in the agent web UI).',
-                              style: TextStyle(color: context.palette.textMuted),
+                              style: QuiccType.text(QuiccType.label, color: context.palette.textMuted),
                             ),
                           ),
                         ],
@@ -302,7 +304,7 @@ class _DriverRow extends StatelessWidget {
                 width: 44,
                 child: Text(
                   rank == null ? '' : '$rank',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: context.palette.textMuted),
+                  style: QuiccType.number(QuiccType.heading + 2, weight: FontWeight.w700, color: context.palette.textMuted),
                 ),
               ),
               Expanded(
@@ -312,12 +314,12 @@ class _DriverRow extends StatelessWidget {
                     Text(
                       rank == 1 ? '${d.name} · NEXT' : d.name,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                      style: QuiccType.text(QuiccType.heading, weight: FontWeight.w600),
                     ),
                     Text(
                       details.join(' · '),
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: context.palette.textSecondary),
+                      style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
                     ),
                   ],
                 ),
@@ -382,7 +384,7 @@ class _DriverStatusPill extends StatelessWidget {
       ),
       child: Text(
         status.label,
-        style: TextStyle(color: c, fontWeight: FontWeight.w700, letterSpacing: 1.2, fontSize: 12),
+        style: QuiccType.text(QuiccType.caption, weight: FontWeight.w700, color: c).copyWith(letterSpacing: 1.2),
       ),
     );
   }
@@ -414,7 +416,7 @@ class _ShiftsDialog extends ConsumerWidget {
           ),
           data: (list) => list.isEmpty
               ? Center(
-                  child: Text('No shifts in the last 7 days.', style: TextStyle(color: context.palette.textMuted)),
+                  child: Text('No shifts in the last 7 days.', style: QuiccType.text(QuiccType.body, color: context.palette.textMuted)),
                 )
               : ListView.separated(
                   itemCount: list.length,
@@ -436,7 +438,7 @@ class _ShiftRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = shift;
     final span = s.isOpen ? '${clock(s.clockIn)} – now' : '${clock(s.clockIn)} – ${clock(s.clockOut)}';
-    final len = s.length(DateTime.now());
+    final len = s.length(timeNow());
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
@@ -446,14 +448,14 @@ class _ShiftRow extends StatelessWidget {
             child: Text(
               s.driverName.isEmpty ? 'Driver' : s.driverName,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
             ),
           ),
           Expanded(
             flex: 5,
             child: Text(
               '${dateClock(s.clockIn).split(',').first} · $span',
-              style: TextStyle(color: context.palette.textSecondary),
+              style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
             ),
           ),
           SizedBox(
@@ -461,7 +463,7 @@ class _ShiftRow extends StatelessWidget {
             child: Text(
               len == null ? '' : minutes(len),
               textAlign: TextAlign.right,
-              style: TextStyle(color: context.palette.textSecondary),
+              style: QuiccType.number(QuiccType.label, weight: FontWeight.w500, color: context.palette.textSecondary),
             ),
           ),
           SizedBox(
@@ -469,12 +471,11 @@ class _ShiftRow extends StatelessWidget {
             child: Text(
               s.isOpen ? 'ON SHIFT' : (s.autoOut ? 'AUTO OUT' : ''),
               textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 12,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.w700,
+              style: QuiccType.text(
+                QuiccType.caption,
+                weight: FontWeight.w700,
                 color: s.isOpen ? QuiccColors.statusPaid : context.palette.textMuted,
-              ),
+              ).copyWith(letterSpacing: 1.2),
             ),
           ),
         ],

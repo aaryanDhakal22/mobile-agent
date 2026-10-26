@@ -228,7 +228,7 @@ void main() {
     expect(rs.sent.single.json['fixed_by'], 'sd_swap');
   });
 
-  testWidgets('Help: four guides, the tools, and a full check with FIX IT', (tester) async {
+  testWidgets('Help: four guides and send diagnostics; the full check has FIX IT', (tester) async {
     final probes = FakeProbes()..diagAnswer = diagOf(printers: [kitchen, down(receipt)]);
     await pump(tester, const Scaffold(body: HelpPane()), probes: probes);
     for (final name in [
@@ -239,12 +239,13 @@ void main() {
     ]) {
       expect(find.text(name), findsOneWidget);
     }
-    expect(find.text(GuideText.fullCheck), findsOneWidget);
+    // The checks and tests moved to developer mode → Tests (1.6.0).
+    expect(find.text(GuideText.fullCheck), findsNothing);
+    expect(find.text(GuideText.pairAnother), findsNothing);
     expect(find.text(GuideText.sendDiag), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.text(GuideText.fullCheck));
-    await settle(tester);
+    await pump(tester, const FullCheckScreen(), probes: probes);
     expect(find.byType(FullCheckScreen), findsOneWidget);
     expect(find.text(CheckText.printersDown(['Online'])), findsOneWidget);
     expect(find.widgetWithText(FilledButton, GuideText.fixIt), findsWidgets);
@@ -252,8 +253,12 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('Home has a Help tab', (tester) async {
+  testWidgets('Home has a Help tab (store mode)', (tester) async {
     await pump(tester, const HomeScreen(), paired: false);
+    await tester.tap(find.byKey(const ValueKey('q-button')));
+    await settle(tester);
+    await settle(tester);
+    await settle(tester);
     await tester.tap(find.text('Help').last);
     await tester.pump(const Duration(milliseconds: 600));
     expect(find.byType(HelpPane), findsOneWidget);

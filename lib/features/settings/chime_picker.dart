@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/alert_player.dart';
 import '../../core/format.dart';
 import '../../core/providers.dart';
+import '../../theme/quicc_spacing.dart';
 
 /// The order chime: a dropdown of the sounds (saved at once, previewed on
 /// change) and PREVIEW / STOP. Used in Settings and the setup wizard.
@@ -67,7 +68,7 @@ class _ChimePickerState extends ConsumerState<ChimePicker> {
             },
           ),
         ),
-        const SizedBox(width: 12),
+        QuiccSpace.gapMd,
         SizedBox(
           height: 56,
           child: previewing

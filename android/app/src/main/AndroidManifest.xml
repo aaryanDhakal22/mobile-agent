@@ -4,9 +4,17 @@
     <!-- AlertPlayer sets stayAwake: true (MediaPlayer.setWakeMode), which
          throws a SecurityException without this — the alarm would not play. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- Forced self-update: the app installs the APK its agent serves
-         (the tablet still shows Android's one-tap install screen). -->
+    <!-- Self-update: the app installs the APK its agent serves, silently
+         once Quibase is its own installer (InstallChannel.kt). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 12+: lets a self-update session skip the "Do you want to
+         update this app?" screen once Quibase is its own installer
+         (USER_ACTION_NOT_REQUIRED). Granted at install, no prompt. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- "Display over other apps", asked for on Store → Updates: the only way
+         Android lets RestartReceiver bring the screen back after a
+         self-update or a reboot (a background activity start). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Ring anywhere: RingService keeps the connection to the Pi alive in the
          background, and a full-screen notification wakes the screen for a new
          order (RingService.kt). -->
@@ -69,6 +77,10 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <!-- The self-update session's result (InstallChannel.kt). -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

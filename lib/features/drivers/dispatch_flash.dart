@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_type.dart';
 
 /// How long the driver's name stays up unless tapped away.
 const Duration kDispatchFlashHold = Duration(seconds: 8);
@@ -90,23 +91,22 @@ class _DispatchFlashState extends ConsumerState<DispatchFlash> with SingleTicker
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text(
+                      Text(
                         'OUT NOW',
-                        style: TextStyle(
-                          fontSize: 18,
-                          letterSpacing: 6,
-                          fontWeight: FontWeight.w700,
+                        style: QuiccType.text(
+                          QuiccType.heading - 2,
+                          weight: FontWeight.w700,
                           color: QuiccColors.brand400,
-                        ),
+                        ).copyWith(letterSpacing: 6),
                       ),
                       SizedBox(height: h * 0.03),
                       FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Text(
                           d.driver.name.isEmpty ? 'Driver' : d.driver.name,
-                          style: TextStyle(
-                            fontSize: nameSize,
-                            fontWeight: FontWeight.w800,
+                          style: QuiccType.text(
+                            nameSize,
+                            weight: FontWeight.w800,
                             height: 1,
                             color: palette.textPrimary,
                           ),
@@ -131,11 +131,10 @@ class _DispatchFlashState extends ConsumerState<DispatchFlash> with SingleTicker
                                     ),
                                     child: Text(
                                       n,
-                                      style: TextStyle(
-                                        fontSize: numberSize,
-                                        fontWeight: FontWeight.w800,
+                                      style: QuiccType.number(
+                                        numberSize,
+                                        weight: FontWeight.w800,
                                         color: QuiccColors.brand400,
-                                        fontFeatures: const [FontFeature.tabularFigures()],
                                       ),
                                     ),
                                   ),
@@ -145,7 +144,7 @@ class _DispatchFlashState extends ConsumerState<DispatchFlash> with SingleTicker
                         ),
                       ],
                       SizedBox(height: h * 0.04),
-                      Text('Tap to close', style: TextStyle(color: palette.textMuted, fontSize: 16)),
+                      Text('Tap to close', style: QuiccType.text(QuiccType.body, color: palette.textMuted)),
                     ],
                   ),
                 );

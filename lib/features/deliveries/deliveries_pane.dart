@@ -8,25 +8,38 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_spacing.dart';
+import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
+import '../home/home_nav.dart';
 import '../maps/pool_map_screen.dart';
 import '../order_detail/order_detail_screen.dart';
 import 'delivery_widgets.dart';
+import 'lava_glow.dart';
+import 'send_out.dart';
 
 /// Keeps toasts clear of the bottom-right driver button.
-const double _toastInset = 160;
+const double _toastInset = kSendOutToastInset;
 
-/// Room under each column's last card so it scrolls clear of the driver
-/// button (104 px + its ring, 24 px from the edge).
-const double _fabClearance = 170;
+/// Room under the left column's last card so it scrolls clear of the select
+/// bar.
+const double _listClearance = 96;
 
-/// Deliveries (1.4.0): unassigned deliveries on the left; on the right one
-/// box per available driver in queue order (NEXT on top), each with the pool
-/// staff build up by drag and drop (long-press) or Select ✓ + tap, and SEND
-/// OUT. Below the boxes: drivers out, with I HAVE RETURNED. AUTO suggests
-/// runs for every available driver as a yellow preview; nothing is saved
-/// until CONFIRM (or Send Out with the yellow stops showing). A single tap
-/// on any delivery opens it.
+/// The send-out bar stops short of the collapsed driver button (64 px, 24 px
+/// from the screen's right edge; the pane itself pads 24).
+const double _fabSlot = 80;
+
+/// Deliveries (1.4.0, reworked 1.6.0): unassigned deliveries on the left; on
+/// the right one box per available driver in queue order (NEXT on top), each
+/// with the pool staff build up by drag and drop (long-press) or Select ✓ +
+/// tap. Below the boxes: drivers out, with I HAVE RETURNED. Drivers leave in
+/// queue order, so there is one SEND OUT — the bar pinned under the pools,
+/// for the NEXT driver ([NextSendOutBar]). AUTO (with its lava-lamp glow
+/// while there is something to plan) suggests runs for every available
+/// driver as a yellow preview; nothing is saved until CONFIRM (or SEND OUT
+/// with the next driver's yellow stops showing). A single tap on any
+/// delivery opens it. Rows in [deliveryHighlightProvider] pulse yellow until
+/// you tap, drag, move or send something.
 class DeliveriesPane extends ConsumerStatefulWidget {
   const DeliveriesPane({super.key});
 
@@ -58,7 +71,15 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
 
   void _toggle(String id) => setState(() => _selected.contains(id) ? _selected.remove(id) : _selected.add(id));
 
-  void _tapOrder(StoredOrder o) => _selectMode ? _toggle(o.id) : _open(o);
+  void _tapOrder(StoredOrder o) {
+    _clearHighlight();
+    _selectMode ? _toggle(o.id) : _open(o);
+  }
+
+  /// The glow asks for attention until staff act on the deliveries.
+  void _clearHighlight() {
+    if (ref.read(deliveryHighlightProvider).isNotEmpty) ref.read(deliveryHighlightProvider.notifier).clear();
+  }
 
   void _endSelect() => setState(() {
     _selectMode = false;
@@ -72,6 +93,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
   /// are going are skipped.
   Future<void> _move(List<String> ids, String? driverId) async {
     if (ids.isEmpty) return;
+    _clearHighlight();
     final fs = ref.read(floorProvider);
     final suggested = ref.read(autoPreviewProvider)?.suggestedIds ?? const <String>{};
     final yellow = ids.where(suggested.contains).toList();
@@ -112,76 +134,14 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
 
   // --- send out ------------------------------------------------------------------
 
-  Future<bool> _confirmCooking(List<String> numbers, String driver) {
-    final one = numbers.length == 1;
-    return confirmDialog(
-      context,
-      title: "${numbersList(numbers)} ${one ? "isn't" : "aren't"} marked ready — send anyway?",
-      message: 'SEND ANYWAY marks ${one ? 'it' : 'them'} ready and sends ${one ? 'it' : 'them'} out with $driver.',
-      confirm: 'SEND ANYWAY',
-    );
-  }
-
   Future<void> _sendOut(Driver d) async {
-    final fs = ref.read(floorProvider);
-    final preview = ref.read(autoPreviewProvider);
-    final yellowIds = preview?.suggestedFor(d.id) ?? const <String>[];
-    final all = [
-      ...fs.poolFor(d.id),
-      for (final id in yellowIds)
-        if (fs.orders[id] != null) fs.orders[id]!,
-    ];
-    if (all.isEmpty) return;
-    var markReady = false;
-    final cooking = all.where((o) => o.state != OrderState.ready).toList();
-    if (cooking.isNotEmpty) {
-      if (!await _confirmCooking(cooking.map(orderNumber).toList(), d.name)) return;
-      markReady = true;
-    }
-    if (!mounted) return;
-    setState(() => _sending.add(d.id));
-    // The yellow stops leave the preview while they go out, so the send's own
-    // echo isn't taken for someone else's change.
-    final taken = yellowIds.isEmpty ? const <String>[] : _preview.takeRun(d.id);
     try {
-      while (true) {
-        try {
-          final out = await _floor.sendOut(
-            d.id,
-            markReady: markReady,
-            includeOrderIds: taken.isEmpty ? null : taken,
-            planId: taken.isEmpty ? null : preview?.planId,
-          );
-          _toast('${out.length} order${out.length == 1 ? '' : 's'} out with ${d.name}');
-          return;
-        } on NotReadyException catch (e) {
-          // The Pi knows better: something we thought ready isn't.
-          if (markReady || !mounted) rethrow;
-          final now = ref.read(floorProvider).orders;
-          final numbers = [for (final id in e.orderIds) now[id] == null ? '#?' : orderNumber(now[id]!)];
-          if (!await _confirmCooking(numbers, d.name)) {
-            if (preview != null) _preview.restoreRun(preview, d.id, taken);
-            return;
-          }
-          markReady = true;
-        }
-      }
-    } catch (e) {
-      if (preview != null) _preview.restoreRun(preview, d.id, taken);
-      if (!mounted) return;
-      final msg = switch (e) {
-        AgentException(code: 'driver_not_available') =>
-          "${d.name} isn't available — clocked out or already out. List refreshed.",
-        AgentException(code: 'driver_not_found') => '${d.name} was removed — list refreshed.',
-        AgentException(code: 'bad_request') => "${d.name}'s pool is empty now — list refreshed.",
-        AgentException(code: 'invalid_state') || AgentException(code: 'not_ready') =>
-          "Something in ${d.name}'s pool changed — list refreshed.",
-        AgentException(code: kPoolsUnsupported) => 'This Pi needs an update for driver pools.',
-        _ => null,
-      };
-      msg == null
-          ? toastError(context, e, lead: 'Not sent out', area: 'deliveries', rightInset: _toastInset)
-          : _toast(msg, error: true);
+      await sendOutDriver(
+        context,
+        d,
+        toastInset: _toastInset,
+        onSending: () => mounted ? setState(() => _sending.add(d.id)) : null,
+      );
     } finally {
       if (mounted) setState(() => _sending.remove(d.id));
     }
@@ -216,6 +176,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
   // --- AUTO ----------------------------------------------------------------------
 
   Future<void> _auto() async {
+    _clearHighlight();
     setState(() => _autoBusy = true);
     try {
       final plan = await _floor.autoPlan();
@@ -295,6 +256,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     });
     final fs = ref.watch(floorProvider);
     final preview = ref.watch(autoPreviewProvider);
+    final highlight = ref.watch(deliveryHighlightProvider);
     final suggested = preview?.suggestedIds ?? const <String>{};
     final left = fs.unassignedDeliveries.where((o) => !suggested.contains(o.id)).toList();
     final drivers = fs.availableDrivers;
@@ -314,7 +276,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     return Stack(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          padding: const EdgeInsets.fromLTRB(QuiccSpace.pane, QuiccSpace.pane, QuiccSpace.pane, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -326,8 +288,8 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(flex: 5, child: _leftColumn(context, left, target, fs)),
-                    const SizedBox(width: 16),
+                    Expanded(flex: 5, child: _leftColumn(context, left, target, fs, highlight)),
+                    QuiccSpace.gapLg,
                     Expanded(flex: 6, child: _rightColumn(context, fs, drivers, pools, preview, runs)),
                   ],
                 ),
@@ -336,13 +298,17 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
           ),
         ),
         if (_selectMode)
-          Positioned(left: 24, right: _toastInset, bottom: 16, child: _selectBar(context)),
+          Positioned(left: QuiccSpace.pane, right: _toastInset, bottom: QuiccSpace.lg, child: _selectBar(context)),
       ],
     );
   }
 
-  Widget _leftColumn(BuildContext context, List<StoredOrder> left, int target, FloorState fs) {
+  Widget _leftColumn(BuildContext context, List<StoredOrder> left, int target, FloorState fs, Set<String> highlight) {
     final moveHere = _selectMode && _selected.isNotEmpty;
+    // AUTO glows while it has something to plan: a delivery waiting, a free
+    // driver and no suggestion already up.
+    final autoInviting =
+        left.isNotEmpty && fs.availableDrivers.isNotEmpty && ref.watch(autoPreviewProvider) == null && !_autoBusy;
     return DragTarget<DeliveryDrag>(
       onWillAcceptWithDetails: (d) => d.data.fromDriver != null || d.data.suggestion,
       onAcceptWithDetails: (d) => _move(d.data.ids, null),
@@ -366,7 +332,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(6, 4, 4, 8),
+                  padding: const EdgeInsets.fromLTRB(QuiccSpace.sm, QuiccSpace.xs, QuiccSpace.xs, QuiccSpace.sm),
                   child: Row(
                     children: [
                       Expanded(
@@ -374,21 +340,25 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                           'Unassigned · ${left.length}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                          style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
                         ),
                       ),
-                      _HeaderButton(
-                        key: const ValueKey('auto'),
-                        icon: Icons.auto_awesome,
-                        label: 'AUTO',
-                        busy: _autoBusy,
-                        onTap: _autoBusy ? null : _auto,
+                      LavaGlow(
+                        active: autoInviting,
+                        child: _HeaderButton(
+                          key: const ValueKey('auto'),
+                          icon: Icons.auto_awesome,
+                          label: 'AUTO',
+                          busy: _autoBusy,
+                          glowing: autoInviting,
+                          onTap: _autoBusy ? null : _auto,
+                        ),
                       ),
-                      const SizedBox(width: 6),
+                      QuiccSpace.gapMd,
                       _HeaderButton(
                         key: const ValueKey('select'),
                         icon: _selectMode ? Icons.check_box : Icons.check_box_outlined,
-                        label: 'SELECT',
+                        label: 'Select',
                         active: _selectMode,
                         onTap: () => _selectMode ? _endSelect() : setState(() => _selectMode = true),
                       ),
@@ -397,34 +367,36 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                 ),
                 if (moveHere)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
+                    padding: const EdgeInsets.fromLTRB(QuiccSpace.sm, 0, QuiccSpace.sm, QuiccSpace.sm),
                     child: Text(
                       'Tap here to take the selected out of their pools',
-                      style: TextStyle(color: context.palette.textMuted, fontSize: 13),
+                      style: QuiccType.text(QuiccType.label, color: context.palette.textMuted),
                     ),
                   ),
                 Expanded(
                   child: RefreshIndicator(
                     onRefresh: () => _floor.refresh(),
                     child: ListView(
-                      padding: const EdgeInsets.only(bottom: _fabClearance),
+                      padding: const EdgeInsets.only(bottom: _listClearance),
                       children: [
                         if (left.isEmpty)
                           Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
+                            padding: const EdgeInsets.symmetric(vertical: QuiccSpace.xl, horizontal: QuiccSpace.sm),
                             child: Text(
                               'No deliveries waiting for a driver.',
-                              style: TextStyle(color: context.palette.textMuted),
+                              style: QuiccType.text(QuiccType.body, color: context.palette.textMuted),
                             ),
                           ),
                         for (final o in left)
                           DeliveryDraggable(
                             key: ValueKey('row-${o.id}'),
                             data: _dragData(o, fromDriver: null),
+                            onDragStarted: _clearHighlight,
                             child: UnassignedRow(
                               order: o,
                               selectMode: _selectMode,
                               selected: _selected.contains(o.id),
+                              highlight: highlight.contains(o.id),
                               targetMinutes: target,
                               onTap: () => _tapOrder(o),
                             ),
@@ -461,49 +433,70 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     AutoPreview? preview,
     List<_Run> runs,
   ) {
-    return ListView(
-      padding: const EdgeInsets.only(bottom: _fabClearance),
+    final next = drivers.isEmpty ? null : drivers.first;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (preview != null) _previewBar(context, preview),
-        if (drivers.isEmpty)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Row(
-                children: [
-                  Icon(Icons.person_off_outlined, color: context.palette.textMuted, size: 32),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                      fs.anyDriverOnShift
-                          ? 'Every clocked-in driver is out — wait for one to return, or clock another in on the Drivers tab.'
-                          : 'No driver clocked in — clock one in on the Drivers tab.',
-                      style: TextStyle(color: context.palette.textSecondary, fontSize: 16),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: QuiccSpace.lg),
+            children: [
+              if (preview != null) _previewBar(context, preview),
+              if (drivers.isEmpty)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(QuiccSpace.lg),
+                    child: Row(
+                      children: [
+                        Icon(Icons.person_off_outlined, color: context.palette.textMuted, size: 32),
+                        QuiccSpace.gapMd,
+                        Expanded(
+                          child: Text(
+                            fs.anyDriverOnShift
+                                ? 'Every clocked-in driver is out — wait for one to return, or clock another in on the Drivers tab.'
+                                : 'No driver clocked in — clock one in on the Drivers tab.',
+                            style: QuiccType.text(QuiccType.body, color: context.palette.textSecondary),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ),
+                ),
+              for (var i = 0; i < drivers.length; i++)
+                _driverBox(context, fs, drivers[i], i == 0, pools[drivers[i].id] ?? const [], preview),
+              QuiccSpace.gapLg,
+              Eyebrow('Out · ${runs.length}'),
+              QuiccSpace.gapSm,
+              if (runs.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: QuiccSpace.sm),
+                  child: Text(
+                    'No drivers are out.',
+                    style: QuiccType.text(QuiccType.body, color: context.palette.textMuted),
+                  ),
+                ),
+              for (final run in runs)
+                OutRunCard(
+                  key: ValueKey('out-${run.driver?.id ?? run.name}'),
+                  name: run.name,
+                  outAt: run.outAt,
+                  orders: run.orders,
+                  busy: run.driver != null && _returning.contains(run.driver!.id),
+                  onReturned: run.driver == null ? null : () => _returned(run.driver!),
+                  onOpen: _open,
+                ),
+            ],
           ),
-        for (var i = 0; i < drivers.length; i++)
-          _driverBox(context, fs, drivers[i], i == 0, pools[drivers[i].id] ?? const [], preview),
-        const SizedBox(height: 16),
-        Eyebrow('Out · ${runs.length}'),
-        const SizedBox(height: 8),
-        if (runs.isEmpty)
+        ),
+        if (next != null)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text('No drivers are out.', style: TextStyle(color: context.palette.textMuted)),
-          ),
-        for (final run in runs)
-          OutRunCard(
-            key: ValueKey('out-${run.driver?.id ?? run.name}'),
-            name: run.name,
-            outAt: run.outAt,
-            orders: run.orders,
-            busy: run.driver != null && _returning.contains(run.driver!.id),
-            onReturned: run.driver == null ? null : () => _returned(run.driver!),
-            onOpen: _open,
+            padding: const EdgeInsets.only(right: _fabSlot, bottom: QuiccSpace.xl),
+            child: NextSendOutBar(
+              driver: next,
+              stops: sendOutStops(fs, preview, next.id).length,
+              sending: _sending.contains(next.id),
+              onPressed: () => _sendOut(next),
+            ),
           ),
       ],
     );
@@ -542,7 +535,6 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
         ..addAll(sorted);
     }
     var yellowIndex = 0;
-    final sending = _sending.contains(d.id);
     final moveHere = _selectMode && _selected.isNotEmpty;
 
     return DragTarget<DeliveryDrag>(
@@ -552,7 +544,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
       builder: (context, candidates, _) {
         final hover = candidates.isNotEmpty;
         return Card(
-          margin: const EdgeInsets.only(bottom: 10),
+          margin: const EdgeInsets.only(bottom: QuiccSpace.md),
           color: hover ? QuiccColors.brand400.withValues(alpha: 0.10) : null,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(QuiccRadius.lg),
@@ -565,30 +557,30 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
             borderRadius: BorderRadius.circular(QuiccRadius.lg),
             onTap: moveHere ? () => _move(_selected.toList(), d.id) : null,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              padding: const EdgeInsets.fromLTRB(QuiccSpace.md, QuiccSpace.sm, QuiccSpace.md, QuiccSpace.md),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Row(
                     children: [
-                      if (next) ...[const NextBadge(), const SizedBox(width: 8)],
+                      if (next) ...[const NextBadge(), QuiccSpace.gapSm],
                       Expanded(
                         child: InkWell(
                           key: ValueKey('driver-header-${d.id}'),
                           borderRadius: BorderRadius.circular(QuiccRadius.sm),
                           onTap: moveHere ? () => _move(_selected.toList(), d.id) : () => _openPoolMap(d, [for (final c in chips) c.order.id], yellowIds.toSet()),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            padding: const EdgeInsets.symmetric(vertical: QuiccSpace.sm),
                             child: Text.rich(
                               TextSpan(
                                 children: [
                                   TextSpan(
                                     text: d.name,
-                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                                    style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
                                   ),
                                   TextSpan(
                                     text: ' · $stops stop${stops == 1 ? '' : 's'}${tips > 0 ? ' · tips ${money(tips)}' : ''}',
-                                    style: TextStyle(color: context.palette.textSecondary, fontSize: 15),
+                                    style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
                                   ),
                                 ],
                               ),
@@ -605,13 +597,13 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  QuiccSpace.gapXs,
                   if (stops == 0)
                     Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      padding: const EdgeInsets.symmetric(vertical: QuiccSpace.md),
                       child: Text(
                         moveHere ? 'Tap to move the selected here' : 'Drag deliveries here',
-                        style: TextStyle(color: context.palette.textMuted),
+                        style: QuiccType.text(QuiccType.body, color: context.palette.textMuted),
                       ),
                     ),
                   for (final c in chips)
@@ -619,6 +611,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                       DeliveryDraggable(
                         key: ValueKey('chip-${c.order.id}'),
                         data: _dragData(c.order, fromDriver: d.id),
+                        onDragStarted: _clearHighlight,
                         child: PoolStopChip(
                           order: c.order,
                           selectMode: _selectMode,
@@ -644,21 +637,6 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                           ),
                         ),
                       ),
-                  const SizedBox(height: 6),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: SizedBox(
-                      height: 52,
-                      child: FilledButton.icon(
-                        key: ValueKey('send-${d.id}'),
-                        onPressed: (stops == 0 || sending) ? null : () => _sendOut(d),
-                        icon: sending
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.delivery_dining),
-                        label: const Text('SEND OUT'),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -672,8 +650,8 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     final leftovers = p.plan.unassigned.length;
     return Container(
       key: const ValueKey('auto-preview-bar'),
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+      margin: const EdgeInsets.only(bottom: QuiccSpace.md),
+      padding: const EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.md, QuiccSpace.md, QuiccSpace.md),
       decoration: BoxDecoration(
         color: QuiccColors.statusFiring.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(QuiccRadius.lg),
@@ -682,7 +660,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
       child: Row(
         children: [
           const Icon(Icons.auto_awesome, color: QuiccColors.statusFiring),
-          const SizedBox(width: 10),
+          QuiccSpace.gapMd,
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -691,33 +669,33 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                   'AUTO suggests ${p.count} · not saved yet',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  style: QuiccType.text(QuiccType.body, weight: FontWeight.w700),
                 ),
                 Wrap(
-                  spacing: 8,
+                  spacing: QuiccSpace.sm,
                   children: [
                     if (p.plan.estimated)
-                      const Text(
+                      Text(
                         'estimated (offline)',
-                        style: TextStyle(color: QuiccColors.statusFiring, fontWeight: FontWeight.w600, fontSize: 13),
+                        style: QuiccType.text(QuiccType.caption, weight: FontWeight.w600, color: QuiccColors.statusFiring),
                       ),
                     if (leftovers > 0)
                       Text(
                         '$leftovers stay unassigned',
-                        style: TextStyle(color: context.palette.textSecondary, fontSize: 13),
+                        style: QuiccType.text(QuiccType.caption, color: context.palette.textSecondary),
                       ),
                   ],
                 ),
               ],
             ),
           ),
-          TextButton(onPressed: _confirmBusy ? null : _preview.clear, child: const Text('CLEAR')),
-          const SizedBox(width: 4),
+          TextButton(onPressed: _confirmBusy ? null : _preview.clear, child: const Text('Clear')),
+          QuiccSpace.gapXs,
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: QuiccColors.statusFiring,
               foregroundColor: QuiccColors.brand900,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.lg, vertical: QuiccSpace.md),
             ),
             onPressed: _confirmBusy ? null : _confirmPreview,
             child: const Text('CONFIRM'),
@@ -735,20 +713,20 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
       color: context.palette.bgElevated,
       borderRadius: BorderRadius.circular(QuiccRadius.lg),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 8, 8, 8),
+        padding: const EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.sm, QuiccSpace.sm, QuiccSpace.sm),
         child: Row(
           children: [
-            Text('$n selected', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(width: 12),
+            Text('$n selected', style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700)),
+            QuiccSpace.gapMd,
             Expanded(
               child: Text(
                 n == 0 ? 'Tap deliveries to pick them' : 'Tap a driver to move them there, or the left side to unassign',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: context.palette.textSecondary),
+                style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
               ),
             ),
-            TextButton(onPressed: _endSelect, child: const Text('CANCEL')),
+            TextButton(onPressed: _endSelect, child: const Text('Cancel')),
           ],
         ),
       ),
@@ -792,12 +770,15 @@ class _Run {
   }
 }
 
-/// AUTO / SELECT in the left column's header.
+/// AUTO / SELECT in the left column's header. [glowing] = AUTO sits on its
+/// lava lamp: an opaque face (so the label stays crisp over the blobs) and
+/// an amber edge.
 class _HeaderButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool active;
   final bool busy;
+  final bool glowing;
   final VoidCallback? onTap;
   const _HeaderButton({
     super.key,
@@ -805,6 +786,7 @@ class _HeaderButton extends StatelessWidget {
     required this.label,
     this.active = false,
     this.busy = false,
+    this.glowing = false,
     required this.onTap,
   });
 
@@ -813,9 +795,19 @@ class _HeaderButton extends StatelessWidget {
     height: 44,
     child: OutlinedButton.icon(
       style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        backgroundColor: active ? QuiccColors.brand400.withValues(alpha: 0.18) : null,
-        side: BorderSide(color: active ? QuiccColors.brand400 : context.palette.borderSoft),
+        padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md),
+        backgroundColor: active
+            ? QuiccColors.brand400.withValues(alpha: 0.18)
+            : (glowing ? context.palette.bgSurface.withValues(alpha: 0.88) : null),
+        // Amber on the dark face; a deep amber on the light one (contrast).
+        foregroundColor: glowing
+            ? (Theme.of(context).brightness == Brightness.dark ? QuiccColors.statusFiring : const Color(0xFFB45309))
+            : null,
+        side: BorderSide(
+          color: active
+              ? QuiccColors.brand400
+              : (glowing ? QuiccColors.statusFiring.withValues(alpha: 0.8) : context.palette.borderSoft),
+        ),
       ),
       onPressed: onTap,
       icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(icon),

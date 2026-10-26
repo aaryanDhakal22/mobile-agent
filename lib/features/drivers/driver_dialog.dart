@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../theme/quicc_type.dart';
+
 /// What the add / edit driver dialog returns.
 typedef DriverInput = ({String name, String posNumber});
 
 /// Help under the Driver # field.
-const String kDriverNumberHelp = 'Their SoftTouch login number. The POS gets it when they go out.';
+const String kDriverNumberHelp = 'Their SoftTouch Employee Number. The POS gets it when they go out.';
 
-/// Add / edit a driver: name + Driver # (their SoftTouch login #, optional).
+/// Add / edit a driver: name + Driver # (their SoftTouch Employee Number, optional).
 /// Resolves the trimmed values, or null when cancelled.
 Future<DriverInput?> driverDialog(
   BuildContext context, {
@@ -33,7 +35,7 @@ class DriverNumberField extends StatelessWidget {
     controller: controller,
     keyboardType: TextInputType.number,
     inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(8)],
-    style: const TextStyle(fontSize: 20),
+    style: QuiccType.number(QuiccType.heading, weight: FontWeight.w500),
     decoration: InputDecoration(
       labelText: 'Driver #',
       hintText: '12',
@@ -81,7 +83,7 @@ class _DriverDialogState extends State<_DriverDialog> {
             autofocus: true,
             maxLength: 40,
             textCapitalization: TextCapitalization.words,
-            style: const TextStyle(fontSize: 20),
+            style: QuiccType.text(QuiccType.heading),
             decoration: const InputDecoration(labelText: 'Name'),
           ),
           const SizedBox(height: 4),

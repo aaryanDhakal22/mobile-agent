@@ -8,6 +8,7 @@ import '../../core/device_platform.dart';
 import '../../core/diag_models.dart';
 import '../../core/providers.dart';
 import '../../core/sse.dart';
+import '../../core/time.dart';
 import 'checks.dart';
 import 'report.dart';
 
@@ -55,7 +56,7 @@ class PiDiagNotifier extends Notifier<PiDiagState> {
     try {
       final d = await client.getDiag(timeout: const Duration(seconds: 5));
       if (ref.read(agentClientProvider) != client) return;
-      state = PiDiagState(diag: d, at: DateTime.now());
+      state = PiDiagState(diag: d, at: timeNow());
       await saveLastPiDiag(ref.read(storageProvider), d);
     } on AgentException catch (e) {
       if (ref.read(agentClientProvider) != client) return;
@@ -70,7 +71,7 @@ class PiDiagNotifier extends Notifier<PiDiagState> {
   }
 
   /// Tests push a diag in.
-  void set(PiDiag d) => state = PiDiagState(diag: d, at: DateTime.now());
+  void set(PiDiag d) => state = PiDiagState(diag: d, at: timeNow());
 }
 
 final piDiagProvider = NotifierProvider<PiDiagNotifier, PiDiagState>(PiDiagNotifier.new);

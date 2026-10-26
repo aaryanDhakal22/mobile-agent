@@ -10,6 +10,8 @@ import '../../theme/quicc_colors.dart';
 import '../common/widgets.dart';
 import 'settings_card.dart';
 import 'settings_texts.dart';
+import '../../theme/quicc_type.dart';
+import '../../theme/quicc_spacing.dart';
 
 /// Settings → Deliveries: AUTO's delivery target and "soon ready" minutes
 /// (`PUT /api/settings/deliveries`), shown from the floor and saved on the Pi.
@@ -62,7 +64,7 @@ class _DeliveriesSettingsCardState extends ConsumerState<DeliveriesSettingsCard>
     final dirty = target != savedTarget || soon != savedSoon;
 
     return SettingsCard(
-      title: 'Deliveries',
+      title: 'AUTO runs',
       info: kDeliveriesInfo,
       subtitle: 'How AUTO plans the driver runs.',
       children: [
@@ -71,7 +73,7 @@ class _DeliveriesSettingsCardState extends ConsumerState<DeliveriesSettingsCard>
         else if (_needsUpdate)
           Text(
             'This Pi needs an update for delivery settings.',
-            style: TextStyle(color: context.palette.textSecondary, fontSize: 16),
+            style: QuiccType.text(QuiccType.body, color: context.palette.textSecondary),
           )
         else ...[
           SettingsStepper(
@@ -84,7 +86,7 @@ class _DeliveriesSettingsCardState extends ConsumerState<DeliveriesSettingsCard>
             max: DeliverySettings.maxTarget,
             onChanged: (v) => setState(() => _target = v),
           ),
-          const SizedBox(height: 8),
+          QuiccSpace.gapSm,
           SettingsStepper(
             key: const ValueKey('soon-ready'),
             label: 'Soon ready',
@@ -95,7 +97,7 @@ class _DeliveriesSettingsCardState extends ConsumerState<DeliveriesSettingsCard>
             max: DeliverySettings.maxSoonReady,
             onChanged: (v) => setState(() => _soon = v),
           ),
-          const SizedBox(height: 12),
+          QuiccSpace.gapMd,
           Row(
             children: [
               SizedBox(
@@ -107,7 +109,7 @@ class _DeliveriesSettingsCardState extends ConsumerState<DeliveriesSettingsCard>
                       : const Text('SAVE'),
                 ),
               ),
-              const SizedBox(width: 12),
+              QuiccSpace.gapMd,
               if (dirty)
                 TextButton(
                   onPressed: _saving
@@ -135,6 +137,9 @@ class SettingsStepper extends StatelessWidget {
   final int min;
   final int max;
   final ValueChanged<int> onChanged;
+
+  /// How the value reads (default "N min").
+  final String Function(int value)? format;
   const SettingsStepper({
     super.key,
     required this.label,
@@ -144,6 +149,7 @@ class SettingsStepper extends StatelessWidget {
     required this.min,
     required this.max,
     required this.onChanged,
+    this.format,
   });
 
   @override
@@ -153,7 +159,7 @@ class SettingsStepper extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+            Text(label, style: QuiccType.text(QuiccType.body, weight: FontWeight.w600)),
             Text(help, style: TextStyle(color: context.palette.textSecondary)),
           ],
         ),
@@ -167,9 +173,9 @@ class SettingsStepper extends StatelessWidget {
       SizedBox(
         width: 96,
         child: Text(
-          '$value min',
+          format?.call(value) ?? '$value min',
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: QuiccColors.brand400),
+          style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700, color: QuiccColors.brand400),
         ),
       ),
       IconButton.outlined(

@@ -3,6 +3,7 @@
 
 import 'dart:convert';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_agent/core/api_client.dart';
@@ -60,7 +61,7 @@ StoredOrder delivery(
   int tipCents = 500,
 }) {
   final m = jsonDecode(onDeliveryJson) as Map<String, dynamic>;
-  final now = DateTime.now().toUtc();
+  final now = clock.now().toUtc();
   (m['order'] as Map)
     ..['id'] = id
     ..['placed_at'] = now.subtract(Duration(minutes: placedMinutesAgo)).toIso8601String()
@@ -123,7 +124,7 @@ FloorState deliveryFloor({Map<String, dynamic>? floorExtra}) {
     ],
     arrived: const [],
     drivers: roster(),
-    at: DateTime.now(),
+    at: clock.now(),
   );
 }
 
@@ -144,6 +145,9 @@ class FakeDeliveryFloor extends FloorController {
   AgentException? autoPlanError;
   PlanConfirmResult confirmResult = const PlanConfirmResult();
   PoolTrip trip = const PoolTrip();
+
+  /// The next delivery-settings save throws this (then is cleared).
+  AgentException? settingsError;
 
   @override
   FloorState build() => initial;
@@ -215,10 +219,22 @@ class FakeDeliveryFloor extends FloorController {
   @override
   Future<DeliverySettings> setDeliverySettings(DeliverySettings s) async {
     calls.add((op: 'settings', ids: const [], driver: null, extra: s.toJson()));
+    final err = settingsError;
+    if (err != null) {
+      settingsError = null;
+      throw err;
+    }
+    final f = state.floor!;
     state = state.copyWith(
-      floor: state.floor!.copyWith(
+      floor: f.copyWith(
         soonReadyMinutes: s.soonReadyMinutes,
         deliveryTargetMinutes: s.deliveryTargetMinutes,
+        nearbyRule: s.nearbyRule,
+        nearbyDetourMinutes: s.nearbyDetourMinutes,
+        nearbyDistanceMi: s.nearbyDistanceMi,
+        store: s.deliveryRadiusM == null || f.store == null
+            ? null
+            : StoreGeo(lat: f.store!.lat, lng: f.store!.lng, deliveryRadiusM: s.deliveryRadiusM!),
       ),
     );
     return s;
@@ -233,18 +249,21 @@ const stubTilesKey = ValueKey('stub-tiles');
 Future<ProviderContainer> deliveryContainer(
   FakeDeliveryFloor fake, {
   MapSource? map = const MapSource(url: 'http://pi:8080/api/map.pmtiles', version: '20261022'),
+  Map<String, Object> prefs = const {},
+  List<Override> extra = const [],
 }) async {
-  SharedPreferences.setMockInitialValues({});
-  final prefs = await SharedPreferences.getInstance();
+  SharedPreferences.setMockInitialValues(prefs);
+  final sp = await SharedPreferences.getInstance();
   return ProviderContainer(
     overrides: [
-      sharedPrefsProvider.overrideWithValue(prefs),
+      sharedPrefsProvider.overrideWithValue(sp),
       floorProvider.overrideWith(() => fake),
       printerStatusProvider.overrideWith((ref) => Stream.value(const <PrinterStatus>[])),
       batchesProvider.overrideWith((ref) async => const [Batch(id: 7)]),
       driverShiftsProvider.overrideWith((ref) async => const []),
       mapSourceProvider.overrideWithValue(map),
       mapBaseLayerProvider.overrideWithValue((context, source, dark) => const SizedBox.expand(key: stubTilesKey)),
+      ...extra,
     ],
   );
 }

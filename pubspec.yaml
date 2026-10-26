@@ -1,7 +1,7 @@
 name: mobile_agent
 description: "Quibase — the QuiccPOS counter tablet app."
 publish_to: 'none'
-version: 1.5.0+1
+version: 1.7.0+1
 
 environment:
   sdk: ^3.11.1
@@ -12,12 +12,12 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^2.5.1
-  google_fonts: ^6.2.1
   http: ^1.2.2
   audioplayers: ^6.1.0
   shared_preferences: ^2.5.6
   wakelock_plus: ^1.7.0
   crypto: ^3.0.7
+  clock: ^1.1.1
   # Maps (1.4.0): the Pi's offline PMTiles file drawn as vector tiles with
   # the Protomaps theme. vector_map_tiles 8 (latest stable) needs
   # flutter_map 7 + latlong2 0.9 — move them together.
@@ -37,3 +37,35 @@ flutter:
   uses-material-design: true
   assets:
     - assets/sounds/
+  # Bundled (OFL, assets/fonts/Barlow-OFL.txt) so text renders the same
+  # offline and in golden tests. 1.6.1 "signage" set, one superfamily:
+  # Barlow = text, Barlow Condensed = titles / names / bold lines / buttons,
+  # Barlow Semi Condensed (tabular figures) = numbers.
+  fonts:
+    - family: Barlow
+      fonts:
+        - asset: assets/fonts/Barlow-Regular.ttf
+        - asset: assets/fonts/Barlow-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Barlow-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Barlow-Bold.ttf
+          weight: 700
+    - family: BarlowCondensed
+      fonts:
+        - asset: assets/fonts/BarlowCondensed-Regular.ttf
+        - asset: assets/fonts/BarlowCondensed-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/BarlowCondensed-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/BarlowCondensed-Bold.ttf
+          weight: 700
+    - family: BarlowSemiCondensed
+      fonts:
+        - asset: assets/fonts/BarlowSemiCondensed-Regular.ttf
+        - asset: assets/fonts/BarlowSemiCondensed-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/BarlowSemiCondensed-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/BarlowSemiCondensed-Bold.ttf
+          weight: 700

@@ -14,6 +14,8 @@ import '../common/widgets.dart';
 import '../setup/steps/test_print_step.dart' show printerAdvice;
 import 'settings_card.dart';
 import 'settings_texts.dart';
+import '../../theme/quicc_type.dart';
+import '../../theme/quicc_spacing.dart';
 
 /// Settings → Receipts: kitchen-ticket sizes, the customer receipt's footer,
 /// copies and toggles (`/api/settings/receipt`), SAVE, PRINT SAMPLE on a
@@ -315,7 +317,7 @@ class _ReceiptSettingsCardState extends ConsumerState<ReceiptSettingsCard> {
             onChanged: (v) => _edit((p) => p.copyWith(kitchenNumberSize: v)),
           ),
         ),
-        const SizedBox(height: 8),
+        QuiccSpace.gapSm,
         const _Heading('Customer receipt'),
         _Setting(
           label: 'Footer text',
@@ -324,7 +326,7 @@ class _ReceiptSettingsCardState extends ConsumerState<ReceiptSettingsCard> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _SwitchRow(label: 'Use the store default', value: d.usesStoreFooter, onChanged: _useStoreFooter),
-              const SizedBox(height: 6),
+              QuiccSpace.gapSm,
               TextField(
                 key: const ValueKey('receipt-footer'),
                 controller: _footerCtrl,
@@ -332,7 +334,7 @@ class _ReceiptSettingsCardState extends ConsumerState<ReceiptSettingsCard> {
                 maxLength: kFooterMaxLength,
                 textCapitalization: TextCapitalization.characters,
                 inputFormatters: [FilteringTextInputFormatter.allow(kFooterAllowed)],
-                style: const TextStyle(fontSize: 20),
+                style: QuiccType.text(QuiccType.heading),
                 decoration: InputDecoration(
                   hintText: d.usesStoreFooter
                       ? (_storeFooter.isEmpty ? 'The store default' : _storeFooter)
@@ -388,7 +390,7 @@ class _ReceiptSettingsCardState extends ConsumerState<ReceiptSettingsCard> {
           value: d.extraPaper,
           onChanged: (v) => _edit((p) => p.copyWith(extraPaper: v)),
         ),
-        const SizedBox(height: 12),
+        QuiccSpace.gapMd,
         if (_dirty)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -439,7 +441,7 @@ class _ReceiptSettingsCardState extends ConsumerState<ReceiptSettingsCard> {
                   onChanged: _busy ? null : (id) => setState(() => _printerId = id),
                 ),
               ),
-              const SizedBox(width: 8),
+              QuiccSpace.gapSm,
             ],
             SizedBox(
               height: 56,
@@ -480,14 +482,14 @@ class _NeedsUpdate extends StatelessWidget {
     return Row(
       children: [
         Icon(Icons.system_update_outlined, color: context.palette.textMuted, size: 28),
-        const SizedBox(width: 12),
+        QuiccSpace.gapMd,
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'This Pi needs an update for receipt settings',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                style: QuiccType.text(QuiccType.body, weight: FontWeight.w700),
               ),
               Text(
                 'Tell the owner. Receipts keep printing as they are.',
@@ -508,7 +510,7 @@ class _Heading extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
-    child: Text(text, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+    child: Text(text, style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700)),
   );
 }
 
@@ -528,11 +530,11 @@ class _Setting extends StatelessWidget {
         Align(
           alignment: Alignment.centerLeft,
           child: LabelWithInfo(
-            label: Text(label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+            label: Text(label, style: QuiccType.text(QuiccType.body, weight: FontWeight.w600)),
             info: info,
           ),
         ),
-        const SizedBox(height: 6),
+        QuiccSpace.gapSm,
         child,
       ],
     ),
@@ -554,7 +556,7 @@ class _Choice<T> extends StatelessWidget {
       showSelectedIcon: false,
       style: SegmentedButton.styleFrom(
         minimumSize: const Size(120, 56),
-        textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+        textStyle: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
       ),
       segments: [for (final v in values) ButtonSegment(value: v, label: Text(label(v)))],
       selected: {selected},
@@ -584,7 +586,7 @@ class _SwitchRow extends StatelessWidget {
             child: Row(
               children: [
                 Flexible(
-                  child: Text(label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+                  child: Text(label, style: QuiccType.text(QuiccType.body, weight: FontWeight.w600)),
                 ),
                 if (info != null) InfoButton(info!, size: 18),
               ],

@@ -379,7 +379,7 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.text('DELIVERIES'), findsOneWidget);
+      expect(find.text('AUTO RUNS'), findsOneWidget);
       expect(find.text('45 min'), findsOneWidget);
       expect(find.text('5 min'), findsOneWidget);
       // SAVE is off until something changes.

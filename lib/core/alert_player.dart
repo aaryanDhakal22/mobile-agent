@@ -4,6 +4,8 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'time.dart';
+
 /// The set of bundled chimes. Add a new entry here AND add the file to the
 /// `assets:` list in pubspec.yaml — the Settings dropdown reads this enum
 /// directly.
@@ -144,7 +146,7 @@ class AlertPlayer {
   static bool shouldRetry([DateTime? now]) {
     if (!_alarmActive || _playing || _starting) return false;
     final f = _lastFailure;
-    return f == null || (now ?? DateTime.now()).difference(f) >= retryAfter;
+    return f == null || (now ?? timeNow()).difference(f) >= retryAfter;
   }
 
   /// Starts (or restarts, from the top) looping [sound]. Cheap to re-call
@@ -184,7 +186,7 @@ class AlertPlayer {
     } catch (e, st) {
       if (current()) {
         _playing = false;
-        _lastFailure = DateTime.now();
+        _lastFailure = timeNow();
       }
       debugPrint('AlertPlayer.start failed (will retry): $e\n$st');
       return false;

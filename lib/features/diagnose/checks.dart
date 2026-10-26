@@ -12,6 +12,7 @@ import '../../core/discovery.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/storage.dart';
+import '../../core/time.dart';
 import 'texts.dart';
 
 /// Every check the troubleshooting runs, in the order the status board shows
@@ -538,7 +539,7 @@ Future<CheckSnapshot> runChecks(
   PiDiag? lastDiag,
   bool probePrinters = false,
   bool discover = true,
-  DateTime Function() now = DateTime.now,
+  DateTime Function() now = timeNow,
 }) async {
   Future<T?> guard<T>(Future<T?> f, Duration t) async {
     try {
@@ -661,7 +662,7 @@ Future<void> saveLastPiDiag(AppStorage storage, PiDiag d, {bool force = false}) 
   if (!force) {
     final prev = readLastPiDiag(storage);
     final at = prev?.fetchedAt;
-    if (at != null && DateTime.now().difference(at) < const Duration(minutes: 5)) return;
+    if (at != null && timeNow().difference(at) < const Duration(minutes: 5)) return;
   }
   await storage.setJson(AppStorage.kLastPiDiag, jsonEncode(d.toJson()));
 }

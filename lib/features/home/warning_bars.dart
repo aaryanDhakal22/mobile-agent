@@ -7,11 +7,14 @@ import '../../core/friendly_error.dart';
 import '../../core/providers.dart';
 import '../../core/sse.dart';
 import '../../core/storage.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 import '../common/info_button.dart';
 import '../diagnose/diagnose_entry.dart';
 import '../diagnose/texts.dart';
 import '../setup/setup_entry.dart';
+import '../../theme/quicc_type.dart';
+import '../../theme/quicc_spacing.dart';
 
 /// How long a printer must be down before its bar shows (a printer being
 /// switched off and on shouldn't flash a warning).
@@ -55,7 +58,7 @@ class _WarningBarsState extends ConsumerState<WarningBars> {
         .read(storageProvider)
         .setJson(
           AppStorage.kNoOrdersSnoozedUntil,
-          DateTime.now().add(const Duration(hours: 1)).toUtc().toIso8601String(),
+          timeNow().add(const Duration(hours: 1)).toUtc().toIso8601String(),
         );
     if (mounted) setState(() {});
   }
@@ -65,7 +68,7 @@ class _WarningBarsState extends ConsumerState<WarningBars> {
     final piUp = ref.watch(floorProvider.select((s) => s.connection)) == SseStatus.connected;
     final diag = ref.watch(piDiagProvider);
     final device = ref.watch(deviceChecksProvider);
-    final now = DateTime.now();
+    final now = timeNow();
     final bars = <Widget>[];
 
     final d = diag.diag;
@@ -183,13 +186,13 @@ class _Bar extends StatelessWidget {
       child: Row(
         children: [
           Icon(icon, color: color, size: 26),
-          const SizedBox(width: 12),
+          QuiccSpace.gapMd,
           Expanded(
             child: Text(
               text,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
             ),
           ),
           if (info != null) InfoButton(info!),

@@ -7,15 +7,13 @@ import '../../theme/quicc_colors.dart';
 import '../common/info_button.dart';
 import '../common/widgets.dart';
 import '../illustrations/illustration.dart';
-import '../setup/setup_entry.dart';
 import 'diagnose_entry.dart';
-import 'full_check_screen.dart';
 import 'guide_screen.dart';
 import 'guide_session.dart';
 import 'texts.dart';
 
-/// The Help tab: the four guides, a full check, sending diagnostics, and the
-/// tablet checks / test ring / test print.
+/// The Help tab: the four guides and sending diagnostics to the owner. (The
+/// checks and tests are in developer mode → Tests.)
 class HelpPane extends ConsumerWidget {
   const HelpPane({super.key});
 
@@ -26,7 +24,6 @@ class HelpPane extends ConsumerWidget {
     final unfinished = view.session != null && !view.session!.concluded
         ? view.session
         : resumableGuideSession(ref.read(storageProvider));
-    void push(Widget w) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => w));
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
@@ -56,46 +53,17 @@ class HelpPane extends ConsumerWidget {
           },
         ),
         const SizedBox(height: 28),
-        const Eyebrow('Checks and tests'),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 14,
-          runSpacing: 14,
-          children: [
-            _ToolButton(
-              icon: Icons.fact_check_outlined,
-              label: GuideText.fullCheck,
-              info: GuideText.fullCheckInfo,
-              primary: true,
-              onTap: () => push(const FullCheckScreen()),
-            ),
-            _ToolButton(
-              icon: Icons.send_outlined,
-              label: GuideText.sendDiag,
-              info: GuideText.sendInfo,
-              onTap: () => showSendDiagnosticsDialog(context, ref),
-            ),
-            _ToolButton(
-              icon: Icons.tablet_android,
-              label: GuideText.tabletChecks,
-              onTap: () => push(const TabletChecksScreen()),
-            ),
-            _ToolButton(
-              icon: Icons.notifications_active_outlined,
-              label: GuideText.testRing,
-              onTap: () => push(const TestRingScreen()),
-            ),
-            _ToolButton(
-              icon: Icons.print_outlined,
-              label: GuideText.testPrint,
-              onTap: () => push(const TestPrintScreen()),
-            ),
-            _ToolButton(
-              icon: Icons.qr_code_2,
-              label: GuideText.pairAnother,
-              onTap: () => push(const PairAnotherTabletScreen()),
-            ),
-          ],
+        // Checks, tests and pairing live in developer mode (1.6.0); Help
+        // keeps the guides and the way to reach the owner.
+        Align(
+          alignment: Alignment.centerLeft,
+          child: _ToolButton(
+            icon: Icons.send_outlined,
+            label: GuideText.sendDiag,
+            info: GuideText.sendInfo,
+            primary: true,
+            onTap: () => showSendDiagnosticsDialog(context, ref),
+          ),
         ),
       ],
     );

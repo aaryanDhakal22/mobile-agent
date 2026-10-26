@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import 'quicc_colors.dart';
+import 'quicc_type.dart';
 
 class QuiccTheme {
   static ThemeData dark() => _build(Brightness.dark, QuiccPalette.dark);
@@ -9,10 +9,7 @@ class QuiccTheme {
 
   static ThemeData _build(Brightness brightness, QuiccPalette palette) {
     final base = ThemeData(brightness: brightness, useMaterial3: true);
-    final textTheme = GoogleFonts.jetBrainsMonoTextTheme(base.textTheme).apply(
-      bodyColor: palette.textPrimary,
-      displayColor: palette.textPrimary,
-    );
+    final textTheme = QuiccType.textTheme(palette.textPrimary);
 
     final onPrimary = brightness == Brightness.dark
         ? QuiccColors.brand900
@@ -60,16 +57,6 @@ class QuiccTheme {
           ),
           textStyle: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500),
         ),
-      ),
-      navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: palette.bgSurface,
-        indicatorColor: QuiccColors.brand400.withValues(alpha: 0.18),
-        selectedIconTheme: const IconThemeData(color: QuiccColors.brand400),
-        unselectedIconTheme: IconThemeData(color: palette.textMuted),
-        selectedLabelTextStyle:
-            textTheme.labelLarge?.copyWith(color: QuiccColors.brand400),
-        unselectedLabelTextStyle:
-            textTheme.labelLarge?.copyWith(color: palette.textMuted),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,

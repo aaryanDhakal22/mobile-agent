@@ -2,8 +2,10 @@
 // canonical order snapshot inside it (contract/main.md §10.1). All parsing is
 // defensive — see json.dart.
 
+import 'delivery_models.dart';
 import 'json.dart';
 import 'polyline.dart';
+import 'time.dart';
 
 // ---------------------------------------------------------------------------
 // Order state
@@ -240,6 +242,9 @@ class OrderStatus {
   /// A scheduled order back in `arrived`: confirmed with no time dialog.
   final bool rerung;
 
+  /// Accepted by the Pi's auto-accept (2.2.0), not by staff.
+  final bool autoAccepted;
+
   const OrderStatus({
     required this.state,
     this.arrivalDate,
@@ -274,6 +279,7 @@ class OrderStatus {
     this.scheduledLeadMinutes,
     this.ringAt,
     this.rerung = false,
+    this.autoAccepted = false,
   });
 
   factory OrderStatus.fromJson(Map<String, dynamic> json) => OrderStatus(
@@ -310,6 +316,7 @@ class OrderStatus {
     scheduledLeadMinutes: jIntOrNull(json['scheduled_lead_minutes']),
     ringAt: jDate(json['ring_at']),
     rerung: jBool(json['rerung']),
+    autoAccepted: jBool(json['auto_accepted']),
   );
 
   /// The same status in [driverId]'s pool (null = unassigned) — the
@@ -330,7 +337,7 @@ class OrderStatus {
     driverId: this.driverId,
     driverName: driverName,
     poolDriverId: driverId,
-    pooledAt: driverId == null ? null : (at ?? DateTime.now().toUtc()),
+    pooledAt: driverId == null ? null : (at ?? timeNow().toUtc()),
     // Unnumbered until the Pi answers: sorts after the numbered stops.
     poolSeq: driverId == poolDriverId ? poolSeq : null,
     extSource: extSource,
@@ -349,6 +356,7 @@ class OrderStatus {
     scheduledLeadMinutes: scheduledLeadMinutes,
     ringAt: ringAt,
     rerung: rerung,
+    autoAccepted: autoAccepted,
   );
 }
 
@@ -793,7 +801,7 @@ class Driver {
   final DateTime? lastReturnedAt;
   final int deliveries;
 
-  /// Their SoftTouch login # (2.1.0) — the hub writes it on the POS checks
+  /// Their SoftTouch Employee Number (2.1.0) — the hub writes it on the POS checks
   /// of a run. Null when not set.
   final String? posNumber;
 
@@ -1249,6 +1257,11 @@ class Floor {
   /// Placed → door target for a delivery (minutes).
   final int deliveryTargetMinutes;
 
+  /// The "nearby" rule (2.2.0; null from an older Pi, which has none).
+  final NearbyRule? nearbyRule;
+  final int nearbyDetourMinutes;
+  final double nearbyDistanceMi;
+
   final StoreGeo? store;
   final MapInfo? map;
 
@@ -1270,6 +1283,9 @@ class Floor {
     this.tipTaxPercent = 6,
     this.soonReadyMinutes = kDefaultSoonReadyMinutes,
     this.deliveryTargetMinutes = kDefaultDeliveryTargetMinutes,
+    this.nearbyRule,
+    this.nearbyDetourMinutes = DeliverySettings.defaultDetour,
+    this.nearbyDistanceMi = DeliverySettings.defaultDistanceMi,
     this.store,
     this.map,
     this.settings = const FloorSettings(),
@@ -1296,6 +1312,11 @@ class Floor {
       deliveryTargetMinutes: (jIntOrNull(json['delivery_target_minutes']) ?? 0) > 0
           ? jInt(json['delivery_target_minutes'])
           : kDefaultDeliveryTargetMinutes,
+      nearbyRule: NearbyRule.parse(json['nearby_rule']),
+      nearbyDetourMinutes: jIntOrNull(json['nearby_detour_minutes']) ?? DeliverySettings.defaultDetour,
+      nearbyDistanceMi: json['nearby_distance_mi'] is num
+          ? (json['nearby_distance_mi'] as num).toDouble()
+          : DeliverySettings.defaultDistanceMi,
       store: StoreGeo.fromJson(json['store']),
       map: MapInfo.fromJson(json['map']),
       settings: FloorSettings.fromJson(jMap(json['settings'])),
@@ -1307,6 +1328,10 @@ class Floor {
     Batch? batch,
     int? soonReadyMinutes,
     int? deliveryTargetMinutes,
+    NearbyRule? nearbyRule,
+    int? nearbyDetourMinutes,
+    double? nearbyDistanceMi,
+    StoreGeo? store,
     FloorSettings? settings,
     IntegrationStatus? integration,
   }) => Floor(
@@ -1320,7 +1345,10 @@ class Floor {
     tipTaxPercent: tipTaxPercent,
     soonReadyMinutes: soonReadyMinutes ?? this.soonReadyMinutes,
     deliveryTargetMinutes: deliveryTargetMinutes ?? this.deliveryTargetMinutes,
-    store: store,
+    nearbyRule: nearbyRule ?? this.nearbyRule,
+    nearbyDetourMinutes: nearbyDetourMinutes ?? this.nearbyDetourMinutes,
+    nearbyDistanceMi: nearbyDistanceMi ?? this.nearbyDistanceMi,
+    store: store ?? this.store,
     map: map,
     settings: settings ?? this.settings,
     integration: integration ?? this.integration,

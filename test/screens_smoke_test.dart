@@ -21,7 +21,8 @@ import 'package:mobile_agent/features/drivers/dispatch_flash.dart';
 import 'package:mobile_agent/features/drivers/driver_fab.dart';
 import 'package:mobile_agent/features/home/home_screen.dart';
 import 'package:mobile_agent/features/order_detail/order_detail_screen.dart';
-import 'package:mobile_agent/features/settings/settings_screen.dart';
+import 'package:mobile_agent/features/dev/pi_cards.dart';
+import 'package:mobile_agent/features/settings/store_settings_screen.dart';
 import 'package:mobile_agent/theme/quicc_colors.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -108,7 +109,16 @@ void main() {
       expect(find.text('Arrived'), findsNothing, reason: 'no Arrived tab — new orders ring full-screen');
       expect(find.byType(DriverFab), findsOneWidget);
 
-      for (final label in ['Deliveries', 'Drivers', 'History', 'Batch', 'Printers', 'Settings', 'Kitchen']) {
+      for (final label in ['Deliveries', 'Drivers', 'History', 'Kitchen']) {
+        await tester.tap(find.text(label).last);
+        await tester.pump(const Duration(milliseconds: 600));
+        expect(tester.takeException(), isNull, reason: '$label at $size');
+      }
+
+      // The q flips the rail to store mode (1.6.0).
+      await tester.tap(find.byKey(const ValueKey('q-button')));
+      await tester.pump(const Duration(milliseconds: 2000));
+      for (final label in ['Batch', 'Printers', 'Help', 'Settings']) {
         await tester.tap(find.text(label).last);
         await tester.pump(const Duration(milliseconds: 600));
         expect(tester.takeException(), isNull, reason: '$label at $size');
@@ -116,7 +126,7 @@ void main() {
 
       await tester.tap(find.text('Settings').last);
       await tester.pump(const Duration(milliseconds: 600));
-      expect(find.byType(DriverFab), findsNothing, reason: 'no driver button on Settings');
+      expect(find.byType(DriverFab), findsNothing, reason: 'no driver button in store mode');
 
       await tester.pumpWidget(const SizedBox());
     });
@@ -167,7 +177,7 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.text('NEW ORDER'), findsOneWidget);
+      expect(find.text('New order'), findsOneWidget);
       expect(find.text('Erik Davis'), findsOneWidget);
       // 1.5.0: the time picker starts at the default pickup time (15).
       expect(find.text('ACCEPT · 15 MIN'), findsOneWidget);
@@ -357,7 +367,7 @@ void main() {
       fake.push(c.read(floorProvider).withDispatch(samRun()));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('NEW ORDER'), findsOneWidget);
+      expect(find.text('New order'), findsOneWidget);
       expect(find.text('OUT NOW'), findsOneWidget, reason: 'flash is up, underneath');
 
       final stack = tester.widget<Stack>(
@@ -382,11 +392,13 @@ void main() {
       'device_id': 'dev-1',
     };
 
-    /// Settings on its own, paired, with the agent answered by [handler].
+    /// The Pi + tablet cards (developer mode since 1.6.0) — or [body] — on
+    /// their own, paired, with the agent answered by [handler].
     Future<ProviderContainer> pumpSettings(
       WidgetTester tester, {
       Future<http.Response> Function(http.Request req)? handler,
       Future<AgentProbe> Function(String address)? probe,
+      Widget body = const _PiAndTablet(),
     }) async {
       tester.view.physicalSize = const Size(1280, 800);
       tester.view.devicePixelRatio = 1;
@@ -413,7 +425,7 @@ void main() {
           container: c,
           child: MaterialApp(
             theme: _theme(),
-            home: const Scaffold(body: SettingsScreen()),
+            home: Scaffold(body: body),
           ),
         ),
       );
@@ -421,27 +433,21 @@ void main() {
       return c;
     }
 
-    testWidgets('renders every card', (tester) async {
+    testWidgets('renders the Pi and tablet cards', (tester) async {
       await pumpSettings(tester);
       expect(tester.takeException(), isNull);
+      for (final t in ['THE PI', 'THIS TABLET', 'Counter tablet', 'RENAME', 'PAIR ANOTHER TABLET', 'UNPAIR']) {
+        await tester.scrollUntilVisible(find.text(t), 200, scrollable: find.byType(Scrollable).first);
+        expect(find.text(t), findsOneWidget, reason: t);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('store settings render every group', (tester) async {
+      await pumpSettings(tester, body: const StoreSettingsScreen());
+      expect(tester.takeException(), isNull);
       // The list is lazy: check each thing once it is scrolled to.
-      for (final t in [
-        'THE PI',
-        'THIS TABLET',
-        'Counter tablet',
-        'RENAME',
-        'PAIR ANOTHER TABLET',
-        'UNPAIR',
-        'ORDER CHIME',
-        'PREVIEW',
-        'RECEIPTS',
-        'CHECKS & TESTS',
-        'TABLET CHECKS',
-        'TEST RING',
-        'TEST PRINT',
-        'LIGHT OR DARK',
-        'System',
-      ]) {
+      for (final t in ['ORDER CHIME', 'PREVIEW', 'RECEIPTS', 'LIGHT OR DARK', 'System', 'MOTION']) {
         await tester.scrollUntilVisible(find.text(t), 200, scrollable: find.byType(Scrollable).first);
         expect(find.text(t), findsOneWidget, reason: t);
       }
@@ -549,7 +555,7 @@ void main() {
     });
 
     testWidgets('the theme picker saves the choice', (tester) async {
-      final c = await pumpSettings(tester);
+      final c = await pumpSettings(tester, body: const StoreSettingsScreen());
       expect(c.read(themeModeProvider), ThemeMode.dark, reason: 'dark by default');
       await tester.scrollUntilVisible(find.text('Light'), 200, scrollable: find.byType(Scrollable).first);
       await tester.ensureVisible(find.text('Light'));
@@ -653,4 +659,12 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   });
+}
+
+class _PiAndTablet extends StatelessWidget {
+  const _PiAndTablet();
+
+  @override
+  Widget build(BuildContext context) =>
+      ListView(padding: const EdgeInsets.all(24), children: const [PiAddressCard(), TabletCard()]);
 }

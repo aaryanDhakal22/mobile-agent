@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_spacing.dart';
+import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
 import '../maps/check_address_sheet.dart';
 import '../maps/geo_format.dart';
+import 'lava_glow.dart';
 
 /// What a drag on the Deliveries screen carries: the order ids, the driver
 /// whose pool they came from (null = the unassigned column) and whether
@@ -40,7 +43,7 @@ class DragFeedback extends StatelessWidget {
   Widget build(BuildContext context) => Material(
     color: Colors.transparent,
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.lg, vertical: QuiccSpace.md),
       decoration: BoxDecoration(
         color: QuiccColors.brand400,
         borderRadius: BorderRadius.circular(QuiccRadius.md),
@@ -50,10 +53,10 @@ class DragFeedback extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.delivery_dining, color: QuiccColors.brand900),
-          const SizedBox(width: 8),
+          QuiccSpace.gapSm,
           Text(
             numbers.join('  '),
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: QuiccColors.brand900),
+            style: QuiccType.number(QuiccType.heading, weight: FontWeight.w700, color: QuiccColors.brand900),
           ),
         ],
       ),
@@ -62,15 +65,17 @@ class DragFeedback extends StatelessWidget {
 }
 
 /// Draggable on long-press (a tap stays a tap): [child] dims while it's
-/// being dragged.
+/// being dragged. [onDragStarted] lets the screen drop a highlight.
 class DeliveryDraggable extends StatelessWidget {
   final DeliveryDrag data;
   final Widget child;
-  const DeliveryDraggable({super.key, required this.data, required this.child});
+  final VoidCallback? onDragStarted;
+  const DeliveryDraggable({super.key, required this.data, required this.child, this.onDragStarted});
 
   @override
   Widget build(BuildContext context) => LongPressDraggable<DeliveryDrag>(
     data: data,
+    onDragStarted: onDragStarted,
     feedback: DragFeedback(numbers: data.numbers),
     childWhenDragging: Opacity(opacity: 0.3, child: child),
     child: child,
@@ -80,10 +85,13 @@ class DeliveryDraggable extends StatelessWidget {
 /// A delivery waiting on the left: kitchen #, customer, address, mi · min,
 /// tip, CASH $x / PAID and how long since it was placed (amber near the
 /// target, red past it). Cooking ones are greyed with "ready in ~m".
+/// [highlight] = a soft pulsing yellow outline (someone asked you to look at
+/// it, e.g. the driver button found it near the next run).
 class UnassignedRow extends StatelessWidget {
   final StoredOrder order;
   final bool selectMode;
   final bool selected;
+  final bool highlight;
   final int targetMinutes;
   final VoidCallback onTap;
   const UnassignedRow({
@@ -91,6 +99,7 @@ class UnassignedRow extends StatelessWidget {
     required this.order,
     required this.selectMode,
     required this.selected,
+    this.highlight = false,
     required this.targetMinutes,
     required this.onTap,
   });
@@ -103,8 +112,8 @@ class UnassignedRow extends StatelessWidget {
     final drive = driveLabel(g);
     final hint = drive == null ? geoHint(g) : null;
     final address = o.fulfillment.address;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+    final card = Card(
+      margin: EdgeInsets.zero,
       color: selected ? QuiccColors.brand400.withValues(alpha: 0.14) : null,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(QuiccRadius.lg),
@@ -116,12 +125,12 @@ class UnassignedRow extends StatelessWidget {
         child: Opacity(
           opacity: cooking ? 0.55 : 1,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+            padding: const EdgeInsets.fromLTRB(QuiccSpace.md, QuiccSpace.md, QuiccSpace.md, QuiccSpace.md),
             child: Row(
               children: [
                 if (selectMode)
                   Padding(
-                    padding: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.only(right: QuiccSpace.xs),
                     child: Icon(
                       selected ? Icons.check_box : Icons.check_box_outline_blank,
                       color: selected ? QuiccColors.brand400 : context.palette.textMuted,
@@ -137,7 +146,7 @@ class UnassignedRow extends StatelessWidget {
                         alignment: Alignment.centerLeft,
                         child: Text(
                           order.displayNumber,
-                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
+                          style: QuiccType.number(QuiccType.heading + 4, weight: FontWeight.w700, color: QuiccColors.brand400),
                         ),
                       ),
                       if (order.isPos) const PosTag(size: 10),
@@ -152,32 +161,31 @@ class UnassignedRow extends StatelessWidget {
                         o.customerName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                        style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
                       ),
                       Text(
                         address == null || address.isEmpty ? 'No address' : address.oneLine,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: context.palette.textSecondary),
+                        style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
                       ),
                       const SizedBox(height: 2),
                       Wrap(
-                        spacing: 6,
+                        spacing: QuiccSpace.sm,
                         runSpacing: 2,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           if (drive != null)
-                            Text(drive, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                            Text(drive, style: QuiccType.text(QuiccType.label, weight: FontWeight.w600)),
                           if (g != null && g.needsCheck)
                             CheckAddressTag(order: order)
                           else if (hint != null)
                             Text(
                               hint,
-                              style: TextStyle(
+                              style: QuiccType.text(
+                                QuiccType.caption,
                                 color: context.palette.textMuted,
-                                fontStyle: FontStyle.italic,
-                                fontSize: 13,
-                              ),
+                              ).copyWith(fontStyle: FontStyle.italic),
                             ),
                           ...geoTags(g),
                         ],
@@ -185,21 +193,26 @@ class UnassignedRow extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
+                QuiccSpace.gapSm,
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
                       order.isPaid ? 'PAID' : 'CASH ${money(order.cashDueCents)}',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
+                      style: QuiccType.number(
+                        QuiccType.label,
+                        weight: FontWeight.w700,
                         color: order.isPaid ? context.palette.textMuted : QuiccColors.statusFiring,
                       ),
                     ),
                     if ((order.status.tipCents ?? o.money.tipCents) > 0)
                       Text(
                         'tip ${money(order.status.tipCents ?? o.money.tipCents)}',
-                        style: TextStyle(color: context.palette.textSecondary),
+                        style: QuiccType.number(
+                          QuiccType.label,
+                          weight: FontWeight.w500,
+                          color: context.palette.textSecondary,
+                        ),
                       ),
                     Ticker(
                       interval: const Duration(seconds: 15),
@@ -214,6 +227,10 @@ class UnassignedRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: QuiccSpace.sm),
+      child: HighlightPulse(active: highlight, child: card),
     );
   }
 }
@@ -231,7 +248,7 @@ class _ReadyIn extends StatelessWidget {
     final text = left == null
         ? 'cooking'
         : (left.inSeconds <= 30 ? 'ready any minute' : 'ready in ~${(left.inSeconds / 60).ceil()} min');
-    return Text(text, style: const TextStyle(color: QuiccColors.statusOpen, fontWeight: FontWeight.w600));
+    return Text(text, style: QuiccType.text(QuiccType.label, weight: FontWeight.w600, color: QuiccColors.statusOpen));
   }
 }
 
@@ -252,7 +269,7 @@ class _Age extends StatelessWidget {
         : (m >= targetMinutes - 10 ? QuiccColors.statusFiring : context.palette.textMuted);
     return Text(
       '${m < 0 ? 0 : m} min',
-      style: TextStyle(color: color, fontWeight: FontWeight.w700),
+      style: QuiccType.number(QuiccType.label, weight: FontWeight.w700, color: color),
     );
   }
 }
@@ -287,7 +304,7 @@ class PoolStopChip extends StatelessWidget {
         ? QuiccColors.brand400
         : (yellow ? QuiccColors.statusFiring : context.palette.borderSoft);
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
+      margin: const EdgeInsets.only(bottom: QuiccSpace.sm),
       decoration: BoxDecoration(
         color: selected ? QuiccColors.brand400.withValues(alpha: 0.14) : context.palette.bgElevated,
         borderRadius: BorderRadius.circular(QuiccRadius.md),
@@ -302,7 +319,7 @@ class PoolStopChip extends StatelessWidget {
           borderRadius: BorderRadius.circular(QuiccRadius.md),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 6, 2, 6),
+            padding: const EdgeInsets.fromLTRB(QuiccSpace.md, QuiccSpace.xs, 2, QuiccSpace.sm),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -310,7 +327,7 @@ class PoolStopChip extends StatelessWidget {
                   children: [
                     if (selectMode)
                       Padding(
-                        padding: const EdgeInsets.only(right: 4),
+                        padding: const EdgeInsets.only(right: QuiccSpace.xs),
                         child: Icon(
                           selected ? Icons.check_box : Icons.check_box_outline_blank,
                           size: 20,
@@ -319,16 +336,16 @@ class PoolStopChip extends StatelessWidget {
                       ),
                     Text(
                       order.displayNumber,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
+                      style: QuiccType.number(QuiccType.body + 2, weight: FontWeight.w700, color: QuiccColors.brand400),
                     ),
-                    if (order.isPos) ...[const SizedBox(width: 6), const PosTag(size: 9)],
-                    const SizedBox(width: 10),
+                    if (order.isPos) ...[QuiccSpace.gapSm, const PosTag(size: 9)],
+                    QuiccSpace.gapMd,
                     Expanded(
                       child: Text(
                         streetOf(order),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                        style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
                       ),
                     ),
                     SizedBox(
@@ -345,14 +362,17 @@ class PoolStopChip extends StatelessWidget {
                   ],
                 ),
                 Wrap(
-                  spacing: 8,
+                  spacing: QuiccSpace.sm,
                   runSpacing: 2,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     if (tip > 0)
-                      Text('tip ${money(tip)}', style: TextStyle(color: context.palette.textSecondary, fontSize: 13)),
+                      Text(
+                        'tip ${money(tip)}',
+                        style: QuiccType.number(QuiccType.caption, weight: FontWeight.w500, color: context.palette.textSecondary),
+                      ),
                     if (drive != null)
-                      Text(drive, style: TextStyle(color: context.palette.textSecondary, fontSize: 13)),
+                      Text(drive, style: QuiccType.text(QuiccType.caption, color: context.palette.textSecondary)),
                     if (cooking) const GeoTag('cooking', color: QuiccColors.statusOpen),
                     ...geoTags(g),
                   ],
@@ -392,11 +412,15 @@ class NextBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.sm, vertical: 3),
     decoration: BoxDecoration(color: QuiccColors.brand400, borderRadius: BorderRadius.circular(QuiccRadius.sm)),
-    child: const Text(
+    child: Text(
       'NEXT',
-      style: TextStyle(color: QuiccColors.brand900, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1.2),
+      style: QuiccType.text(
+        QuiccType.caption,
+        weight: FontWeight.w700,
+        color: QuiccColors.brand900,
+      ).copyWith(letterSpacing: 1.2),
     ),
   );
 }
@@ -423,9 +447,9 @@ class OutRunCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: QuiccSpace.sm),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(QuiccSpace.md),
         child: Row(
           children: [
             Expanded(
@@ -435,13 +459,13 @@ class OutRunCard extends StatelessWidget {
                   Row(
                     children: [
                       const Icon(Icons.delivery_dining, color: QuiccColors.brand400, size: 24),
-                      const SizedBox(width: 8),
+                      QuiccSpace.gapSm,
                       Flexible(
                         child: Text(
                           name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+                          style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
                         ),
                       ),
                     ],
@@ -455,26 +479,25 @@ class OutRunCard extends StatelessWidget {
                         'out ${duration(d)}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+                        style: QuiccType.number(
+                          QuiccType.body,
+                          weight: FontWeight.w700,
                           color: d.inMinutes >= 45 ? QuiccColors.statusVoided : context.palette.textSecondary,
                         ),
                       );
                     },
                   ),
-                  const SizedBox(height: 6),
+                  QuiccSpace.gapSm,
                   if (orders.isEmpty)
-                    Text('No orders on this run.', style: TextStyle(color: context.palette.textMuted))
+                    Text('No orders on this run.', style: QuiccType.text(QuiccType.label, color: context.palette.textMuted))
                   else
                     Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
+                      spacing: QuiccSpace.sm,
+                      runSpacing: QuiccSpace.sm,
                       children: [
                         for (final o in orders)
                           ActionChip(
-                            label: Text(o.displayNumber, style: const TextStyle(fontWeight: FontWeight.w700)),
+                            label: Text(o.displayNumber, style: QuiccType.number(QuiccType.label, weight: FontWeight.w700)),
                             onPressed: () => onOpen(o),
                           ),
                       ],
@@ -482,20 +505,20 @@ class OutRunCard extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 10),
+            QuiccSpace.gapMd,
             SizedBox(
               height: 56,
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: QuiccColors.statusPaid,
                   foregroundColor: QuiccColors.brand900,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.lg),
                 ),
                 onPressed: (busy || onReturned == null) ? null : onReturned,
                 icon: busy
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.home_outlined),
-                label: Text(onReturned == null ? 'DRIVER REMOVED' : 'I HAVE RETURNED'),
+                label: Text(onReturned == null ? 'Driver removed' : 'I HAVE RETURNED'),
               ),
             ),
           ],

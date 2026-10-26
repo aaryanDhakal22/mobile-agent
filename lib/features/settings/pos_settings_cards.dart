@@ -11,6 +11,8 @@ import '../common/widgets.dart';
 import 'deliveries_settings_card.dart';
 import 'settings_card.dart';
 import 'settings_texts.dart';
+import '../../theme/quicc_type.dart';
+import '../../theme/quicc_spacing.dart';
 
 /// One switch: wire key, label and a short line under it.
 typedef SwitchSpec = ({String key, String label, String help});
@@ -95,14 +97,14 @@ class _SwitchCardState extends ConsumerState<_SwitchCard> {
         else if (_needsUpdate)
           Text(
             'This Pi needs an update for these switches.',
-            style: TextStyle(color: context.palette.textSecondary, fontSize: 16),
+            style: QuiccType.text(QuiccType.body, color: context.palette.textSecondary),
           )
         else
           for (final sw in widget.switches)
             SwitchListTile(
               key: ValueKey('switch-${sw.key}'),
               contentPadding: EdgeInsets.zero,
-              title: Text(sw.label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+              title: Text(sw.label, style: QuiccType.text(QuiccType.body, weight: FontWeight.w600)),
               subtitle: Text(sw.help, style: TextStyle(color: context.palette.textSecondary)),
               value: _pending[sw.key] ?? saved[sw.key] ?? false,
               onChanged: _pending.containsKey(sw.key) ? null : (on) => _flip(sw.key, on),
@@ -112,15 +114,33 @@ class _SwitchCardState extends ConsumerState<_SwitchCard> {
   }
 }
 
+/// The POS hub's feature switches (developer mode → POS hub, 1.6.1).
+const kPosFeatureKeys = {'pos_pull', 'order_insert', 'driver_writeback', 'address_heal'};
+
+/// Feature switches, saved one by one on the Pi. [keys] shows only those
+/// (the others keep their saved value).
 class FeaturesSettingsCard extends StatelessWidget {
-  const FeaturesSettingsCard({super.key});
+  final Set<String>? keys;
+  final bool exclude;
+  final String title;
+  final String subtitle;
+  const FeaturesSettingsCard({
+    super.key,
+    this.keys,
+    this.exclude = false,
+    this.title = 'Features',
+    this.subtitle = 'Turn the newer parts on or off. Saved on the Pi.',
+  });
 
   @override
   Widget build(BuildContext context) => _SwitchCard(
-    title: 'Features',
-    subtitle: 'Turn the newer parts on or off. Saved on the Pi.',
+    title: title,
+    subtitle: subtitle,
     info: kFeaturesInfo,
-    switches: kFeatureSwitches,
+    switches: [
+      for (final s in kFeatureSwitches)
+        if (keys == null || keys!.contains(s.key) != exclude) s,
+    ],
     read: (s) => s.features.toJson(),
     save: (floor, next) => floor.saveFeatures(FeatureToggles.fromJson(next)),
   );
@@ -162,7 +182,7 @@ class DefaultTimesFields extends StatelessWidget {
         onChanged: (v) =>
             onChanged(DefaultTimes(defaultPickupMinutes: v, defaultDeliveryMinutes: value.defaultDeliveryMinutes)),
       ),
-      const SizedBox(height: 8),
+      QuiccSpace.gapSm,
       SettingsStepper(
         key: const ValueKey('default-delivery'),
         label: 'Delivery',
@@ -226,11 +246,11 @@ class _DefaultTimesSettingsCardState extends ConsumerState<DefaultTimesSettingsC
         else if (_needsUpdate)
           Text(
             'This Pi needs an update for default times.',
-            style: TextStyle(color: context.palette.textSecondary, fontSize: 16),
+            style: QuiccType.text(QuiccType.body, color: context.palette.textSecondary),
           )
         else ...[
           DefaultTimesFields(value: t, onChanged: (v) => setState(() => _edit = v)),
-          const SizedBox(height: 12),
+          QuiccSpace.gapMd,
           Row(
             children: [
               SizedBox(
@@ -243,7 +263,7 @@ class _DefaultTimesSettingsCardState extends ConsumerState<DefaultTimesSettingsC
                       : const Text('SAVE'),
                 ),
               ),
-              const SizedBox(width: 12),
+              QuiccSpace.gapMd,
               if (dirty)
                 TextButton(onPressed: _saving ? null : () => setState(() => _edit = null), child: const Text('UNDO')),
             ],

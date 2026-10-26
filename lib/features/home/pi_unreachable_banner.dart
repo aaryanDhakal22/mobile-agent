@@ -8,6 +8,8 @@ import '../../core/providers.dart';
 import '../../core/sse.dart';
 import '../diagnose/diagnose_entry.dart';
 import '../diagnose/texts.dart';
+import '../../theme/quicc_type.dart';
+import '../../theme/quicc_spacing.dart';
 
 /// How long the agent may be unreachable before the banner shows (a short
 /// blip — the Pi restarting, Wi-Fi roaming — shouldn't alarm anyone).
@@ -68,22 +70,22 @@ class _PiUnreachableBannerState extends ConsumerState<PiUnreachableBanner> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Icon(Icons.wifi_off_rounded, color: Colors.white, size: 34),
-              const SizedBox(width: 16),
+              QuiccSpace.gapLg,
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       mins >= 1 ? "Can't reach the Pi — $mins min" : "Can't reach the Pi",
-                      style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700),
+                      style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700, color: Colors.white),
                     ),
-                    const SizedBox(height: 4),
-                    const Text(
+                    QuiccSpace.gapXs,
+                    Text(
                       'New orders will NOT ring here. 1) Check the tablet Wi-Fi. '
                       '2) Check the Pi has power and its network cable. '
                       '3) Unplug the Pi, wait 10 s, plug it back in (2 min to start). '
                       '4) Still red? Call the owner.',
-                      style: TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
+                      style: QuiccType.text(QuiccType.label, color: Colors.white, height: 1.3),
                     ),
                   ],
                 ),
@@ -100,7 +102,7 @@ class _PiUnreachableBannerState extends ConsumerState<PiUnreachableBanner> {
                     ),
                     child: const Text(GuideText.fixIt),
                   ),
-                  const SizedBox(height: 6),
+                  QuiccSpace.gapSm,
                   TextButton(
                     onPressed: () => ref.read(floorProvider.notifier).resume(),
                     style: TextButton.styleFrom(foregroundColor: Colors.white),
