@@ -10,16 +10,15 @@ import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../core/sse.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_spacing.dart';
+import '../../theme/quicc_type.dart';
 import '../common/info_button.dart';
 import '../common/widgets.dart';
-import '../diagnose/diagnose_entry.dart';
-import '../setup/setup_entry.dart';
-import 'chime_picker.dart';
-import 'deliveries_settings_card.dart';
-import 'pos_settings_cards.dart';
-import 'receipt_settings_card.dart';
-import 'settings_card.dart';
-import 'settings_texts.dart';
+import '../settings/settings_card.dart';
+import '../settings/settings_texts.dart';
+
+// The Pi and this tablet (developer mode: Connections and Config). Moved out
+// of Settings in 1.6.0.
 
 /// Asks whatever answers at an address whether it is a Quicc Pi (`GET
 /// /api/session`) — the address field's live check. Overridden in tests.
@@ -31,51 +30,16 @@ final piProbeProvider = Provider<Future<AgentProbe> Function(String address)>(
 /// How long typing must pause before the address is checked.
 const Duration kAddressCheckDelay = Duration(milliseconds: 700);
 
-class SettingsScreen extends ConsumerWidget {
-  const SettingsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ListView(
-      padding: const EdgeInsets.all(32),
-      children: const [
-        PaneHeader(title: 'Settings'),
-        ContinueSetupCard(),
-        _PiCard(),
-        _TabletCard(),
-        SettingsCard(
-          title: 'Order chime',
-          info: kChimeInfo,
-          subtitle: 'Rings until every new order is accepted.',
-          children: [ChimePicker()],
-        ),
-        ReceiptSettingsCard(),
-        DeliveriesSettingsCard(),
-        DefaultTimesSettingsCard(),
-        FeaturesSettingsCard(),
-        KitchenTicketsSettingsCard(),
-        _ChecksCard(),
-        _ThemeCard(),
-        AboutDiagnosticsCard(),
-      ],
-    );
-  }
-}
-
-// =============================================================================
-// The Pi: address (with a live check) + connection
-// =============================================================================
-
 enum _Check { idle, checking, found, nothing }
 
-class _PiCard extends ConsumerStatefulWidget {
-  const _PiCard();
+class PiAddressCard extends ConsumerStatefulWidget {
+  const PiAddressCard({super.key});
 
   @override
-  ConsumerState<_PiCard> createState() => _PiCardState();
+  ConsumerState<PiAddressCard> createState() => _PiAddressCardState();
 }
 
-class _PiCardState extends ConsumerState<_PiCard> {
+class _PiAddressCardState extends ConsumerState<PiAddressCard> {
   late final TextEditingController _addrCtrl;
   Timer? _debounce;
   int _seq = 0;
@@ -145,22 +109,22 @@ class _PiCardState extends ConsumerState<_PiCard> {
               child: TextField(
                 controller: _addrCtrl,
                 keyboardType: TextInputType.url,
-                style: const TextStyle(fontSize: 20),
+                style: QuiccType.text(QuiccType.heading),
                 decoration: const InputDecoration(hintText: '192.168.1.219', prefixIcon: Icon(Icons.router_outlined)),
                 onChanged: _onChanged,
                 onSubmitted: (_) => _save(),
               ),
             ),
-            const SizedBox(width: 12),
+            QuiccSpace.gapMd,
             SizedBox(
               height: 56,
               child: FilledButton(onPressed: _save, child: const Text('SAVE')),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        QuiccSpace.gapSm,
         _AddressCheck(check: _check, found: _found),
-        const SizedBox(height: 14),
+        QuiccSpace.gapMd,
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -183,10 +147,10 @@ class _PiCardState extends ConsumerState<_PiCard> {
           ],
         ),
         if (unsynced > 0) ...[
-          const SizedBox(height: 6),
+          QuiccSpace.gapSm,
           Text(
             'The Pi has changes it has not yet sent to the Quicc website. It keeps trying by itself.',
-            style: TextStyle(color: context.palette.textMuted, fontSize: 13),
+            style: QuiccType.text(QuiccType.caption, color: context.palette.textMuted),
           ),
         ],
       ],
@@ -230,7 +194,7 @@ class _AddressCheck extends StatelessWidget {
       child: Row(
         children: [
           lead,
-          const SizedBox(width: 8),
+          QuiccSpace.gapSm,
           Expanded(
             child: Text(
               text,
@@ -249,8 +213,8 @@ class _AddressCheck extends StatelessWidget {
 // This tablet: rename, pair another, unpair
 // =============================================================================
 
-class _TabletCard extends ConsumerWidget {
-  const _TabletCard();
+class TabletCard extends ConsumerWidget {
+  const TabletCard({super.key});
 
   Future<void> _rename(BuildContext context, WidgetRef ref) async {
     final current = ref.read(pairingProvider)?.deviceName ?? '';
@@ -300,6 +264,7 @@ class _TabletCard extends ConsumerWidget {
     return SettingsCard(
       title: 'This tablet',
       info: kTabletNameInfo,
+      subtitle: 'The name the Pi knows it by. Pair a second tablet from here, or unpair this one.',
       children: [
         Row(
           children: [
@@ -307,11 +272,11 @@ class _TabletCard extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                  Text(name, style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700)),
                   if (pairing?.deviceId.isNotEmpty == true)
                     Text(
                       'device ${pairing!.deviceId}',
-                      style: TextStyle(color: context.palette.textMuted, fontSize: 12),
+                      style: QuiccType.text(QuiccType.caption, color: context.palette.textMuted),
                     ),
                 ],
               ),
@@ -326,7 +291,7 @@ class _TabletCard extends ConsumerWidget {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        QuiccSpace.gapLg,
         Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -423,14 +388,12 @@ class _PairAnotherTabletDialogState extends ConsumerState<PairAnotherTabletDialo
                         Text(
                           code.code,
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 80,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 12,
-                            fontFeatures: const [FontFeature.tabularFigures()],
+                          // The one oversized number: read across the counter.
+                          style: QuiccType.number(
+                            QuiccType.display * 2,
+                            weight: FontWeight.w800,
                             color: expired ? context.palette.textMuted : QuiccColors.brand400,
-                            decoration: expired ? TextDecoration.lineThrough : null,
-                          ),
+                          ).copyWith(letterSpacing: 12, decoration: expired ? TextDecoration.lineThrough : null),
                         ),
                         Text(
                           left == null
@@ -438,9 +401,9 @@ class _PairAnotherTabletDialogState extends ConsumerState<PairAnotherTabletDialo
                               : expired
                               ? 'This code has expired — get a new one'
                               : 'Expires in ${duration(left)}',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
+                          style: QuiccType.text(
+                            QuiccType.body,
+                            weight: FontWeight.w600,
                             color: expired ? QuiccColors.statusVoided : context.palette.textSecondary,
                           ),
                         ),
@@ -448,9 +411,9 @@ class _PairAnotherTabletDialogState extends ConsumerState<PairAnotherTabletDialo
                     );
                   },
                 ),
-                const SizedBox(height: 20),
+                QuiccSpace.gapXl,
                 const Eyebrow('On the new tablet'),
-                const SizedBox(height: 6),
+                QuiccSpace.gapSm,
                 for (final (i, step) in const [
                   'Open Quibase',
                   'Pick this Pi',
@@ -458,8 +421,8 @@ class _PairAnotherTabletDialogState extends ConsumerState<PairAnotherTabletDialo
                   'Type the 6 digits above',
                 ].indexed)
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Text('${i + 1}.  $step', style: const TextStyle(fontSize: 18)),
+                    padding: const EdgeInsets.symmetric(vertical: QuiccSpace.xs),
+                    child: Text('${i + 1}.  $step', style: QuiccType.text(QuiccType.heading)),
                   ),
               ],
             );
@@ -469,72 +432,6 @@ class _PairAnotherTabletDialogState extends ConsumerState<PairAnotherTabletDialo
       actions: [
         TextButton(onPressed: _newCode, child: const Text('NEW CODE')),
         FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('DONE')),
-      ],
-    );
-  }
-}
-
-// =============================================================================
-// Checks & tests, theme
-// =============================================================================
-
-class _ChecksCard extends StatelessWidget {
-  const _ChecksCard();
-
-  void _open(BuildContext context, Widget screen) =>
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
-
-  @override
-  Widget build(BuildContext context) {
-    Widget button(IconData icon, String label, Widget screen) => SizedBox(
-      height: 64,
-      child: OutlinedButton.icon(onPressed: () => _open(context, screen), icon: Icon(icon), label: Text(label)),
-    );
-    return SettingsCard(
-      title: 'Checks & tests',
-      info: kChecksInfo,
-      subtitle: 'Run these after an Android update or when something seems off.',
-      children: [
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            button(Icons.fact_check_outlined, 'TABLET CHECKS', const TabletChecksScreen()),
-            button(Icons.notifications_active_outlined, 'TEST RING', const TestRingScreen()),
-            button(Icons.print_outlined, 'TEST PRINT', const TestPrintScreen()),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _ThemeCard extends ConsumerWidget {
-  const _ThemeCard();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final mode = ref.watch(themeModeProvider);
-    return SettingsCard(
-      title: 'Light or dark',
-      info: kThemeInfo,
-      children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: SegmentedButton<ThemeMode>(
-            style: SegmentedButton.styleFrom(
-              minimumSize: const Size(0, 56),
-              textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-            ),
-            segments: const [
-              ButtonSegment(value: ThemeMode.light, icon: Icon(Icons.light_mode_outlined), label: Text('Light')),
-              ButtonSegment(value: ThemeMode.dark, icon: Icon(Icons.dark_mode_outlined), label: Text('Dark')),
-              ButtonSegment(value: ThemeMode.system, icon: Icon(Icons.brightness_auto_outlined), label: Text('System')),
-            ],
-            selected: {mode},
-            onSelectionChanged: (s) => ref.read(themeModeProvider.notifier).set(s.first),
-          ),
-        ),
       ],
     );
   }
@@ -551,10 +448,10 @@ class _Info extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Eyebrow(label),
-      const SizedBox(height: 2),
+      QuiccSpace.gapXs,
       Text(
         value,
-        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: warn ? QuiccColors.statusFiring : null),
+        style: QuiccType.text(QuiccType.body, weight: FontWeight.w600, color: warn ? QuiccColors.statusFiring : null),
       ),
     ],
   );

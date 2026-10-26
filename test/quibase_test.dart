@@ -138,34 +138,40 @@ void main() {
         home: const Scaffold(body: Stack(children: [Positioned.fill(child: DriverFab())])),
       ),
     ));
-    expect(find.text('1'), findsOneWidget, reason: 'badge: one driver out (Sam)');
+    expect(find.text('1 out'), findsOneWidget, reason: 'badge: one driver out (Sam)');
     expect(find.text('Sam'), findsNothing);
+    final card = find.byKey(const ValueKey('next-card'));
+    final round = find.byKey(const ValueKey('fab-round'));
 
     await tester.tap(find.byIcon(Icons.local_shipping_outlined));
     await tester.pumpAndSettle();
     expect(find.text('Sam'), findsOneWidget, reason: 'pill for the driver who is out');
     expect(find.text('Joe'), findsNothing, reason: 'available drivers are not pills');
-    expect(find.text('NEXT'), findsOneWidget);
-    expect(find.text('Ana'), findsOneWidget, reason: 'the head of the queue is NEXT');
+    expect(card, findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('next-driver'))).textSpan!.toPlainText(),
+      startsWith('Ana'),
+      reason: 'the head of the queue is NEXT',
+    );
 
     await tester.tap(find.text('Sam'));
     await tester.pumpAndSettle();
     expect(floor.calls, ['returned:d-sam']);
-    expect(find.text('NEXT'), findsNothing, reason: 'collapsed after a return');
+    expect(card, findsNothing, reason: 'collapsed after a return');
 
-    // Hold the big button 2 s → undo.
+    // Hold the round button 2 s → undo.
     await tester.tap(find.byIcon(Icons.local_shipping_outlined));
     await tester.pumpAndSettle();
-    final g = await tester.startGesture(tester.getCenter(find.text('NEXT')));
+    final g = await tester.startGesture(tester.getCenter(round));
     await tester.pump(kUndoHold + const Duration(milliseconds: 100));
     await g.up();
     await tester.pumpAndSettle();
     expect(floor.calls, ['returned:d-sam', 'undo:d-sam']);
-    expect(find.text('NEXT'), findsOneWidget, reason: 'the release-tap of an undo does not collapse');
+    expect(card, findsOneWidget, reason: 'the release-tap of an undo does not collapse');
 
     // Tap outside collapses.
     await tester.tapAt(const Offset(100, 100));
     await tester.pumpAndSettle();
-    expect(find.text('NEXT'), findsNothing);
+    expect(card, findsNothing);
   });
 }

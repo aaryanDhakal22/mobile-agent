@@ -8,6 +8,8 @@ import '../../core/local_log.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_spacing.dart';
+import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
 import 'time_picker.dart';
 
@@ -62,9 +64,11 @@ String scheduleErrorMessage(Object e) {
 
 /// The time picker + CONFIRM, used on the order detail screen and the
 /// full-screen alert (1.5.0). Errors render inline (the alert sits above the
-/// navigator, so no dialogs / snackbars there). Three cases:
+/// navigator, so no dialogs / snackbars there). Four cases:
 ///
-/// * a normal order: X / X+5 / X+10 prep time → ACCEPT (prints);
+/// * a delivery (1.6.0): one big ACCEPT · Y MIN (Y = the store's delivery
+///   default) with −5 / +5 nudges beside it (5 … 240 min);
+/// * a pickup / dine-in: X / X+5 / X+10 prep time → ACCEPT (prints);
 /// * a future order's first ring: the same picker sets the lead time →
 ///   `POST /schedule` (nothing prints; it waits in the Later strip);
 /// * a future order ringing again (`rerung`): no picker, one CONFIRM prints
@@ -152,28 +156,57 @@ class _AcceptControlsState extends ConsumerState<AcceptControls> {
     final rerung = so.status.rerung;
     final lead = so.needsLead;
     final due = so.dueAt;
+    // 1.6.0: a delivery's normal ring is one big ACCEPT at the store's
+    // delivery default with −5 / +5 nudges (no X / X+5 / X+10).
+    final quickDelivery = so.isDelivery && !rerung && !lead;
 
     final String eyebrow;
     final String action;
     final VoidCallback onConfirm;
     final IconData icon;
     if (rerung) {
-      eyebrow = due == null ? 'LATER ORDER — TIME TO COOK' : 'LATER ORDER — DUE ${clock(due)}';
+      eyebrow = due == null ? 'Later order — time to cook' : 'Later order — due ${clock(due)}';
       final l = so.status.scheduledLeadMinutes;
       action = 'CONFIRM · PRINT';
       onConfirm = () => _accept(l);
       icon = Icons.print;
     } else if (lead) {
-      eyebrow = 'LATER ORDER — START COOKING HOW LONG BEFORE IT IS DUE? (MIN)';
+      eyebrow = 'Later order — start cooking how long before it is due? (min)';
       action = 'CONFIRM · $selected MIN BEFORE';
       onConfirm = () => _schedule(selected);
       icon = Icons.schedule;
+    } else if (quickDelivery) {
+      eyebrow = selected == base ? 'Delivery time — store default' : 'Delivery time — store default $base min';
+      action = 'ACCEPT · $selected MIN';
+      onConfirm = () => _accept(selected);
+      icon = Icons.print;
     } else {
-      eyebrow = 'PREP TIME (MIN)';
+      eyebrow = 'Prep time (min)';
       action = 'ACCEPT · $selected MIN';
       onConfirm = () => _accept(selected);
       icon = Icons.print;
     }
+
+    final confirm = FilledButton.icon(
+      key: const ValueKey('accept-confirm'),
+      style: widget.onBrand
+          ? FilledButton.styleFrom(backgroundColor: QuiccColors.brand900, foregroundColor: QuiccColors.brand50)
+          : null,
+      onPressed: _busy ? null : onConfirm,
+      icon: _busy
+          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3))
+          : Icon(icon, size: quickDelivery ? 32 : 26),
+      label: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          _busy ? (lead ? 'SAVING…' : 'PRINTING…') : action,
+          style: QuiccType.text(
+            quickDelivery ? QuiccType.title : QuiccType.heading,
+            weight: FontWeight.w700,
+          ).copyWith(letterSpacing: 1),
+        ),
+      ),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -181,52 +214,101 @@ class _AcceptControlsState extends ConsumerState<AcceptControls> {
       children: [
         Text(
           eyebrow,
-          style: TextStyle(fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.w600, color: muted),
+          style: QuiccType.text(QuiccType.label, weight: FontWeight.w600, color: muted),
         ),
-        const SizedBox(height: 8),
-        if (!rerung)
-          TimePicker(
-            key: const ValueKey('time-picker'),
-            base: base,
-            value: selected,
-            onBrand: widget.onBrand,
-            fontSize: widget.chipFontSize,
-            enabled: !_busy,
-            onChanged: (m) => setState(() => _prep = m),
-          ),
-        if (lead && due != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            'Due ${clock(due)} — rings again at ${clock(due.subtract(Duration(minutes: selected)))}. Nothing prints now.',
-            style: TextStyle(fontSize: 15, color: fg ?? context.palette.textSecondary),
-          ),
-        ],
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 64,
-          child: FilledButton.icon(
-            key: const ValueKey('accept-confirm'),
-            style: widget.onBrand
-                ? FilledButton.styleFrom(backgroundColor: QuiccColors.brand900, foregroundColor: QuiccColors.brand50)
-                : null,
-            onPressed: _busy ? null : onConfirm,
-            icon: _busy
-                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3))
-                : Icon(icon, size: 26),
-            label: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                _busy ? (lead ? 'SAVING…' : 'PRINTING…') : action,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: 1),
-              ),
+        QuiccSpace.gapSm,
+        if (quickDelivery)
+          SizedBox(
+            height: kQuickAcceptHeight,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _Nudge(
+                  key: const ValueKey('nudge-minus'),
+                  label: '−5',
+                  semantics: '5 minutes less',
+                  onBrand: widget.onBrand,
+                  onTap: !_busy && selected > TimePickerMath.nudgeFloor
+                      ? () => setState(() => _prep = TimePickerMath.nudgeDown(selected))
+                      : null,
+                ),
+                QuiccSpace.gapSm,
+                Expanded(child: confirm),
+                QuiccSpace.gapSm,
+                _Nudge(
+                  key: const ValueKey('nudge-plus'),
+                  label: '+5',
+                  semantics: '5 minutes more',
+                  onBrand: widget.onBrand,
+                  onTap: !_busy && selected < DefaultTimes.maxMinutes
+                      ? () => setState(() => _prep = TimePickerMath.nudgeUp(selected))
+                      : null,
+                ),
+              ],
             ),
-          ),
-        ),
+          )
+        else ...[
+          if (!rerung)
+            TimePicker(
+              key: const ValueKey('time-picker'),
+              base: base,
+              value: selected,
+              onBrand: widget.onBrand,
+              fontSize: widget.chipFontSize,
+              enabled: !_busy,
+              onChanged: (m) => setState(() => _prep = m),
+            ),
+          if (lead && due != null) ...[
+            QuiccSpace.gapSm,
+            Text(
+              'Due ${clock(due)} — rings again at ${clock(due.subtract(Duration(minutes: selected)))}. Nothing prints now.',
+              style: QuiccType.text(QuiccType.body, color: fg ?? context.palette.textSecondary),
+            ),
+          ],
+          QuiccSpace.gapMd,
+          SizedBox(height: 64, child: confirm),
+        ],
         if (_error != null) ...[
-          const SizedBox(height: 10),
+          QuiccSpace.gapMd,
           InlineError(_error!, details: _details, onRetry: _busy ? null : onConfirm),
         ],
       ],
+    );
+  }
+}
+
+/// The delivery ACCEPT's height (1.6.0).
+const double kQuickAcceptHeight = 104;
+
+/// A small −5 / +5 beside the delivery ACCEPT. No Tooltip: the alert sits
+/// above the navigator (no Overlay there).
+class _Nudge extends StatelessWidget {
+  final String label;
+  final String semantics;
+  final bool onBrand;
+  final VoidCallback? onTap;
+  const _Nudge({super.key, required this.label, required this.semantics, required this.onBrand, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = onBrand ? QuiccColors.brand900 : context.palette.textPrimary;
+    final off = onTap == null;
+    return Semantics(
+      label: semantics,
+      button: true,
+      child: SizedBox(
+        width: 76,
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            padding: EdgeInsets.zero,
+            minimumSize: const Size(76, 64),
+            foregroundColor: fg,
+            side: BorderSide(color: fg.withValues(alpha: off ? 0.3 : 0.8), width: 2),
+          ),
+          onPressed: onTap,
+          child: Text(label, style: QuiccType.number(QuiccType.heading, weight: FontWeight.w700)),
+        ),
+      ),
     );
   }
 }

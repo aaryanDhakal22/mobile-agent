@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 
 import 'api_client.dart';
+import 'app_version.dart';
 
 /// One dispatched SSE frame.
 class SseEvent {
@@ -110,6 +111,10 @@ class AgentEventStream {
   /// Wait before reconnect attempt n (0 after a connection that worked).
   final Duration Function(int attempt) backoff;
 
+  /// This tablet's Quibase version for [kQuibaseVersionHeader] (read at each
+  /// connect; null = left off). Defaults to [QuibaseVersion].
+  final String? Function() appVersion;
+
   AgentEventStream({
     required String baseUrl,
     required this.deviceKey,
@@ -120,9 +125,13 @@ class AgentEventStream {
     this.idleTimeout = const Duration(seconds: 70),
     http.Client Function()? clientFactory,
     Duration Function(int attempt)? backoff,
+    String? Function()? appVersion,
   }) : baseUrl = normalizeAgentAddress(baseUrl),
        clientFactory = clientFactory ?? http.Client.new,
-       backoff = backoff ?? sseBackoff;
+       backoff = backoff ?? sseBackoff,
+       appVersion = appVersion ?? _installedVersion;
+
+  static String? _installedVersion() => QuibaseVersion.current;
 
   bool _running = false;
   http.Client? _client;
@@ -165,7 +174,8 @@ class AgentEventStream {
         final req = http.Request('GET', Uri.parse('$baseUrl/api/events'))
           ..headers[kDeviceKeyHeader] = deviceKey
           ..headers['Accept'] = 'text/event-stream'
-          ..headers['Cache-Control'] = 'no-cache';
+          ..headers['Cache-Control'] = 'no-cache'
+          ..headers.addAll(quibaseVersionHeaders(appVersion()));
         final resp = await client.send(req).timeout(const Duration(seconds: 10));
         if (resp.statusCode != 200) {
           final raw = await resp.stream.bytesToString().timeout(const Duration(seconds: 5), onTimeout: () => '');

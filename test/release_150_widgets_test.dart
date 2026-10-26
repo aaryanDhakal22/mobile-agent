@@ -241,11 +241,18 @@ void main() {
       await _done(tester);
     });
 
-    testWidgets('a delivery starts from the default delivery time (Y)', (tester) async {
+    testWidgets('a delivery starts from the default delivery time (Y): one ACCEPT with ±5 (1.6.0)', (tester) async {
       final so = StoredOrder.fromJson(_online('a-3', state: 'arrived', type: 'delivery'));
-      await _pump(tester, _Agent(), _floorState([so]), _accept(so));
+      final agent = _Agent((req) => _json(_online('a-3', type: 'delivery')));
+      await _pump(tester, agent, _floorState([so]), _accept(so));
       expect(find.text('ACCEPT · 35 MIN'), findsOneWidget);
-      expect(find.text('45 min', findRichText: true), findsOneWidget, reason: 'Y+10');
+      expect(find.byKey(const ValueKey('time-picker')), findsNothing, reason: 'no X / X+5 / X+10 for a delivery');
+      await tester.tap(find.byKey(const ValueKey('nudge-plus')));
+      await tester.pump();
+      expect(find.text('ACCEPT · 40 MIN'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('accept-confirm')));
+      await _settle(tester);
+      expect(agent.bodyOf('POST /api/orders/a-3/accept'), {'prep_minutes': 40});
       await _done(tester);
     });
 

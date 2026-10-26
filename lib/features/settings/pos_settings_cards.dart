@@ -11,6 +11,8 @@ import '../common/widgets.dart';
 import 'deliveries_settings_card.dart';
 import 'settings_card.dart';
 import 'settings_texts.dart';
+import '../../theme/quicc_type.dart';
+import '../../theme/quicc_spacing.dart';
 
 /// One switch: wire key, label and a short line under it.
 typedef SwitchSpec = ({String key, String label, String help});
@@ -95,14 +97,14 @@ class _SwitchCardState extends ConsumerState<_SwitchCard> {
         else if (_needsUpdate)
           Text(
             'This Pi needs an update for these switches.',
-            style: TextStyle(color: context.palette.textSecondary, fontSize: 16),
+            style: QuiccType.text(QuiccType.body, color: context.palette.textSecondary),
           )
         else
           for (final sw in widget.switches)
             SwitchListTile(
               key: ValueKey('switch-${sw.key}'),
               contentPadding: EdgeInsets.zero,
-              title: Text(sw.label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+              title: Text(sw.label, style: QuiccType.text(QuiccType.body, weight: FontWeight.w600)),
               subtitle: Text(sw.help, style: TextStyle(color: context.palette.textSecondary)),
               value: _pending[sw.key] ?? saved[sw.key] ?? false,
               onChanged: _pending.containsKey(sw.key) ? null : (on) => _flip(sw.key, on),
@@ -162,7 +164,7 @@ class DefaultTimesFields extends StatelessWidget {
         onChanged: (v) =>
             onChanged(DefaultTimes(defaultPickupMinutes: v, defaultDeliveryMinutes: value.defaultDeliveryMinutes)),
       ),
-      const SizedBox(height: 8),
+      QuiccSpace.gapSm,
       SettingsStepper(
         key: const ValueKey('default-delivery'),
         label: 'Delivery',
@@ -226,11 +228,11 @@ class _DefaultTimesSettingsCardState extends ConsumerState<DefaultTimesSettingsC
         else if (_needsUpdate)
           Text(
             'This Pi needs an update for default times.',
-            style: TextStyle(color: context.palette.textSecondary, fontSize: 16),
+            style: QuiccType.text(QuiccType.body, color: context.palette.textSecondary),
           )
         else ...[
           DefaultTimesFields(value: t, onChanged: (v) => setState(() => _edit = v)),
-          const SizedBox(height: 12),
+          QuiccSpace.gapMd,
           Row(
             children: [
               SizedBox(
@@ -243,7 +245,7 @@ class _DefaultTimesSettingsCardState extends ConsumerState<DefaultTimesSettingsC
                       : const Text('SAVE'),
                 ),
               ),
-              const SizedBox(width: 12),
+              QuiccSpace.gapMd,
               if (dirty)
                 TextButton(onPressed: _saving ? null : () => setState(() => _edit = null), child: const Text('UNDO')),
             ],

@@ -62,8 +62,27 @@ const kChecksInfo = InfoText(
 const kThemeInfo = InfoText(
   'Light or dark',
   'Dark is easier on the eyes in a dim kitchen; light is easier to read in bright sun. System '
-      'follows the tablet\'s own setting. Tapping the q logo at the top left also switches between '
-      'light and dark.',
+      'follows the tablet\'s own setting.\n\n'
+      'Only this tablet changes.',
+);
+
+const kMotionInfo = InfoText(
+  'Motion',
+  'Quibase moves things on screen to show what changed: the menu on the left drops away and pops '
+      'back when you tap the q, the highlight slides to the screen you pick, AUTO glows.\n\n'
+      'Switch Motion off for quick fades instead. Animation speed makes every movement faster or '
+      'slower; 1× is how it was designed.\n\n'
+      'If Android\'s own "Remove animations" is on, Quibase follows it and keeps to quick fades.',
+);
+
+const kComingInfo = InfoText(
+  'Delivery area and nearby',
+  'Two settings that arrive with the next Pi update.\n\n'
+      'Delivery radius: how far the store delivers. Orders farther away get the "outside area" tag. '
+      'It will be the same number the Quicc website uses.\n\n'
+      'Nearby rule: when the driver button\'s NEXT should send you to Deliveries first, because an '
+      'unassigned delivery is close to the next driver\'s run — by extra driving minutes, by miles '
+      'from a stop, or when AUTO would add it to the run.',
 );
 
 const kReceiptsInfo = InfoText(

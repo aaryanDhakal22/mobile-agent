@@ -9,6 +9,8 @@ import '../../core/models.dart';
 import '../../core/polyline.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_spacing.dart';
+import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
 import 'geo_format.dart';
 import 'map_layers.dart';
@@ -106,7 +108,7 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
               key: const ValueKey('drive-label'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              style: QuiccType.text(QuiccType.body, weight: FontWeight.w700),
             ),
           ),
       ],
@@ -163,11 +165,7 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
 
   /// "Not found on the map" (main looked and found nothing) / "No map
   /// location" (main gave up / never located it).
-  static String _lostTitle(OrderGeo g) => switch (g.state) {
-    GeoState.unavailable => 'No map location',
-    GeoState.check => 'Address needs a check',
-    _ => 'Not found on the map',
-  };
+  static String _lostTitle(OrderGeo g) => lostLocationTitle(g);
 
   static GeoPoint? _bboxCenter(List<double>? b) =>
       (b == null || b.length != 4) ? null : (lat: (b[1] + b[3]) / 2, lng: (b[0] + b[2]) / 2);
@@ -281,8 +279,9 @@ class _MapCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    height: height * 0.6,
-    padding: const EdgeInsets.all(18),
+    // At least this tall; longer messages grow it instead of overflowing.
+    constraints: BoxConstraints(minHeight: height * 0.6),
+    padding: const EdgeInsets.all(QuiccSpace.lg),
     decoration: BoxDecoration(
       color: context.palette.bgElevated,
       borderRadius: BorderRadius.circular(QuiccRadius.md),
@@ -300,9 +299,9 @@ class _MapCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text(message, style: TextStyle(color: context.palette.textSecondary)),
+              Text(title, style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700)),
+              QuiccSpace.gapXs,
+              Text(message, style: QuiccType.text(QuiccType.body, color: context.palette.textSecondary)),
             ],
           ),
         ),
@@ -340,6 +339,211 @@ class _RoundButton extends StatelessWidget {
     color: context.palette.bgSurface,
     shape: const CircleBorder(),
     elevation: 2,
-    child: IconButton(tooltip: tooltip, icon: Icon(icon, color: QuiccColors.brand400), onPressed: onTap),
+    child: IconButton(
+      tooltip: tooltip,
+      icon: Icon(icon, color: QuiccColors.brand400),
+      onPressed: onTap,
+    ),
   );
+}
+
+/// The read-only delivery map on the full-screen new-order alert (1.6.0):
+/// store, door, the route line, "2.3 mi · 7 min" and the approx /
+/// outside-area tags, at a fixed height. Nothing in it can be touched — no
+/// gestures, no buttons, no tooltips, no pin mode, no toasts: the alert sits
+/// above the Navigator, where there is no Overlay. Without a usable location
+/// (still locating, not found, no map file on the Pi) it shrinks to one slim
+/// line.
+class StaticDeliveryMap extends ConsumerWidget {
+  final StoredOrder order;
+  final double height;
+
+  /// Text colour of the slim line (the alert's ink on lavender).
+  final Color? foreground;
+
+  const StaticDeliveryMap({super.key, required this.order, this.height = kStaticMapHeight, this.foreground});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final g = order.geo;
+    final store = ref.watch(floorProvider.select((s) => s.floor?.store))?.point;
+    final source = ref.watch(mapSourceProvider);
+    final label = driveLabel(g);
+    final tags = geoTags(g, fontSize: QuiccType.label);
+    final dest = g?.point;
+
+    final Widget child;
+    if (g == null || g.state == GeoState.pending) {
+      child = _SlimLine(
+        key: const ValueKey('static-map-locating'),
+        icon: Icons.travel_explore,
+        text: 'Locating address…',
+        foreground: foreground,
+      );
+    } else if (g.needsPin || dest == null) {
+      child = _SlimLine(
+        key: const ValueKey('static-map-lost'),
+        icon: Icons.location_off_outlined,
+        text: '${lostLocationTitle(g)} — check it on the order after accepting',
+        foreground: foreground,
+      );
+    } else if (source == null) {
+      child = _SlimLine(
+        key: const ValueKey('static-map-nofile'),
+        icon: Icons.map_outlined,
+        text: label == null ? 'Map not downloaded yet' : 'Store → door: $label',
+        tags: tags,
+        foreground: foreground,
+      );
+    } else {
+      child = _StaticMap(height: height, geo: g, store: store, dest: dest, source: source, label: label, tags: tags);
+    }
+    return Semantics(
+      label: [
+        'Delivery map',
+        ?label,
+        if (g?.isApprox == true) 'approximate location',
+        if (g?.state == GeoState.located && g?.outsideArea == true) 'outside delivery area',
+      ].join(', '),
+      excludeSemantics: true,
+      child: child,
+    );
+  }
+}
+
+/// The alert map's height.
+const double kStaticMapHeight = 220;
+
+/// "Not found on the map" (main looked and found nothing) / "No map
+/// location" (main gave up / never located it) / "Address needs a check".
+String lostLocationTitle(OrderGeo g) => switch (g.state) {
+  GeoState.unavailable => 'No map location',
+  GeoState.check => 'Address needs a check',
+  _ => 'Not found on the map',
+};
+
+class _StaticMap extends ConsumerWidget {
+  final double height;
+  final OrderGeo geo;
+  final GeoPoint? store;
+  final GeoPoint dest;
+  final MapSource source;
+  final String? label;
+  final List<Widget> tags;
+  const _StaticMap({
+    required this.height,
+    required this.geo,
+    required this.store,
+    required this.dest,
+    required this.source,
+    required this.label,
+    required this.tags,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final route = geo.route;
+    final fit = fitPoints(<GeoPoint>[?store, dest], padding: const EdgeInsets.fromLTRB(40, 56, 40, 32));
+    final line = route.length >= 2
+        ? routeLine(route)
+        : (store != null ? routeLine([store!, dest], dashed: true) : null);
+    return SizedBox(
+      key: const ValueKey('static-map'),
+      height: height,
+      width: double.infinity,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(QuiccRadius.md),
+        child: IgnorePointer(
+          child: Stack(
+            children: [
+              FlutterMap(
+                options: MapOptions(
+                  initialCameraFit: fit,
+                  backgroundColor: mapBackground(dark),
+                  interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+                ),
+                children: [
+                  ref.watch(mapBaseLayerProvider)(context, source, dark),
+                  ?(line == null ? null : PolylineLayer(polylines: [line])),
+                  MarkerLayer(
+                    markers: [
+                      if (store != null) storeMarker(store!),
+                      destinationMarker(dest, approx: geo.isApprox),
+                    ],
+                  ),
+                  const MapAttribution(),
+                ],
+              ),
+              if (label != null || tags.isNotEmpty)
+                Positioned(
+                  left: QuiccSpace.sm,
+                  top: QuiccSpace.sm,
+                  right: QuiccSpace.sm,
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md, vertical: QuiccSpace.xs + 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.94),
+                        borderRadius: BorderRadius.circular(QuiccRadius.sm),
+                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                      ),
+                      child: Wrap(
+                        spacing: QuiccSpace.sm,
+                        runSpacing: QuiccSpace.xs,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          if (label != null)
+                            Text(
+                              label!,
+                              key: const ValueKey('static-drive-label'),
+                              style: QuiccType.number(
+                                QuiccType.body,
+                                weight: FontWeight.w700,
+                                color: QuiccColors.brand900,
+                              ),
+                            ),
+                          ...tags,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One line in place of the alert map (locating, not found, no map file).
+class _SlimLine extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final List<Widget> tags;
+  final Color? foreground;
+  const _SlimLine({super.key, required this.icon, required this.text, this.tags = const [], this.foreground});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = foreground ?? context.palette.textSecondary;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: QuiccSpace.xs),
+      child: Wrap(
+        spacing: QuiccSpace.sm,
+        runSpacing: QuiccSpace.xs,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Icon(icon, size: 20, color: fg),
+          Text(
+            text,
+            style: QuiccType.text(QuiccType.body, weight: FontWeight.w600, color: fg),
+          ),
+          ...tags,
+        ],
+      ),
+    );
+  }
 }

@@ -7,7 +7,10 @@ import 'package:mobile_agent/core/auto_preview.dart';
 import 'package:mobile_agent/core/delivery_models.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/providers.dart';
+import 'package:mobile_agent/core/floor_state.dart';
 import 'package:mobile_agent/features/deliveries/deliveries_pane.dart';
+import 'package:mobile_agent/features/deliveries/lava_glow.dart';
+import 'package:mobile_agent/features/home/home_nav.dart';
 import 'package:mobile_agent/features/home/home_screen.dart';
 import 'package:mobile_agent/features/maps/pool_map_screen.dart';
 import 'package:mobile_agent/features/order_detail/order_detail_screen.dart';
@@ -15,10 +18,13 @@ import 'package:mobile_agent/theme/quicc_colors.dart';
 
 import 'delivery_fixtures.dart';
 
+/// [motion] false (the default) pumps with Android's "remove animations" on,
+/// so the AUTO lava lamp is a still glow and pumpAndSettle can settle.
 Future<(ProviderContainer, FakeDeliveryFloor)> pumpPane(
   WidgetTester tester, {
   Size size = const Size(1280, 800),
   FakeDeliveryFloor? fake,
+  bool motion = false,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -29,12 +35,24 @@ Future<(ProviderContainer, FakeDeliveryFloor)> pumpPane(
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: c,
-      child: MaterialApp(theme: darkTheme(), home: const Scaffold(body: DeliveriesPane())),
+      child: MaterialApp(
+        theme: darkTheme(),
+        builder: (context, child) =>
+            MediaQuery(data: MediaQuery.of(context).copyWith(disableAnimations: !motion), child: child!),
+        home: const Scaffold(body: DeliveriesPane()),
+      ),
     ),
   );
   await tester.pump();
   return (c, f);
 }
+
+/// [s] with [ids] moved into [driver]'s pool.
+FloorState pooled(FloorState s, String driver, List<String> ids) => s.withOrders([
+  for (final id in ids) s.orders[id]!.copyWith(status: s.orders[id]!.status.withPool(driver)),
+]);
+
+final sendBar = find.byKey(const ValueKey('send-next'));
 
 /// Long-press [from], drag it onto [to], drop.
 Future<void> longDrag(WidgetTester tester, Finder from, Finder to) async {
@@ -112,8 +130,12 @@ void main() {
       expect(find.text('outside area'), findsOneWidget);
       expect(find.text('no location'), findsWidgets);
       expect(find.textContaining('ready in ~'), findsOneWidget);
-      expect(find.text('SEND OUT'), findsNWidgets(2));
-
+      // One SEND OUT, pinned under the pools, for the NEXT driver only.
+      expect(sendBar, findsOneWidget);
+      expect(find.text('SEND OUT · ANA · 1 order'), findsOneWidget);
+      expect(find.descendant(of: box('d-ana'), matching: find.byType(FilledButton)), findsNothing);
+      expect(find.descendant(of: box('d-joe'), matching: find.byType(FilledButton)), findsNothing);
+      expect(find.byKey(const ValueKey('lava-glow')), findsOneWidget, reason: 'AUTO has something to plan');
 
       // AUTO preview at this size too.
       (c.read(floorProvider.notifier) as FakeDeliveryFloor).plan = samplePlan();
@@ -123,13 +145,19 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('CONFIRM'), findsOneWidget);
 
-      // Scrolled to the end, the last Out card's I HAVE RETURNED sits clear
-      // of the driver button (104 px + ring, 24 px from the bottom-right).
+      expect(find.byKey(const ValueKey('lava-glow')), findsNothing, reason: 'no glow while a preview is up');
+
+      // Scrolled to the end, the last Out card's I HAVE RETURNED sits above
+      // the send bar, and the bar stops short of the collapsed driver button
+      // (64 px, 24 px from the bottom-right).
       final right = find.ancestor(of: box('d-ana'), matching: find.byType(Scrollable)).first;
       await tester.drag(right, const Offset(0, -3000));
       await tester.pump(const Duration(seconds: 1));
       final returned = tester.getRect(find.widgetWithText(FilledButton, 'I HAVE RETURNED'));
-      expect(returned.bottom, lessThanOrEqualTo(size.height - 146), reason: 'clear of the driver button');
+      final bar = tester.getRect(sendBar);
+      expect(returned.bottom, lessThanOrEqualTo(bar.top), reason: 'clear of the send bar');
+      expect(bar.right, lessThanOrEqualTo(size.width - 88 - 8), reason: 'clear of the driver button');
+      expect(bar.bottom, lessThanOrEqualTo(size.height - 24));
       await tester.pumpWidget(const SizedBox());
     });
   }
@@ -189,7 +217,7 @@ void main() {
     // Cancel leaves select mode.
     await tester.tap(find.byKey(const ValueKey('select')));
     await tester.pump();
-    await tester.tap(find.text('CANCEL'));
+    await tester.tap(find.text('Cancel'));
     await tester.pump();
     expect(find.byKey(const ValueKey('select-bar')), findsNothing);
     await tester.pumpWidget(const SizedBox());
@@ -231,9 +259,10 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('Send Out with a cooking order asks first, then sends with markReady', (tester) async {
-    final (_, f) = await pumpPane(tester);
-    await tester.tap(find.byKey(const ValueKey('send-d-joe')));
+  testWidgets('SEND OUT with a cooking order asks first, then sends with markReady', (tester) async {
+    final (_, f) = await pumpPane(tester, fake: FakeDeliveryFloor(pooled(deliveryFloor(), 'd-ana', ['d4'])));
+    expect(find.text('SEND OUT · ANA · 2 orders'), findsOneWidget);
+    await tester.tap(sendBar);
     await tester.pumpAndSettle();
     expect(find.text("#1106 isn't marked ready — send anyway?"), findsOneWidget);
 
@@ -242,19 +271,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(callsOf(f, 'sendOut'), isEmpty);
 
-    await tester.tap(find.byKey(const ValueKey('send-d-joe')));
+    await tester.tap(sendBar);
     await tester.pumpAndSettle();
     await tester.tap(find.text('SEND ANYWAY'));
     await tester.pumpAndSettle();
     final s = callsOf(f, 'sendOut').single;
-    expect(s.driver, 'd-joe');
+    expect(s.driver, 'd-ana');
     expect(s.extra['markReady'], isTrue);
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('Send Out with everything ready goes straight out (no dialog)', (tester) async {
+  testWidgets('SEND OUT with everything ready goes straight out (no dialog)', (tester) async {
     final (_, f) = await pumpPane(tester);
-    await tester.tap(find.byKey(const ValueKey('send-d-ana')));
+    await tester.tap(sendBar);
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
     expect(callsOf(f, 'sendOut').single.extra['markReady'], isFalse);
@@ -262,11 +291,21 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets("the bar is disabled with a hint while the next driver's box is empty", (tester) async {
+    final (_, f) = await pumpPane(tester, fake: FakeDeliveryFloor(pooled(deliveryFloor(), 'd-joe', ['d3'])));
+    expect(find.text('Ana is next — drag deliveries into their box first'), findsOneWidget);
+    expect(tester.widget<FilledButton>(sendBar).onPressed, isNull);
+    await tester.tap(sendBar);
+    await tester.pump();
+    expect(callsOf(f, 'sendOut'), isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('409 not_ready from the Pi: asks, then retries with markReady', (tester) async {
     final fake = FakeDeliveryFloor(deliveryFloor())
       ..sendOutError = NotReadyException('not ready', orderIds: const ['d3']);
     final (_, f) = await pumpPane(tester, fake: fake);
-    await tester.tap(find.byKey(const ValueKey('send-d-ana')));
+    await tester.tap(sendBar);
     await settle(tester); // the SEND OUT spinner runs under the dialog
     expect(find.text("#1103 isn't marked ready — send anyway?"), findsOneWidget);
     await tester.tap(find.text('SEND ANYWAY'));
@@ -278,14 +317,94 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('Send Out errors in plain words (driver gone)', (tester) async {
+  testWidgets('SEND OUT errors in plain words (driver gone)', (tester) async {
     final fake = FakeDeliveryFloor(deliveryFloor())
       ..sendOutError = const AgentException('x', statusCode: 409, code: 'driver_not_available');
     await pumpPane(tester, fake: fake);
-    await tester.tap(find.byKey(const ValueKey('send-d-ana')));
+    await tester.tap(sendBar);
     await tester.pumpAndSettle();
     expect(find.textContaining("Ana isn't available"), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  group('highlight', () {
+    Finder glowOn(String id) =>
+        find.descendant(of: find.byKey(ValueKey('row-$id')), matching: find.byKey(const ValueKey('highlight-glow')));
+
+    testWidgets('highlighted rows glow until tapped', (tester) async {
+      final (c, _) = await pumpPane(tester);
+      expect(glowOn('d1'), findsNothing);
+      c.read(deliveryHighlightProvider.notifier).show(['d1']);
+      await tester.pump();
+      expect(glowOn('d1'), findsOneWidget);
+      expect(glowOn('d5'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('row-d1')));
+      await tester.pumpAndSettle();
+      expect(c.read(deliveryHighlightProvider), isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('dragging, moving or sending clears the glow', (tester) async {
+      final (c, _) = await pumpPane(tester);
+      c.read(deliveryHighlightProvider.notifier).show(['d5']);
+      await tester.pump();
+      expect(glowOn('d5'), findsOneWidget);
+      await longDrag(tester, find.byKey(const ValueKey('row-d1')), box('d-joe'));
+      expect(c.read(deliveryHighlightProvider), isEmpty);
+      expect(glowOn('d5'), findsNothing);
+
+      c.read(deliveryHighlightProvider.notifier).show(['d5']);
+      await tester.pump();
+      await tester.tap(sendBar);
+      await tester.pumpAndSettle();
+      expect(c.read(deliveryHighlightProvider), isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the glow pulses with motion on', (tester) async {
+      final (c, _) = await pumpPane(tester, motion: true);
+      c.read(deliveryHighlightProvider.notifier).show(['d1']);
+      await tester.pump();
+      Color edge() =>
+          ((tester.widget<Container>(glowOn('d1')).foregroundDecoration! as BoxDecoration).border! as Border).top.color;
+      final a = edge();
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(edge(), isNot(a));
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('AUTO lava lamp', () {
+    testWidgets('drifts with motion on (one ticker, its own repaint layer)', (tester) async {
+      await pumpPane(tester, motion: true);
+      final glow = find.byKey(const ValueKey('lava-glow'));
+      expect(glow, findsOneWidget);
+      expect(find.ancestor(of: glow, matching: find.byType(RepaintBoundary)), findsWidgets);
+      final painter = tester.widget<CustomPaint>(glow).painter! as LavaPainter;
+      final t0 = painter.progress.value;
+      await tester.pump(const Duration(seconds: 2));
+      expect(painter.progress.value, isNot(t0));
+      expect(tester.binding.hasScheduledFrame, isTrue);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a still glow with motion off', (tester) async {
+      await pumpPane(tester);
+      final painter = tester.widget<CustomPaint>(find.byKey(const ValueKey('lava-glow'))).painter! as LavaPainter;
+      final t0 = painter.progress.value;
+      await tester.pump(const Duration(seconds: 2));
+      expect(painter.progress.value, t0);
+      expect(tester.binding.hasScheduledFrame, isFalse);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('no glow when there is nothing to plan', (tester) async {
+      final s = pooled(deliveryFloor(), 'd-joe', ['d1', 'd2', 'd5']);
+      await pumpPane(tester, fake: FakeDeliveryFloor(s), motion: true);
+      expect(find.text('Unassigned · 0'), findsOneWidget);
+      expect(find.byKey(const ValueKey('lava-glow')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
   testWidgets('Out section: I HAVE RETURNED', (tester) async {
@@ -301,7 +420,7 @@ void main() {
     final off = s.drivers.map((d) => Driver(id: d.id, name: d.name, status: DriverStatus.off)).toList();
     await pumpPane(tester, fake: FakeDeliveryFloor(s.copyWith(drivers: off)));
     expect(find.text('No driver clocked in — clock one in on the Drivers tab.'), findsOneWidget);
-    expect(find.text('SEND OUT'), findsNothing);
+    expect(sendBar, findsNothing);
     expect(find.text('Unassigned · 5'), findsOneWidget, reason: 'pools of unavailable drivers show as unassigned');
     await tester.pumpWidget(const SizedBox());
   });
@@ -393,7 +512,7 @@ void main() {
 
     testWidgets('CLEAR drops it', (tester) async {
       final (c, f) = await withPreview(tester);
-      await tester.tap(find.text('CLEAR'));
+      await tester.tap(find.text('Clear'));
       await tester.pump();
       expect(c.read(autoPreviewProvider), isNull);
       expect(find.byKey(const ValueKey('row-d1')), findsOneWidget);
@@ -401,9 +520,10 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('Send Out on a driver with yellow stops sends them too (with the plan id)', (tester) async {
+    testWidgets('SEND OUT for the next driver with yellow stops sends them too (with the plan id)', (tester) async {
       final (c, f) = await withPreview(tester);
-      await tester.tap(find.byKey(const ValueKey('send-d-ana')));
+      expect(find.text('SEND OUT · ANA · 2 orders'), findsOneWidget, reason: 'pooled + yellow');
+      await tester.tap(sendBar);
       await tester.pumpAndSettle();
       final s = callsOf(f, 'sendOut').single;
       expect(s.driver, 'd-ana');

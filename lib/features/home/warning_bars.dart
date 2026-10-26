@@ -12,6 +12,8 @@ import '../common/info_button.dart';
 import '../diagnose/diagnose_entry.dart';
 import '../diagnose/texts.dart';
 import '../setup/setup_entry.dart';
+import '../../theme/quicc_type.dart';
+import '../../theme/quicc_spacing.dart';
 
 /// How long a printer must be down before its bar shows (a printer being
 /// switched off and on shouldn't flash a warning).
@@ -183,13 +185,13 @@ class _Bar extends StatelessWidget {
       child: Row(
         children: [
           Icon(icon, color: color, size: 26),
-          const SizedBox(width: 12),
+          QuiccSpace.gapMd,
           Expanded(
             child: Text(
               text,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
             ),
           ),
           if (info != null) InfoButton(info!),

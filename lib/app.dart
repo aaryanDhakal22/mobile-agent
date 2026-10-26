@@ -8,6 +8,7 @@ import 'core/device_platform.dart';
 import 'core/providers.dart';
 import 'core/storage.dart';
 import 'features/alert/new_order_alert.dart';
+import 'features/dev/dev_gate.dart';
 import 'features/diagnose/diagnose_entry.dart';
 import 'features/home/home_screen.dart';
 import 'features/setup/setup_controller.dart';
@@ -104,8 +105,10 @@ class _MobileAgentAppState extends ConsumerState<MobileAgentApp> {
       // over order detail screens and dialogs too. A newer Quibase on the
       // agent locks everything below the alarm until installed (UpdateGate):
       // the new-order alert stays on top, so orders can always be accepted.
-      builder: (context, child) =>
-          paired ? pairedOverlays(child ?? const SizedBox.shrink()) : (child ?? const SizedBox.shrink()),
+      // Any touch restarts developer mode's idle clock (it relocks after 15 min).
+      builder: (context, child) => DevActivityListener(
+        child: paired ? pairedOverlays(child ?? const SizedBox.shrink()) : (child ?? const SizedBox.shrink()),
+      ),
     );
   }
 }

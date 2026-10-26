@@ -304,7 +304,7 @@ void main() {
         ),
       );
       expect(find.text('Update not finished'), findsOneWidget);
-      expect(find.text('NEW ORDER').hitTestable(), findsOneWidget);
+      expect(find.text('New order').hitTestable(), findsOneWidget);
       expect(find.text('ACCEPT · 15 MIN').hitTestable(), findsOneWidget);
       expect(find.text('TRY AGAIN').hitTestable(), findsNothing, reason: 'the lock is underneath');
       await tester.pumpWidget(const SizedBox());

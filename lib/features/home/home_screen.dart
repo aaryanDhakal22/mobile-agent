@@ -1,23 +1,34 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/motion.dart';
 import '../../core/providers.dart';
 import '../../core/sse.dart';
-import '../diagnose/diagnose_entry.dart';
-import '../diagnose/guide_session.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_spacing.dart';
+import '../../theme/quicc_type.dart';
 import '../batch/batch_pane.dart';
 import '../deliveries/deliveries_pane.dart';
+import '../dev/config_screen.dart';
+import '../dev/connections_screen.dart';
+import '../dev/dev_gate.dart';
+import '../dev/dev_log.dart';
+import '../dev/logs_screen.dart';
+import '../dev/tests_screen.dart';
+import '../diagnose/diagnose_entry.dart';
+import '../diagnose/guide_session.dart';
 import '../drivers/driver_fab.dart';
 import '../drivers/drivers_pane.dart';
 import '../history/history_pane.dart';
 import '../integration/integration_alerts.dart';
 import '../kitchen/kitchen_pane.dart';
 import '../printers/printers_pane.dart';
-import '../settings/settings_screen.dart';
+import '../settings/store_settings_screen.dart';
+import 'home_nav.dart';
 import 'pi_unreachable_banner.dart';
+import 'q_button.dart';
 import 'quicc_nav_rail.dart';
+import 'rail_modes.dart';
 import 'warning_bars.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -27,18 +38,36 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-/// The rail's sections, top to bottom. Kitchen is the start screen — new
-/// orders ring full-screen over whatever is showing (AlarmHost), so there is
-/// no separate "Arrived" list any more.
-enum HomeSection { kitchen, deliveries, drivers, history, batch, printers, help, settings }
-
+/// The shell: the rail (q + the current mode's destinations) and the pane.
+/// Kitchen is the start screen — new orders ring full-screen over whatever is
+/// showing (AlarmHost). What shows follows [homeNavProvider], so anything
+/// (the driver button, a redirect) can send staff somewhere; the rail
+/// switches to the mode that holds it. Developer screens need the manager
+/// login: asked for while locked, they are ignored.
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  HomeSection _section = HomeSection.kitchen;
+  late HomeDestination _shown;
+
+  /// Where each mode was last, so the q brings you back there.
+  final Map<RailMode, HomeDestination> _last = {
+    RailMode.kitchen: HomeDestination.kitchen,
+    RailMode.store: HomeDestination.batch,
+    RailMode.dev: HomeDestination.connections,
+  };
+
+  RailMode get _mode => railModeOf(_shown);
 
   @override
   void initState() {
     super.initState();
     installGuideHook();
+    final asked = ref.read(homeNavProvider);
+    _shown = _allowed(asked) ? asked : HomeDestination.kitchen;
+    _last[railModeOf(_shown)] = _shown;
+    ref.listenManual(homeNavProvider, (_, next) => _follow(next));
+    ref.listenManual(devGateProvider, (_, unlocked) {
+      if (!unlocked && _mode == RailMode.dev) ref.read(homeNavProvider.notifier).go(_last[RailMode.kitchen]!);
+    });
+    ref.listenManual(floorProvider, (prev, next) => ref.read(devLogProvider.notifier).observeFloor(prev, next));
     // A guide was running when the app stopped (e.g. mid SD-card swap):
     // carry on with it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -46,10 +75,63 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
+  bool _allowed(HomeDestination d) => railModeOf(d) != RailMode.dev || ref.read(devGateProvider);
+
+  void _follow(HomeDestination next) {
+    if (!mounted || next == _shown) return;
+    if (!_allowed(next)) {
+      // Developer screens stay shut while locked: put the request back.
+      ref.read(homeNavProvider.notifier).go(_shown);
+      return;
+    }
+    final from = _mode;
+    setState(() {
+      _shown = next;
+      _last[railModeOf(next)] = next;
+    });
+    if (railModeOf(next) != from) {
+      ref.read(devLogProvider.notifier).add(DevLogKind.app, switch (railModeOf(next)) {
+        RailMode.kitchen => 'Kitchen mode',
+        RailMode.store => 'Store mode',
+        RailMode.dev => 'Developer mode',
+      });
+    }
+  }
+
+  void _go(HomeDestination d) => ref.read(homeNavProvider.notifier).go(d);
+
+  void _onQTap() {
+    switch (_mode) {
+      case RailMode.kitchen:
+        _go(_last[RailMode.store]!);
+      case RailMode.store:
+        _go(_last[RailMode.kitchen]!);
+      case RailMode.dev:
+        _go(_last[RailMode.kitchen]!);
+        ref.read(devGateProvider.notifier).lock();
+    }
+  }
+
+  Future<void> _onQLongPress() async {
+    if (_mode == RailMode.dev) return;
+    if (ref.read(devGateProvider) || await showDevLoginSheet(context)) {
+      if (mounted) _go(_last[RailMode.dev]!);
+    }
+  }
+
+  QuiccNavDestination _dest(HomeDestination d, {int badge = 0}) {
+    final look = lookOf(d);
+    return QuiccNavDestination(icon: look.icon, selectedIcon: look.selectedIcon, label: look.label, badge: badge);
+  }
+
   @override
   Widget build(BuildContext context) {
     final kitchen = ref.watch(floorProvider.select((s) => s.kitchen.length));
-    final ready = ref.watch(floorProvider.select((s) => s.readyDeliveries.length));
+    // Matches the Deliveries pane's "Unassigned · N".
+    final unassigned = ref.watch(floorProvider.select((s) => s.unassignedDeliveries.length));
+    final motion = Motion.of(context, ref);
+    final mode = _mode;
+    final list = kRailDestinations[mode]!;
 
     return Scaffold(
       // Don't shrink the body for the keyboard — the rail's evenly spread
@@ -59,42 +141,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: Row(
           children: [
             QuiccNavRail(
-              selectedIndex: _section.index,
-              onDestinationSelected: (i) => setState(() => _section = HomeSection.values[i]),
+              modeKey: mode,
+              motion: motion,
+              selectedIndex: list.indexOf(_shown),
+              onDestinationSelected: (i) => _go(list[i]),
               header: Column(
                 children: [
-                  _ThemeToggleLogo(onTap: () => ref.read(themeModeProvider.notifier).toggle()),
-                  const SizedBox(height: 10),
+                  QButton(mode: mode, motion: motion, onTap: _onQTap, onLongPress: _onQLongPress),
+                  QuiccSpace.gapMd,
                   const _ConnectionDot(),
                 ],
               ),
               destinations: [
-                QuiccNavDestination(
-                  icon: Icons.soup_kitchen_outlined,
-                  selectedIcon: Icons.soup_kitchen,
-                  label: 'Kitchen',
-                  badge: kitchen,
-                ),
-                QuiccNavDestination(
-                  icon: Icons.delivery_dining_outlined,
-                  selectedIcon: Icons.delivery_dining,
-                  label: 'Deliveries',
-                  badge: ready,
-                ),
-                const QuiccNavDestination(icon: Icons.groups_outlined, selectedIcon: Icons.groups, label: 'Drivers'),
-                const QuiccNavDestination(
-                  icon: Icons.receipt_long_outlined,
-                  selectedIcon: Icons.receipt_long,
-                  label: 'History',
-                ),
-                const QuiccNavDestination(icon: Icons.layers_outlined, selectedIcon: Icons.layers, label: 'Batch'),
-                const QuiccNavDestination(icon: Icons.print_outlined, selectedIcon: Icons.print, label: 'Printers'),
-                const QuiccNavDestination(icon: Icons.help_outline, selectedIcon: Icons.help, label: 'Help'),
-                const QuiccNavDestination(
-                  icon: Icons.settings_outlined,
-                  selectedIcon: Icons.settings,
-                  label: 'Settings',
-                ),
+                for (final d in list)
+                  _dest(
+                    d,
+                    badge: switch (d) {
+                      HomeDestination.kitchen => kitchen,
+                      HomeDestination.deliveries => unassigned,
+                      _ => 0,
+                    },
+                  ),
               ],
             ),
             const VerticalDivider(width: 1),
@@ -109,8 +176,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       children: [
                         Positioned.fill(
                           child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 260),
-                            reverseDuration: const Duration(milliseconds: 140),
+                            duration: motion.full ? motion.scale(const Duration(milliseconds: 260)) : motion.fade,
+                            reverseDuration: motion.full
+                                ? motion.scale(const Duration(milliseconds: 140))
+                                : motion.fade,
                             switchInCurve: Curves.easeOutCubic,
                             switchOutCurve: Curves.easeInCubic,
                             layoutBuilder: (current, previous) => Stack(
@@ -120,16 +189,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             ),
                             transitionBuilder: (child, anim) => FadeTransition(
                               opacity: anim,
-                              child: SlideTransition(
-                                position: Tween<Offset>(begin: const Offset(0, 0.015), end: Offset.zero).animate(anim),
-                                child: child,
-                              ),
+                              child: motion.full
+                                  ? SlideTransition(
+                                      position: Tween<Offset>(
+                                        begin: const Offset(0, 0.015),
+                                        end: Offset.zero,
+                                      ).animate(anim),
+                                      child: child,
+                                    )
+                                  : child,
                             ),
-                            child: KeyedSubtree(key: ValueKey<HomeSection>(_section), child: _buildSection(_section)),
+                            child: KeyedSubtree(key: ValueKey<HomeDestination>(_shown), child: _pane(_shown)),
                           ),
                         ),
                         // Hub info / warnings, top-right over every pane.
-                        const Positioned(top: 12, right: 16, child: IntegrationToastHost()),
+                        const Positioned(top: QuiccSpace.md, right: QuiccSpace.lg, child: IntegrationToastHost()),
                       ],
                     ),
                   ),
@@ -142,20 +216,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildSection(HomeSection s) {
-    final pane = switch (s) {
-      HomeSection.kitchen => const KitchenPane(),
-      HomeSection.deliveries => const DeliveriesPane(),
-      HomeSection.drivers => const DriversPane(),
-      HomeSection.history => const HistoryPane(),
-      HomeSection.batch => const BatchPane(),
-      HomeSection.printers => const PrintersPane(),
-      HomeSection.help => const HelpPane(),
-      HomeSection.settings => const SettingsScreen(),
+  Widget _pane(HomeDestination d) {
+    final pane = switch (d) {
+      HomeDestination.kitchen => const KitchenPane(),
+      HomeDestination.deliveries => const DeliveriesPane(),
+      HomeDestination.drivers => const DriversPane(),
+      HomeDestination.history => const HistoryPane(),
+      HomeDestination.batch => const BatchPane(),
+      HomeDestination.printers => const PrintersPane(),
+      HomeDestination.help => const HelpPane(),
+      HomeDestination.settings => const StoreSettingsScreen(),
+      HomeDestination.connections => const ConnectionsScreen(),
+      HomeDestination.logs => const DevLogsScreen(),
+      HomeDestination.tests => const DevTestsScreen(),
+      HomeDestination.config => const DevConfigScreen(),
     };
-    if (s == HomeSection.settings || s == HomeSection.help) return pane;
-    // The driver button floats bottom-right over every pane but Help and
-    // Settings.
+    if (railModeOf(d) != RailMode.kitchen) return pane;
+    // The driver button floats bottom-right over the kitchen-mode panes.
     return Stack(
       children: [
         Positioned.fill(child: pane),
@@ -173,9 +250,9 @@ class _ConnectionDot extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final st = ref.watch(floorProvider.select((s) => s.connection));
     final (color, label) = switch (st) {
-      SseStatus.connected => (QuiccColors.statusPaid, 'LIVE'),
-      SseStatus.connecting => (QuiccColors.statusFiring, 'SYNC'),
-      SseStatus.disconnected => (QuiccColors.statusVoided, 'OFF'),
+      SseStatus.connected => (QuiccColors.statusPaid, 'Live'),
+      SseStatus.connecting => (QuiccColors.statusFiring, 'Syncing'),
+      SseStatus.disconnected => (QuiccColors.statusVoided, 'Offline'),
     };
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -185,73 +262,12 @@ class _ConnectionDot extends ConsumerWidget {
           height: 9,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(width: 5),
+        QuiccSpace.gapXs,
         Text(
           label,
-          style: TextStyle(fontSize: 10, letterSpacing: 1, color: color, fontWeight: FontWeight.w700),
+          style: QuiccType.text(QuiccType.caption, weight: FontWeight.w700, color: color),
         ),
       ],
-    );
-  }
-}
-
-/// The `q` logo tile that doubles as the theme toggle.
-class _ThemeToggleLogo extends StatefulWidget {
-  final VoidCallback onTap;
-  const _ThemeToggleLogo({required this.onTap});
-
-  @override
-  State<_ThemeToggleLogo> createState() => _ThemeToggleLogoState();
-}
-
-class _ThemeToggleLogoState extends State<_ThemeToggleLogo> with SingleTickerProviderStateMixin {
-  late final AnimationController _press;
-
-  @override
-  void initState() {
-    super.initState();
-    _press = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 130),
-      reverseDuration: const Duration(milliseconds: 200),
-    );
-  }
-
-  @override
-  void dispose() {
-    _press.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: 'Toggle theme',
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: (_) => _press.forward(),
-        onTapUp: (_) {
-          _press.reverse();
-          HapticFeedback.selectionClick();
-          widget.onTap();
-        },
-        onTapCancel: () => _press.reverse(),
-        child: AnimatedBuilder(
-          animation: _press,
-          builder: (_, child) => Transform.scale(scale: 1.0 - (_press.value * 0.08), child: child),
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(color: QuiccColors.brand400, borderRadius: BorderRadius.circular(QuiccRadius.md)),
-            alignment: Alignment.center,
-            child: const Text(
-              'q',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: QuiccColors.brand900, height: 1),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
