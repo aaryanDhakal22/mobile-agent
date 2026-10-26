@@ -58,6 +58,14 @@ object InstallChannel {
                     )
                     result.success(null)
                 }
+                "canReopen" -> result.success(Settings.canDrawOverlays(app))
+                "openReopenSettings" -> {
+                    app.startActivity(
+                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${app.packageName}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                    result.success(null)
+                }
                 "installer" -> result.success(installerOf(app))
                 "canInstallSilently" -> result.success(Build.VERSION.SDK_INT >= 31 && installerOf(app) == app.packageName)
                 "install" -> {

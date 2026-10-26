@@ -154,8 +154,13 @@ yet, the prompt says **ALLOW INSTALLS** (switch on, come back). A failed
 install asks again; after two failed sessions INSTALL NOW uses Android's own
 install screen. A release withdrawn on the agent is dropped at the next
 check; older APKs in the cache are deleted when a new one is downloaded.
-After the install Quibase comes back by itself (`RestartReceiver`, below).
-(≤ 1.6.0 locked behind "Updating Quibase" until INSTALL was tapped.)
+After the install the ring service comes back by itself (`RestartReceiver`,
+below); the **screen** comes back too only when Quibase may "display over
+other apps" — Android's rule for opening a screen from the background — so
+Updates has **Reopen after an update · TURN ON** (also used after a reboot).
+Google Play Protect may ask to scan the sideloaded app on an install ("Install
+without scanning" keeps it private). (≤ 1.6.0 locked behind "Updating Quibase"
+until INSTALL was tapped.)
 
 **Driver name flash.** When a driver is sent out (from this tablet or anywhere
 else — SSE `drivers.dispatched`) the driver's name fills the screen with the

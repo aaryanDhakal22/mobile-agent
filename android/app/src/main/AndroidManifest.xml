@@ -7,6 +7,10 @@
     <!-- Self-update: the app installs the APK its agent serves, silently
          once Quibase is its own installer (InstallChannel.kt). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- "Display over other apps", asked for on Store → Updates: the only way
+         Android lets RestartReceiver bring the screen back after a
+         self-update or a reboot (a background activity start). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Ring anywhere: RingService keeps the connection to the Pi alive in the
          background, and a full-screen notification wakes the screen for a new
          order (RingService.kt). -->

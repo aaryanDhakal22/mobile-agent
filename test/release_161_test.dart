@@ -55,6 +55,10 @@ class FakeUpdatePlatform extends UpdatePlatform {
   @override
   Future<bool> canInstallSilently() async => silent;
   @override
+  Future<bool> canReopen() async => false;
+  @override
+  Future<void> openReopenSettings() async => calls.add('reopen-settings');
+  @override
   Future<void> installSession(String path) async => calls.add('session:${path.split('/').last}');
   @override
   Future<bool> confirm() async {
@@ -353,6 +357,7 @@ void main() {
       await tester.pump();
       expect(find.text('1.6.1 downloaded — installs by itself after Close batch'), findsOneWidget);
       expect(find.text('No tap needed'), findsOneWidget);
+      expect(find.byKey(const ValueKey('update-reopen')), findsOneWidget, reason: 'reopen is off');
       await tester.tap(find.byKey(const ValueKey('update-install-now')));
       await tester.pump();
       expect(platform.calls, ['session:quibase-20.apk']);

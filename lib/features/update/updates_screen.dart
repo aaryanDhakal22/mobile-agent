@@ -22,7 +22,9 @@ const kUpdatesInfo = InfoText(
       'be accepted.\n\n'
       'Android asks for one tap the first time Quibase installs itself; after that, updates need no '
       'tap. If one ever needs a tap, Quibase asks "Install now?" when the store is quiet.\n\n'
-      'INSTALL NOW installs a downloaded version straight away. CHECK NOW asks the Pi what it has.',
+      'INSTALL NOW installs a downloaded version straight away. CHECK NOW asks the Pi what it has.\n\n'
+      'Reopen after an update: Android only lets Quibase bring its screen back by itself when it may '
+      '"display over other apps". TURN ON opens that switch: turn it on for Quibase and come back.',
 );
 
 /// One line for where the update stands.
@@ -74,6 +76,23 @@ class _UpdateStatusCardState extends ConsumerState<UpdateStatusCard> {
           bad: u.phase == UpdatePhase.failed,
         ),
         KeyValueRow('Install', u.silent ? 'No tap needed' : 'The next update asks for one tap (Android)'),
+        Row(
+          children: [
+            Expanded(
+              child: KeyValueRow(
+                'Reopen after an update',
+                u.reopen ? 'On' : 'Off — the tablet shows its home screen after an update',
+                warn: !u.reopen,
+              ),
+            ),
+            if (!u.reopen)
+              TextButton(
+                key: const ValueKey('update-reopen'),
+                onPressed: ctl.turnOnReopen,
+                child: const Text('TURN ON'),
+              ),
+          ],
+        ),
         if (u.phase == UpdatePhase.downloading && u.progress != null) ...[
           QuiccSpace.gapSm,
           LinearProgressIndicator(value: u.progress, minHeight: 6),

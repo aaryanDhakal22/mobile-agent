@@ -82,6 +82,18 @@ class UpdatePlatform {
     }
   }
 
+  /// Android lets Quibase reopen its screen after an update or a reboot
+  /// ("display over other apps").
+  Future<bool> canReopen() async {
+    try {
+      return (await _ch.invokeMethod<bool>('canReopen')) ?? false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  Future<void> openReopenSettings() => _ch.invokeMethod('openReopenSettings');
+
   /// The silent path: a PackageInstaller session (result on [results]).
   Future<void> installSession(String path) => _ch.invokeMethod('installSession', {'path': path});
 
@@ -141,6 +153,9 @@ class UpdateState {
 
   /// Quibase is its own installer, so the next install needs no tap.
   final bool silent;
+
+  /// Quibase reopens its screen by itself after an update.
+  final bool reopen;
   final DateTime? lastCheck;
 
   const UpdateState({
@@ -151,6 +166,7 @@ class UpdateState {
     this.apkPath,
     this.snoozedUntil,
     this.silent = false,
+    this.reopen = false,
     this.lastCheck,
   });
 
@@ -169,6 +185,7 @@ class UpdateState {
     String? apkPath,
     DateTime? snoozedUntil,
     bool? silent,
+    bool? reopen,
     DateTime? lastCheck,
     bool clearError = false,
     bool clearSnooze = false,
@@ -180,6 +197,7 @@ class UpdateState {
     apkPath: apkPath ?? this.apkPath,
     snoozedUntil: clearSnooze ? null : (snoozedUntil ?? this.snoozedUntil),
     silent: silent ?? this.silent,
+    reopen: reopen ?? this.reopen,
     lastCheck: lastCheck ?? this.lastCheck,
   );
 }
@@ -237,8 +255,11 @@ class Updater extends Notifier<UpdateState> {
 
   LocalLog get _log => ref.read(localLogProvider);
 
+  /// Opens Android's "display over other apps" switch for Quibase.
+  Future<void> turnOnReopen() => ref.read(updatePlatformProvider).openReopenSettings();
+
   void _onResume() {
-    // Back from Android's install screen or the "allow installs" switch.
+    // Back from Android's install screen or one of the permission switches.
     if (state.phase == UpdatePhase.needPermission) {
       unawaited(installNow());
     } else {
@@ -258,18 +279,25 @@ class Updater extends Notifier<UpdateState> {
       if (installed == null) return;
       final rel = await client.appLatest();
       final silent = await platform.canInstallSilently();
-      state = state.copyWith(silent: silent, lastCheck: timeNow());
+      final reopen = await platform.canReopen();
+      state = state.copyWith(silent: silent, reopen: reopen, lastCheck: timeNow());
       if (!needsUpdate(installed, rel)) {
         if (state.target != null) {
           _log.add('update', 'release withdrawn on the Pi');
-          state = UpdateState(silent: silent, lastCheck: state.lastCheck);
+          state = UpdateState(silent: silent, reopen: reopen, lastCheck: state.lastCheck);
         }
         return;
       }
       if (state.target?.versionCode == rel!.versionCode && state.phase != UpdatePhase.failed) return;
       if (state.target?.versionCode != rel.versionCode) {
         _sessionFailures = 0;
-        state = UpdateState(target: rel, phase: UpdatePhase.downloading, silent: silent, lastCheck: state.lastCheck);
+        state = UpdateState(
+          target: rel,
+          phase: UpdatePhase.downloading,
+          silent: silent,
+          reopen: reopen,
+          lastCheck: state.lastCheck,
+        );
       }
       if (state.apkPath == null) await _download();
     } catch (_) {
