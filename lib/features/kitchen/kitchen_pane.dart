@@ -1,14 +1,18 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
+import '../../core/motion.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
+import '../deliveries/lava_glow.dart';
 import '../order_detail/order_detail_screen.dart';
 import '../arrived/time_picker.dart';
 import 'resend_kitchen.dart';
@@ -49,10 +53,13 @@ class KitchenPane extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final kitchen = ref.watch(floorProvider.select((s) => s.kitchenByUrgency));
+    var kitchen = ref.watch(floorProvider.select((s) => s.kitchenByUrgency));
     final later = ref.watch(floorProvider.select((s) => s.later));
     final greenTill = ref.watch(floorProvider.select((s) => s.floor?.greenTillMinutes ?? kDefaultGreenTillMinutes));
     final wave = ref.watch(floorProvider.select((s) => s.settings.features.paidWave));
+    // 1.7.1: customers waiting on a paid ticket go first (most urgent order
+    // kept within each part).
+    if (wave) kitchen = [...kitchen.where((o) => o.paidNotReady), ...kitchen.where((o) => !o.paidNotReady)];
     return RefreshIndicator(
       onRefresh: () => ref.read(floorProvider.notifier).refresh(),
       child: LayoutBuilder(
@@ -254,72 +261,59 @@ class _LaterTile extends StatelessWidget {
   }
 }
 
-/// The paid-not-ready wave (1.5.0): a slow, soft green sweep across a ticket
-/// body. Static tint when the platform asks for no animations.
-class PaidWave extends StatefulWidget {
+/// "Customer waiting" (1.7.1, replaces the 1.5.0 green wave): a paid ticket
+/// that isn't ready gets a red lava bar, a red halo breathing round the
+/// card and "CUSTOMER WAITING · N min" — brighter and faster after
+/// [kWaitingEscalate]. Motion off: a solid red bar and a thick red outline.
+const Duration kWaitingEscalate = Duration(minutes: 5);
+
+/// One lava loop at speed 1 (the halo breathes [_breaths] times per loop:
+/// ~1 s), and the faster escalated loop (~0.6 s breaths).
+const Duration kWaitingLava = Duration(seconds: 12);
+const Duration kWaitingLavaHot = Duration(seconds: 6);
+const int _breaths = 12, _breathsHot = 10;
+
+/// The waiting bar's reds: the base, and the blobs drifting over it.
+const Color kWaitingRed = Color(0xFFB91C1C);
+const Color kWaitingRedHot = Color(0xFFDC2626);
+const Color _blobRed = Color(0xFFF87171);
+const Color _blobRedHot = Color(0xFFFFA28A);
+
+/// The red halo round a waiting ticket: breathes outward, never below half.
+class _WaitingHalo extends AnimatedWidget {
+  final bool hot;
+  final BorderRadius radius;
   final Widget child;
-  final BorderRadius borderRadius;
-  const PaidWave({super.key, required this.child, this.borderRadius = BorderRadius.zero});
-
-  /// One sweep, left to right.
-  static const Duration period = Duration(milliseconds: 3600);
-
-  @override
-  State<PaidWave> createState() => _PaidWaveState();
-}
-
-class _PaidWaveState extends State<PaidWave> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: PaidWave.period)..repeat();
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
+  const _WaitingHalo({
+    super.key,
+    required Animation<double> animation,
+    required this.hot,
+    required this.radius,
+    required this.child,
+  }) : super(listenable: animation);
 
   @override
   Widget build(BuildContext context) {
-    final still = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-    final band = QuiccColors.statusPaid.withValues(alpha: 0.30);
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: IgnorePointer(
-            child: ClipRRect(
-              borderRadius: widget.borderRadius,
-              child: still
-                  ? ColoredBox(color: QuiccColors.statusPaid.withValues(alpha: 0.10))
-                  : AnimatedBuilder(
-                      animation: _c,
-                      builder: (context, _) => DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
-                            colors: [band.withValues(alpha: 0), band, band.withValues(alpha: 0)],
-                            stops: const [0.3, 0.5, 0.7],
-                            transform: _Slide(Curves.easeInOut.transform(_c.value) * 2 - 1),
-                          ),
-                        ),
-                      ),
-                    ),
-            ),
+    final t = (listenable as Animation<double>).value;
+    final breath = 0.5 + 0.5 * (0.5 + 0.5 * math.sin(2 * math.pi * (hot ? _breathsHot : _breaths) * t));
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: [
+          BoxShadow(
+            color: (hot ? kWaitingRedHot : kWaitingRed).withValues(alpha: (hot ? 0.95 : 0.75) * breath),
+            blurRadius: 6 + (hot ? 16 : 10) * breath,
+            spreadRadius: (hot ? 3 : 1.5) * breath,
           ),
-        ),
-        widget.child,
-      ],
+        ],
+      ),
+      child: child,
     );
   }
 }
 
-/// Moves a gradient sideways by [t] × its width (−1 … 1).
-class _Slide extends GradientTransform {
-  final double t;
-  const _Slide(this.t);
-
-  @override
-  Matrix4? transform(Rect bounds, {TextDirection? textDirection}) => Matrix4.translationValues(bounds.width * t, 0, 0);
-}
+/// What the bar shows for a waiting ticket.
+typedef _Waiting = ({int minutes, bool hot, Animation<double>? lava});
 
 /// The kitchen ticket's paper look: a white body with dark text in either
 /// theme (the urgency colour lives in the header bar).
@@ -356,7 +350,8 @@ const double kTicketButtonHeight = 52;
 
 /// One ticket on the Kitchen board: a coloured header bar (green → red by
 /// time since arrival) with the number, then a white body. A paid ticket
-/// that isn't ready yet gets the slow wave ([paidWave] = the feature switch).
+/// that isn't ready yet shows "customer waiting" — the red lava bar and
+/// halo ([paidWave] = the feature switch; see [kWaitingEscalate]).
 class KitchenCard extends ConsumerStatefulWidget {
   final StoredOrder order;
   final int greenTill;
@@ -367,10 +362,36 @@ class KitchenCard extends ConsumerStatefulWidget {
   ConsumerState<KitchenCard> createState() => _KitchenCardState();
 }
 
-class _KitchenCardState extends ConsumerState<KitchenCard> {
+class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProviderStateMixin {
   bool _busy = false;
   bool _reprinting = false;
   bool _resending = false;
+
+  /// The one ticker of a waiting ticket: drives the lava and the halo (muted
+  /// offstage by TickerMode; stopped when not waiting or Motion is off).
+  late final AnimationController _wave = AnimationController(vsync: this, duration: kWaitingLava);
+
+  @override
+  void dispose() {
+    _wave.dispose();
+    super.dispose();
+  }
+
+  void _syncWave(bool animate, Duration period) {
+    if (!animate) {
+      if (_wave.isAnimating) _wave.stop();
+      return;
+    }
+    if (_wave.duration != period) {
+      _wave.duration = period;
+      if (_wave.isAnimating) _wave.repeat();
+    }
+    // From a frame where the blobs are well spread: full from the start.
+    if (!_wave.isAnimating) {
+      if (_wave.value == 0) _wave.value = 0.18;
+      _wave.repeat();
+    }
+  }
 
   Future<void> _ready() async {
     setState(() => _busy = true);
@@ -434,6 +455,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
     final o = so.order;
     final arrived = so.status.sentAt ?? so.status.arrivalDate ?? o.receivedAt ?? so.status.acceptedAt;
     final wave = widget.paidWave && so.paidNotReady;
+    final motion = Motion.of(context, ref);
     final radius = BorderRadius.circular(QuiccRadius.md);
     return Ticker(
       interval: const Duration(seconds: 5),
@@ -442,6 +464,14 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
         final raw = arrived == null ? Duration.zero : now.difference(arrived);
         final since = raw.isNegative ? Duration.zero : raw;
         final tone = lateColor(since, widget.greenTill);
+        final waitStart = so.waitingSince;
+        final waitedRaw = waitStart == null ? Duration.zero : now.difference(waitStart);
+        final waited = waitedRaw.isNegative ? Duration.zero : waitedRaw;
+        final hot = wave && waited >= kWaitingEscalate;
+        _syncWave(wave && motion.full, motion.scale(hot ? kWaitingLavaHot : kWaitingLava));
+        final _Waiting? waiting = wave
+            ? (minutes: waited.inMinutes, hot: hot, lava: motion.full ? _wave : null)
+            : null;
         final body = Padding(
           padding: const EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.md, QuiccSpace.lg, QuiccSpace.lg),
           child: Column(
@@ -513,14 +543,18 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
             ],
           ),
         );
-        return Theme(
+        final outline = !wave
+            ? Border.all(color: tone, width: 2)
+            // Motion off: the thick red outline stands in for the halo.
+            : Border.all(color: hot ? kWaitingRedHot : kWaitingRed, width: motion.full ? 2 : 4);
+        final card = Theme(
           data: paperTheme(Theme.of(context)),
           child: Container(
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: radius,
-              border: Border.all(color: tone, width: 2),
+              border: outline,
             ),
             child: Material(
               type: MaterialType.transparency,
@@ -536,14 +570,17 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _CardBar(order: so, tone: tone),
-                    if (wave) PaidWave(key: const ValueKey('paid-wave'), child: body) else body,
+                    _CardBar(order: so, tone: tone, waiting: waiting),
+                    body,
                   ],
                 ),
               ),
             ),
           ),
         );
+        if (!wave) return card;
+        if (!motion.full) return KeyedSubtree(key: const ValueKey('paid-wave'), child: card);
+        return _WaitingHalo(key: const ValueKey('paid-wave'), animation: _wave, hot: hot, radius: radius, child: card);
       },
     );
   }
@@ -554,74 +591,123 @@ class _KitchenCardState extends ConsumerState<KitchenCard> {
 class _CardBar extends StatelessWidget {
   final StoredOrder order;
   final Color tone;
-  const _CardBar({required this.order, required this.tone});
+
+  /// A paid ticket that isn't ready (1.7.1): red lava (or solid red with
+  /// Motion off) and "CUSTOMER WAITING · N min".
+  final _Waiting? waiting;
+  const _CardBar({required this.order, required this.tone, this.waiting});
 
   @override
   Widget build(BuildContext context) {
     final so = order;
-    const ink = QuiccColors.brand900;
+    final w = waiting;
+    final ink = w == null ? QuiccColors.brand900 : Colors.white;
     final posCheck = so.status.posCheckNumber;
-    return Container(
-      key: const ValueKey('card-bar'),
-      color: tone,
-      padding: const EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.sm, QuiccSpace.xs, QuiccSpace.sm),
-      // Each side shrinks rather than overflow on a narrow ticket.
-      child: Row(
-        children: [
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      so.displayNumber,
-                      style: QuiccType.number(QuiccType.display, weight: FontWeight.w700, color: ink, height: 1),
-                    ),
-                    if (so.isPos) ...[QuiccSpace.gapSm, const PosTag(color: ink)],
-                    if (!so.isPos && posCheck != null) ...[
-                      QuiccSpace.gapSm,
-                      Text(
-                        'POS #$posCheck',
-                        style: QuiccType.number(
-                          QuiccType.label,
-                          weight: FontWeight.w700,
-                          color: ink.withValues(alpha: 0.75),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-          QuiccSpace.gapSm,
-          // Pinned right (not sharing the free space with the number), and
-          // shrinks on a very narrow ticket.
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: kTicketWidth * 0.55),
+    // Each side shrinks rather than overflow on a narrow ticket.
+    final row = Row(
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
             child: FittedBox(
               fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
+              alignment: Alignment.centerLeft,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (so.status.paid) ...[const PaidBadge(), QuiccSpace.gapSm],
-                  FulfillmentTag(so.order.fulfillment.type, size: QuiccType.label, color: ink),
+                  Text(
+                    so.displayNumber,
+                    style: QuiccType.number(QuiccType.display, weight: FontWeight.w700, color: ink, height: 1),
+                  ),
+                  if (so.isPos) ...[QuiccSpace.gapSm, PosTag(color: ink)],
+                  if (!so.isPos && posCheck != null) ...[
+                    QuiccSpace.gapSm,
+                    Text(
+                      'POS #$posCheck',
+                      style: QuiccType.number(
+                        QuiccType.label,
+                        weight: FontWeight.w700,
+                        color: ink.withValues(alpha: 0.75),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
-          // Tap anywhere on the ticket → the order details.
-          Icon(
-            Icons.chevron_right,
-            key: const ValueKey('ticket-details'),
-            size: 32,
-            color: ink.withValues(alpha: 0.7),
-            semanticLabel: 'Open order details',
+        ),
+        QuiccSpace.gapSm,
+        // Pinned right (not sharing the free space with the number), and
+        // shrinks on a very narrow ticket.
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: kTicketWidth * 0.55),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (so.status.paid) ...[const PaidBadge(), QuiccSpace.gapSm],
+                FulfillmentTag(so.order.fulfillment.type, size: QuiccType.label, color: ink),
+              ],
+            ),
+          ),
+        ),
+        // Tap anywhere on the ticket → the order details.
+        Icon(
+          Icons.chevron_right,
+          key: const ValueKey('ticket-details'),
+          size: 32,
+          color: ink.withValues(alpha: 0.7),
+          semanticLabel: 'Open order details',
+        ),
+      ],
+    );
+    const pad = EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.sm, QuiccSpace.xs, QuiccSpace.sm);
+    if (w == null) return Container(key: const ValueKey('card-bar'), color: tone, padding: pad, child: row);
+    final lava = w.lava;
+    return Container(
+      key: const ValueKey('card-bar'),
+      color: w.hot ? kWaitingRedHot : kWaitingRed,
+      child: Stack(
+        children: [
+          if (lava != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    key: const ValueKey('waiting-lava'),
+                    painter: LavaPainter(
+                      progress: lava,
+                      color: w.hot ? _blobRedHot : _blobRed,
+                      bleed: const EdgeInsets.symmetric(horizontal: 56, vertical: QuiccSpace.md),
+                      blobScale: 1.8,
+                      maxOpacity: w.hot ? 0.95 : 0.8,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Padding(
+            padding: pad,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                row,
+                Text(
+                  'CUSTOMER WAITING · ${w.minutes} min',
+                  key: const ValueKey('customer-waiting'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: QuiccType.text(
+                    QuiccType.body,
+                    weight: FontWeight.w700,
+                    color: Colors.white,
+                  ).copyWith(letterSpacing: 0.6),
+                ),
+              ],
+            ),
           ),
         ],
       ),

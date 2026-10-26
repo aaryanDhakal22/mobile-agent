@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/delivery_models.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../theme/quicc_colors.dart';
@@ -86,13 +87,15 @@ class DeliveryDraggable extends StatelessWidget {
 /// tip, CASH $x / PAID and how long since it was placed (amber near the
 /// target, red past it). Cooking ones are greyed with "ready in ~m".
 /// [highlight] = a soft pulsing yellow outline (someone asked you to look at
-/// it, e.g. the driver button found it near the next run).
+/// it, e.g. the driver button found it near the next run). [heldFor] (2.2.1)
+/// = AUTO kept it for a driver on his way back: "Held for Abdul · ~6 min".
 class UnassignedRow extends StatelessWidget {
   final StoredOrder order;
   final bool selectMode;
   final bool selected;
   final bool highlight;
   final int targetMinutes;
+  final HeldFor? heldFor;
   final VoidCallback onTap;
   const UnassignedRow({
     super.key,
@@ -101,6 +104,7 @@ class UnassignedRow extends StatelessWidget {
     required this.selected,
     this.highlight = false,
     required this.targetMinutes,
+    this.heldFor,
     required this.onTap,
   });
 
@@ -188,6 +192,7 @@ class UnassignedRow extends StatelessWidget {
                               ).copyWith(fontStyle: FontStyle.italic),
                             ),
                           ...geoTags(g),
+                          if (heldFor != null) HeldForTag(heldFor: heldFor!, key: ValueKey('held-${order.id}')),
                         ],
                       ),
                     ],
@@ -233,6 +238,22 @@ class UnassignedRow extends StatelessWidget {
       child: HighlightPulse(active: highlight, child: card),
     );
   }
+}
+
+/// "Held for Abdul · ~6 min" (2.2.1): AUTO kept this delivery for a driver
+/// on his way back — it is the other way from the runs going out now.
+class HeldForTag extends StatelessWidget {
+  final HeldFor heldFor;
+  const HeldForTag({super.key, required this.heldFor});
+
+  @override
+  Widget build(BuildContext context) => Ticker(
+    interval: const Duration(seconds: 30),
+    builder: (context, now) {
+      final back = heldFor.backIn(now);
+      return GeoTag('Held for ${heldFor.name}${back == null ? '' : ' · $back'}', color: QuiccColors.statusOpen);
+    },
+  );
 }
 
 /// "ready in ~4 min" for a cooking delivery.
@@ -386,6 +407,41 @@ class PoolStopChip extends StatelessWidget {
   }
 }
 
+/// One stop of a run that is out (1.7.1): a pin in the driver's map colour
+/// and the street ("531 Stevenson Ln"), or the kitchen # without an address.
+/// [onTap] null = not tappable (the Map legend).
+class StopAddressLine extends StatelessWidget {
+  final StoredOrder order;
+  final Color color;
+  final VoidCallback? onTap;
+  const StopAddressLine({super.key, required this.order, required this.color, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final a = order.order.fulfillment.address;
+    final text = a == null || a.isEmpty ? orderNumber(order) : streetOf(order);
+    final line = Padding(
+      padding: const EdgeInsets.symmetric(vertical: QuiccSpace.xs),
+      child: Row(
+        children: [
+          Icon(Icons.location_on, size: 20, color: color),
+          QuiccSpace.gapXs,
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: QuiccType.text(QuiccType.label, weight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onTap == null) return line;
+    return InkWell(borderRadius: BorderRadius.circular(QuiccRadius.sm), onTap: onTap, child: line);
+  }
+}
+
 /// Slides an AUTO suggestion in from the left (once per preview) — a cheap
 /// translate + fade, smooth on a low-end tablet.
 class SlideIn extends StatelessWidget {
@@ -425,12 +481,14 @@ class NextBadge extends StatelessWidget {
   );
 }
 
-/// A driver out on a run: name, time out, their kitchen numbers (tap = the
-/// order) and I HAVE RETURNED.
+/// A driver out on a run: name, time out, his stops in stop order — a pin in
+/// his map colour and the street (1.7.1; tap = the order) — and I HAVE
+/// RETURNED.
 class OutRunCard extends StatelessWidget {
   final String name;
   final DateTime? outAt;
   final List<StoredOrder> orders;
+  final Color color;
   final bool busy;
   final VoidCallback? onReturned;
   final void Function(StoredOrder) onOpen;
@@ -439,6 +497,7 @@ class OutRunCard extends StatelessWidget {
     required this.name,
     required this.outAt,
     required this.orders,
+    this.color = QuiccColors.brand400,
     required this.busy,
     required this.onReturned,
     required this.onOpen,
@@ -491,17 +550,8 @@ class OutRunCard extends StatelessWidget {
                   if (orders.isEmpty)
                     Text('No orders on this run.', style: QuiccType.text(QuiccType.label, color: context.palette.textMuted))
                   else
-                    Wrap(
-                      spacing: QuiccSpace.sm,
-                      runSpacing: QuiccSpace.sm,
-                      children: [
-                        for (final o in orders)
-                          ActionChip(
-                            label: Text(o.displayNumber, style: QuiccType.number(QuiccType.label, weight: FontWeight.w700)),
-                            onPressed: () => onOpen(o),
-                          ),
-                      ],
-                    ),
+                    for (final o in orders)
+                      StopAddressLine(key: ValueKey('out-stop-${o.id}'), order: o, color: color, onTap: () => onOpen(o)),
                 ],
               ),
             ),

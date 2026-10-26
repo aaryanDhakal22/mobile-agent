@@ -215,7 +215,25 @@ class FloorController extends Notifier<FloorState> {
     final up = applySseEvent(state, ev);
     _set(up.state);
     if (up.refetch) unawaited(refresh());
+    // 2.2.1: a one-off signal, not floor state (a refresh replays frames).
+    if (ev.event == 'deliveries.auto_assigned') {
+      final a = AutoAssignment.fromJson(ev.json);
+      if (a != null) _autoAssigned(a);
+    }
   }
+
+  /// An SSE frame, as the stream delivers it (tests).
+  @visibleForTesting
+  void handleEvent(SseEvent ev) => _onEvent(ev);
+
+  /// The Pi pooled deliveries for the NEXT driver: the driver button pops
+  /// open on the NEXT card ([fobPopProvider]).
+  void _autoAssigned(AutoAssignment a) {
+    ref.read(fobPopProvider.notifier).state = a;
+  }
+
+  /// The soft chime once (the ring bridge plays it).
+  void chime() => _set(state.copyWith(chimes: state.chimes + 1));
 
   /// Refetches floor, current batch, arrived queue and drivers. Frames that
   /// arrive mid-fetch are replayed on top so a slow fetch can't roll them back.
@@ -419,12 +437,17 @@ class FloorController extends Notifier<FloorState> {
     String driverId, {
     bool markReady = false,
     List<String>? includeOrderIds,
+    List<String>? excludeOrderIds,
     String? planId,
   }) async {
     try {
-      final out = await _requireClient(
-        ref,
-      ).sendOut(driverId, markReady: markReady, includeOrderIds: includeOrderIds, planId: planId);
+      final out = await _requireClient(ref).sendOut(
+        driverId,
+        markReady: markReady,
+        includeOrderIds: includeOrderIds,
+        excludeOrderIds: excludeOrderIds,
+        planId: planId,
+      );
       _upsert(out);
       final driver = state.drivers.where((d) => d.id == driverId).firstOrNull;
       if (driver != null && out.isNotEmpty) {
@@ -439,6 +462,11 @@ class FloorController extends Notifier<FloorState> {
       rethrow;
     }
   }
+
+  /// The "hold the far one" check before a send-out (2.2.1); null from an
+  /// older Pi. Changes nothing.
+  Future<List<HeldStop>?> sendCheck(String driverId, List<String> orderIds) =>
+      _requireClient(ref).sendCheck(driverId, orderIds);
 
   /// AUTO: a suggested set of runs. Changes nothing.
   Future<AutoPlan> autoPlan() => _requireClient(ref).autoPlan();
@@ -472,6 +500,8 @@ class FloorController extends Notifier<FloorState> {
             nearbyRule: saved.nearbyRule,
             nearbyDetourMinutes: saved.nearbyDetourMinutes,
             nearbyDistanceMi: saved.nearbyDistanceMi,
+            // An answer without it keeps what was sent.
+            autoAssign: saved.autoAssign ?? s.autoAssign,
             store: saved.deliveryRadiusM == null || f.store == null
                 ? null
                 : StoreGeo(lat: f.store!.lat, lng: f.store!.lng, deliveryRadiusM: saved.deliveryRadiusM!),
@@ -482,13 +512,49 @@ class FloorController extends Notifier<FloorState> {
     return saved;
   }
 
+  /// NOT DELIVERED (1.7.1, Pi 2.2.1): the driver came back with [id]. A 409
+  /// (not out / delivered any more) resyncs; an older Pi
+  /// ([kNotDeliveredUnsupported]) hides the action until the Pi changes.
+  Future<StoredOrder> notDelivered(String id, NotDeliveredAction action) async {
+    try {
+      final o = await _requireClient(ref).notDelivered(id, action);
+      if (o.id.isNotEmpty) _upsert([o]);
+      return o;
+    } on AgentException catch (e) {
+      if (e.code == kNotDeliveredUnsupported) ref.read(notDeliveredUnsupportedProvider.notifier).state = true;
+      if (e.isConflict || e.code == 'not_found') unawaited(refresh());
+      rethrow;
+    }
+  }
+
+  /// A came-back delivery goes back to Unassigned. 409 `not_came_back` =
+  /// someone already did: resync.
+  Future<StoredOrder> releaseCameBack(String id) async {
+    try {
+      final o = await _requireClient(ref).releaseCameBack(id);
+      if (o.id.isNotEmpty) _upsert([o]);
+      return o;
+    } on AgentException catch (e) {
+      if (e.code == kNotDeliveredUnsupported) ref.read(notDeliveredUnsupportedProvider.notifier).state = true;
+      if (e.isConflict || e.code == 'not_found') unawaited(refresh());
+      rethrow;
+    }
+  }
+
   /// 409 `invalid_state` = the driver isn't out (already returned
   /// elsewhere): resync before the error reaches the UI.
   Future<void> driverReturned(String driverId) async {
     try {
-      _upsert(await _requireClient(ref).driverReturned(driverId));
+      final r = await _requireClient(ref).driverReturned(driverId);
+      _upsert(r.orders);
       ref.read(lastReturnProvider.notifier).state = LastReturn(driverId, timeNow());
       unawaited(_reloadDrivers());
+      final a = r.autoAssigned;
+      if (a != null) {
+        // The pool itself arrives as order updates; fetch it now anyway.
+        unawaited(refresh());
+        _autoAssigned(a);
+      }
     } on AgentException catch (e) {
       if (e.isConflict || e.isNotFound) unawaited(refresh());
       rethrow;
@@ -610,6 +676,18 @@ class LastReturn {
 }
 
 final lastReturnProvider = StateProvider<LastReturn?>((_) => null);
+
+/// A pending "pop the driver button open on NEXT" (2.2.1 auto-assign). The
+/// driver button takes it (and clears it) when nothing is in the way — the
+/// full-screen ring or a dialog / screen on top.
+final fobPopProvider = StateProvider<AutoAssignment?>((_) => null);
+
+/// The paired Pi answered NOT DELIVERED with "no such route" (≤ 2.2.0): the
+/// action hides. Forgotten when the Pi (address / key) changes.
+final notDeliveredUnsupportedProvider = StateProvider<bool>((ref) {
+  ref.watch(_agentLinkProvider);
+  return false;
+});
 
 // =============================================================================
 // Alarm

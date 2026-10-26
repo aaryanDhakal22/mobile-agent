@@ -145,7 +145,10 @@ class HistoryRow extends StatelessWidget {
                         if (o.fulfillment.type != FulfillmentType.unknown) o.fulfillment.type.label,
                         '${o.itemCount} item${o.itemCount == 1 ? '' : 's'}',
                         clock(order.status.arrivalDate ?? o.receivedAt),
-                        if (order.status.driverName != null) 'driver ${order.status.driverName}',
+                        // Cancelled (e.g. NOT DELIVERED → CANCEL ORDER): no driver.
+                        if (order.status.driverName != null && order.state != OrderState.cancelled)
+                          'driver ${order.status.driverName}',
+                        if (order.isCameBack) 'came back',
                       ].join(' · '),
                       style: TextStyle(color: context.palette.textSecondary),
                     ),

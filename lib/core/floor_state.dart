@@ -262,6 +262,14 @@ class FloorState {
     return list;
   }
 
+  /// Deliveries the driver brought back that wait to go out again (1.7.1):
+  /// the Deliveries screen's "Came back" section, longest back first. They
+  /// are in no other delivery list (not poolable, not out).
+  List<StoredOrder> get cameBackDeliveries => _sorted(
+    _shown.where((o) => o.isCameBack),
+    (o) => o.status.notDelivered?.at ?? o.status.outAt ?? o.placedTime,
+  );
+
   /// The deliveries in [driverId]'s pool in driving order (`pool_seq`, from
   /// the Pi), then kitchen number; unnumbered ones last.
   List<StoredOrder> poolFor(String driverId) {
@@ -285,13 +293,15 @@ class FloorState {
 
   /// Orders out with [driverId], oldest run first.
   List<StoredOrder> outWith(String driverId) => _sorted(
-    _shown.where((o) => o.state == OrderState.onDelivery && o.status.driverId == driverId),
+    _shown.where((o) => _isOut(o) && o.status.driverId == driverId),
     (o) => o.status.outAt,
   );
 
   /// Every order currently on delivery (incl. ones whose driver was removed).
-  List<StoredOrder> get onDelivery =>
-      _sorted(_shown.where((o) => o.state == OrderState.onDelivery), (o) => o.status.outAt);
+  List<StoredOrder> get onDelivery => _sorted(_shown.where(_isOut), (o) => o.status.outAt);
+
+  /// Out with a driver — a came-back order never is, whatever its state says.
+  static bool _isOut(StoredOrder o) => o.state == OrderState.onDelivery && !o.status.cameBack;
 
   /// The current batch, newest first.
   List<StoredOrder> get currentBatchOrders {

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../core/auto_preview.dart';
+import '../../core/delivery_models.dart';
 import '../../core/floor_state.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
@@ -13,7 +14,9 @@ import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
 import '../home/home_nav.dart';
 import '../maps/pool_map_screen.dart';
+import '../maps/runs_map_pane.dart';
 import '../order_detail/order_detail_screen.dart';
+import 'came_back.dart';
 import 'delivery_widgets.dart';
 import 'lava_glow.dart';
 import 'send_out.dart';
@@ -24,6 +27,10 @@ const double _toastInset = kSendOutToastInset;
 /// Room under the left column's last card so it scrolls clear of the select
 /// bar.
 const double _listClearance = 96;
+
+/// The most of the left column the "Came back" section takes; the Unassigned
+/// list keeps the rest (and both scroll on their own).
+const double _cameBackShare = 0.45;
 
 /// The send-out bar stops short of the collapsed driver button (64 px, 24 px
 /// from the screen's right edge; the pane itself pads 24).
@@ -39,7 +46,10 @@ const double _fabSlot = 80;
 /// driver as a yellow preview; nothing is saved until CONFIRM (or SEND OUT
 /// with the next driver's yellow stops showing). A single tap on any
 /// delivery opens it. Rows in [deliveryHighlightProvider] pulse yellow until
-/// you tap, drag, move or send something.
+/// you tap, drag, move or send something. Under Unassigned, below a rule,
+/// "Came back · N" (1.7.1) holds the deliveries a driver brought back
+/// ([CameBackSection]): not draggable or selectable, held to go to
+/// Unassigned.
 class DeliveriesPane extends ConsumerStatefulWidget {
   const DeliveriesPane({super.key});
 
@@ -121,6 +131,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
         AgentException(code: 'invalid_state') => 'That order was sent out or cancelled meanwhile — list refreshed.',
         AgentException(code: 'not_found') => 'That order is gone — list refreshed.',
         AgentException(code: kPoolsUnsupported) => 'This Pi needs an update for driver pools.',
+        AgentException(code: kCameBack) => kCameBackFirst,
         _ => null,
       };
       msg == null
@@ -259,6 +270,12 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     final highlight = ref.watch(deliveryHighlightProvider);
     final suggested = preview?.suggestedIds ?? const <String>{};
     final left = fs.unassignedDeliveries.where((o) => !suggested.contains(o.id)).toList();
+    final back = fs.cameBackDeliveries;
+    // AUTO kept these for a driver on his way back (2.2.1).
+    final held = {
+      for (final u in preview?.plan.unassigned ?? const <PlanLeftover>[])
+        if (u.reason == 'held_for_returning_driver' && u.heldFor != null) u.orderId: u.heldFor!,
+    };
     final drivers = fs.availableDrivers;
     final pools = {for (final d in drivers) d.id: fs.poolFor(d.id)};
     final runs = _runs(fs);
@@ -282,13 +299,15 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
             children: [
               PaneHeader(
                 title: 'Deliveries',
-                subtitle: '${left.length} unassigned · $pooledCount in pools · ${runs.length} out',
+                subtitle:
+                    '${left.length} unassigned · $pooledCount in pools · ${runs.length} out'
+                    '${back.isEmpty ? '' : ' · ${back.length} came back'}',
               ),
               Expanded(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(flex: 5, child: _leftColumn(context, left, target, fs, highlight)),
+                    Expanded(flex: 5, child: _leftColumn(context, left, back, target, fs, highlight, held)),
                     QuiccSpace.gapLg,
                     Expanded(flex: 6, child: _rightColumn(context, fs, drivers, pools, preview, runs)),
                   ],
@@ -303,7 +322,15 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     );
   }
 
-  Widget _leftColumn(BuildContext context, List<StoredOrder> left, int target, FloorState fs, Set<String> highlight) {
+  Widget _leftColumn(
+    BuildContext context,
+    List<StoredOrder> left,
+    List<StoredOrder> back,
+    int target,
+    FloorState fs,
+    Set<String> highlight,
+    Map<String, HeldFor> held,
+  ) {
     final moveHere = _selectMode && _selected.isNotEmpty;
     // AUTO glows while it has something to plan: a delivery waiting, a free
     // driver and no suggestion already up.
@@ -328,84 +355,94 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                 width: 2,
               ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(QuiccSpace.sm, QuiccSpace.xs, QuiccSpace.xs, QuiccSpace.sm),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Unassigned · ${left.length}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
-                        ),
-                      ),
-                      LavaGlow(
-                        active: autoInviting,
-                        child: _HeaderButton(
-                          key: const ValueKey('auto'),
-                          icon: Icons.auto_awesome,
-                          label: 'AUTO',
-                          busy: _autoBusy,
-                          glowing: autoInviting,
-                          onTap: _autoBusy ? null : _auto,
-                        ),
-                      ),
-                      QuiccSpace.gapMd,
-                      _HeaderButton(
-                        key: const ValueKey('select'),
-                        icon: _selectMode ? Icons.check_box : Icons.check_box_outlined,
-                        label: 'Select',
-                        active: _selectMode,
-                        onTap: () => _selectMode ? _endSelect() : setState(() => _selectMode = true),
-                      ),
-                    ],
-                  ),
-                ),
-                if (moveHere)
+            child: LayoutBuilder(
+              builder: (context, box) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(QuiccSpace.sm, 0, QuiccSpace.sm, QuiccSpace.sm),
-                    child: Text(
-                      'Tap here to take the selected out of their pools',
-                      style: QuiccType.text(QuiccType.label, color: context.palette.textMuted),
-                    ),
-                  ),
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: () => _floor.refresh(),
-                    child: ListView(
-                      padding: const EdgeInsets.only(bottom: _listClearance),
+                    padding: const EdgeInsets.fromLTRB(QuiccSpace.sm, QuiccSpace.xs, QuiccSpace.xs, QuiccSpace.sm),
+                    child: Row(
                       children: [
-                        if (left.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: QuiccSpace.xl, horizontal: QuiccSpace.sm),
-                            child: Text(
-                              'No deliveries waiting for a driver.',
-                              style: QuiccType.text(QuiccType.body, color: context.palette.textMuted),
-                            ),
+                        Expanded(
+                          child: Text(
+                            'Unassigned · ${left.length}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
                           ),
-                        for (final o in left)
-                          DeliveryDraggable(
-                            key: ValueKey('row-${o.id}'),
-                            data: _dragData(o, fromDriver: null),
-                            onDragStarted: _clearHighlight,
-                            child: UnassignedRow(
-                              order: o,
-                              selectMode: _selectMode,
-                              selected: _selected.contains(o.id),
-                              highlight: highlight.contains(o.id),
-                              targetMinutes: target,
-                              onTap: () => _tapOrder(o),
-                            ),
+                        ),
+                        LavaGlow(
+                          active: autoInviting,
+                          child: _HeaderButton(
+                            key: const ValueKey('auto'),
+                            icon: Icons.auto_awesome,
+                            label: 'AUTO',
+                            busy: _autoBusy,
+                            glowing: autoInviting,
+                            onTap: _autoBusy ? null : _auto,
                           ),
+                        ),
+                        QuiccSpace.gapMd,
+                        _HeaderButton(
+                          key: const ValueKey('select'),
+                          icon: _selectMode ? Icons.check_box : Icons.check_box_outlined,
+                          label: 'Select',
+                          active: _selectMode,
+                          onTap: () => _selectMode ? _endSelect() : setState(() => _selectMode = true),
+                        ),
                       ],
                     ),
                   ),
-                ),
-              ],
+                  if (moveHere)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(QuiccSpace.sm, 0, QuiccSpace.sm, QuiccSpace.sm),
+                      child: Text(
+                        'Tap here to take the selected out of their pools',
+                        style: QuiccType.text(QuiccType.label, color: context.palette.textMuted),
+                      ),
+                    ),
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: () => _floor.refresh(),
+                      child: ListView(
+                        padding: const EdgeInsets.only(bottom: _listClearance),
+                        children: [
+                          if (left.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: QuiccSpace.xl, horizontal: QuiccSpace.sm),
+                              child: Text(
+                                'No deliveries waiting for a driver.',
+                                style: QuiccType.text(QuiccType.body, color: context.palette.textMuted),
+                              ),
+                            ),
+                          for (final o in left)
+                            DeliveryDraggable(
+                              key: ValueKey('row-${o.id}'),
+                              data: _dragData(o, fromDriver: null),
+                              onDragStarted: _clearHighlight,
+                              child: UnassignedRow(
+                                order: o,
+                                selectMode: _selectMode,
+                                selected: _selected.contains(o.id),
+                                highlight: highlight.contains(o.id),
+                                targetMinutes: target,
+                                heldFor: held[o.id],
+                                onTap: () => _tapOrder(o),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Below the rule, never in the way of the list above: it
+                  // takes what it needs up to [_cameBackShare] and scrolls.
+                  if (back.isNotEmpty)
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: box.maxHeight * _cameBackShare),
+                      child: CameBackSection(orders: back),
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -481,6 +518,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                   name: run.name,
                   outAt: run.outAt,
                   orders: run.orders,
+                  color: driverColor(fs.drivers, run.driver?.id ?? ''),
                   busy: run.driver != null && _returning.contains(run.driver!.id),
                   onReturned: run.driver == null ? null : () => _returned(run.driver!),
                   onOpen: _open,
@@ -744,7 +782,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     for (final d in fs.drivers) {
       final orders = byDriver.remove(d.id) ?? const <StoredOrder>[];
       if (d.isOut || orders.isNotEmpty) {
-        runs.add(_Run(driver: d, name: d.name, orders: orders));
+        runs.add(_Run(driver: d, name: d.name, orders: inStopOrder(orders, d)));
       }
     }
     byDriver.forEach((id, orders) {

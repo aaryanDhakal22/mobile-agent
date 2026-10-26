@@ -116,15 +116,22 @@ const _blobs = [
 /// Paints the blobs as radial gradients, blurred together and then given a
 /// gentle alpha contrast so touching blobs merge like wax (the "goo" trick),
 /// at a capped opacity so the label on top stays easy to read. [bleed] says
-/// where the child sits inside the painted box.
+/// where the child sits inside the painted box. Also the Kitchen ticket's
+/// red "customer waiting" bar (1.7.1): [blobScale] makes the blobs bigger
+/// than the box's height, [maxOpacity] how strong they get.
 class LavaPainter extends CustomPainter {
   final Animation<double> progress;
   final Color color;
   final EdgeInsets bleed;
-  LavaPainter({required this.progress, required this.color, this.bleed = EdgeInsets.zero})
-    : super(repaint: progress);
-
-  static const double _maxOpacity = 0.8;
+  final double blobScale;
+  final double maxOpacity;
+  LavaPainter({
+    required this.progress,
+    required this.color,
+    this.bleed = EdgeInsets.zero,
+    this.blobScale = 1,
+    this.maxOpacity = 0.8,
+  }) : super(repaint: progress);
 
   // alpha' = 2.2·a − 0.2: thin tails fade out, overlaps fuse into one soft
   // shape (a gentle goo, not hard-edged).
@@ -141,11 +148,11 @@ class LavaPainter extends CustomPainter {
     final t = progress.value;
     final bounds = Offset.zero & size;
     final child = bleed.deflateRect(bounds);
-    final ch = child.height <= 0 ? size.height : child.height;
+    final ch = (child.height <= 0 ? size.height : child.height) * blobScale;
     final sigma = ch * 0.12;
     final turn = 2 * math.pi;
 
-    canvas.saveLayer(bounds, Paint()..color = Color.fromRGBO(0, 0, 0, _maxOpacity));
+    canvas.saveLayer(bounds, Paint()..color = Color.fromRGBO(0, 0, 0, maxOpacity));
     canvas.saveLayer(bounds, Paint()..colorFilter = _goo);
     canvas.saveLayer(bounds, Paint()..imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma));
     for (final b in _blobs) {
@@ -154,7 +161,7 @@ class LavaPainter extends CustomPainter {
       final out = 1 + b.wobble * r / ch * math.sin(turn * (2 * t + b.phase * 3));
       var c = Offset(
         child.center.dx + (child.width / 2) * out * math.cos(a),
-        child.center.dy + (ch / 2 + r * 0.2) * out * math.sin(a),
+        child.center.dy + (ch / blobScale / 2 + r * 0.2) * out * math.sin(a),
       );
       // Stay a blur's width inside the box, so no edge of the glow is ever
       // cut off straight (a blob near a tight edge slides in behind the
@@ -181,7 +188,12 @@ class LavaPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(LavaPainter old) => old.progress != progress || old.color != color || old.bleed != bleed;
+  bool shouldRepaint(LavaPainter old) =>
+      old.progress != progress ||
+      old.color != color ||
+      old.bleed != bleed ||
+      old.blobScale != blobScale ||
+      old.maxOpacity != maxOpacity;
 }
 
 /// A soft yellow outline that pulses around [child] while [active] — the

@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/delivery_models.dart';
+import '../../core/floor_state.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/polyline.dart';
@@ -11,6 +12,7 @@ import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
+import '../deliveries/delivery_widgets.dart';
 import 'geo_format.dart';
 import 'map_layers.dart';
 
@@ -54,7 +56,7 @@ List<OutRun> outRuns(List<Driver> drivers, List<StoredOrder> onDelivery) => [
           null,
           (a, b) => a == null || b.isBefore(a) ? b : a,
         );
-        return OutRun(d, driverColor(drivers, d.id), stops, out);
+        return OutRun(d, driverColor(drivers, d.id), inStopOrder(stops, d), out);
       }(),
 ];
 
@@ -71,13 +73,49 @@ final _runTripProvider = FutureProvider.autoDispose.family<PoolTrip?, ({String d
 /// Kitchen mode → Map (1.6.1): every driver who is out, his route in his
 /// colour, a legend on the right. An overview, not a tracker: the Pi has no
 /// driver positions, and the map doesn't move (no gestures).
-class RunsMapPane extends ConsumerWidget {
-  const RunsMapPane({super.key});
+///
+/// 1.7.1: the home shell keeps it built (offstage, tickers off) so the tab
+/// opens at once instead of drawing every tile again. While hidden
+/// ([active] false) it rebuilds only when the runs change — the road routes
+/// are still fetched and the camera refit, so it is ready when shown. The
+/// refresh button opens the map file again and refits.
+class RunsMapPane extends ConsumerStatefulWidget {
+  final bool active;
+  const RunsMapPane({super.key, this.active = true});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final drivers = ref.watch(floorProvider.select((s) => s.drivers));
-    final onDelivery = ref.watch(floorProvider.select((s) => s.onDelivery));
+  ConsumerState<RunsMapPane> createState() => _RunsMapPaneState();
+}
+
+/// Who is out with which orders — what a hidden map follows.
+String runsSignature(FloorState s) =>
+    outRuns(s.drivers, s.onDelivery).map((r) => '${r.driver.id}:${r.ids.join(',')}').join('|');
+
+class _RunsMapPaneState extends ConsumerState<RunsMapPane> {
+  /// Bumped by the refresh button: a new base layer (archive re-opened).
+  int _reload = 0;
+
+  void _refresh() {
+    final source = ref.read(mapSourceProvider);
+    if (source != null) PmTilesBaseLayer.forget(source);
+    ref.invalidate(_runTripProvider);
+    setState(() => _reload++);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Driver> drivers;
+    final List<StoredOrder> onDelivery;
+    if (widget.active) {
+      drivers = ref.watch(floorProvider.select((s) => s.drivers));
+      onDelivery = ref.watch(floorProvider.select((s) => s.onDelivery));
+    } else {
+      // Offstage: only a change of runs is worth a rebuild.
+      ref.watch(floorProvider.select(runsSignature));
+      final fs = ref.read(floorProvider);
+      drivers = fs.drivers;
+      onDelivery = fs.onDelivery;
+    }
     final store = ref.watch(floorProvider.select((s) => s.floor?.store?.point));
     final source = ref.watch(mapSourceProvider);
     final runs = outRuns(drivers, onDelivery);
@@ -101,7 +139,29 @@ class RunsMapPane extends ConsumerWidget {
                 Expanded(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(QuiccRadius.md),
-                    child: _RunsMap(runs: runs, trips: trips, store: store, source: source),
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: _RunsMap(runs: runs, trips: trips, store: store, source: source, reload: _reload),
+                        ),
+                        if (source != null)
+                          Positioned(
+                            top: QuiccSpace.sm,
+                            right: QuiccSpace.sm,
+                            child: Material(
+                              color: context.palette.bgSurface,
+                              shape: const CircleBorder(),
+                              elevation: 2,
+                              child: IconButton(
+                                key: const ValueKey('map-refresh'),
+                                tooltip: 'Reload the map',
+                                icon: const Icon(Icons.refresh, color: QuiccColors.brand400),
+                                onPressed: _refresh,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
                 QuiccSpace.gapLg,
@@ -115,16 +175,77 @@ class RunsMapPane extends ConsumerWidget {
   }
 }
 
-class _RunsMap extends ConsumerWidget {
+class _RunsMap extends ConsumerStatefulWidget {
   final List<OutRun> runs;
   final Map<String, PoolTrip?> trips;
   final GeoPoint? store;
   final MapSource? source;
-  const _RunsMap({required this.runs, required this.trips, required this.store, required this.source});
+  final int reload;
+  const _RunsMap({
+    required this.runs,
+    required this.trips,
+    required this.store,
+    required this.source,
+    required this.reload,
+  });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_RunsMap> createState() => _RunsMapState();
+}
+
+/// One FlutterMap for the pane's whole life (1.7.1 — it used to be rebuilt,
+/// tiles and all, per set of runs): a new set of runs, or a refresh, refits
+/// the camera through the controller instead.
+class _RunsMapState extends ConsumerState<_RunsMap> {
+  final _ctrl = MapController();
+  bool _ready = false;
+
+  GeoPoint? get store => widget.store;
+
+  List<GeoPoint> _points(_RunsMap w) => [?w.store, for (final r in w.runs) for (final o in r.stops) ?o.geo?.point];
+
+  /// The whole delivery area when nobody is out; otherwise fit the runs.
+  CameraFit? _fit(List<GeoPoint> pts) {
+    if (pts.isEmpty) return null;
+    return pts.length <= 1 && store != null
+        ? CameraFit.coordinates(coordinates: [ll(store!)], maxZoom: 13)
+        : fitPoints(pts, padding: const EdgeInsets.all(56));
+  }
+
+  @override
+  void didUpdateWidget(_RunsMap old) {
+    super.didUpdateWidget(old);
+    final pts = _points(widget);
+    if (widget.reload != old.reload || !_samePoints(pts, _points(old))) {
+      final fit = _fit(pts);
+      // After this frame: moving the camera mid-build would rebuild the map
+      // during the build.
+      if (fit != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _ready) _ctrl.fitCamera(fit);
+        });
+      }
+    }
+  }
+
+  static bool _samePoints(List<GeoPoint> a, List<GeoPoint> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final palette = context.palette;
+    final source = widget.source;
     if (source == null) {
       return ColoredBox(
         color: palette.bgSurface,
@@ -136,26 +257,27 @@ class _RunsMap extends ConsumerWidget {
         ),
       );
     }
-    final pts = <GeoPoint>[?store, for (final r in runs) for (final o in r.stops) ?o.geo?.point];
+    final runs = widget.runs;
     final dark = Theme.of(context).brightness == Brightness.dark;
     final lines = <Polyline>[
-      for (final r in runs) ?_line(r, trips[r.driver.id]),
+      for (final r in runs) ?_line(r, widget.trips[r.driver.id]),
     ];
-    // The whole delivery area when nobody is out; otherwise fit the runs.
-    final fit = pts.length <= 1 && store != null
-        ? CameraFit.coordinates(coordinates: [ll(store!)], maxZoom: 13)
-        : fitPoints(pts, padding: const EdgeInsets.all(56));
     return IgnorePointer(
       child: FlutterMap(
-        // A new set of runs refits the camera.
-        key: ValueKey(runs.map((r) => r.ids.join(',')).join('|')),
+        mapController: _ctrl,
         options: MapOptions(
-          initialCameraFit: pts.isEmpty ? null : fit,
+          initialCameraFit: _fit(_points(widget)),
           backgroundColor: mapBackground(dark),
           interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+          onMapReady: () => _ready = true,
         ),
         children: [
-          ref.watch(mapBaseLayerProvider)(context, source!, dark),
+          // Keyed by the refresh count: a refresh builds a new base layer,
+          // which opens the map file again.
+          KeyedSubtree(
+            key: ValueKey('base-${widget.reload}'),
+            child: ref.watch(mapBaseLayerProvider)(context, source, dark),
+          ),
           PolylineLayer(polylines: lines),
           MarkerLayer(
             markers: [
@@ -253,10 +375,9 @@ class _Legend extends StatelessWidget {
                           style: QuiccType.text(QuiccType.label, color: palette.textSecondary),
                         ),
                         QuiccSpace.gapXs,
-                        Text(
-                          r.stops.map((o) => o.displayNumber).join('  '),
-                          style: QuiccType.number(QuiccType.label, color: r.color),
-                        ),
+                        // 1.7.1: his stops in stop order, pinned in his colour.
+                        for (final o in r.stops)
+                          StopAddressLine(key: ValueKey('legend-stop-${o.id}'), order: o, color: r.color),
                       ],
                     ),
                   ),

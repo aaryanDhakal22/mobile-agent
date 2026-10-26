@@ -132,6 +132,15 @@ const String kPoolsUnsupported = 'pools_unsupported';
 /// [AgentException.code] when AUTO finds no available driver (409).
 const String kNoDrivers = 'no_drivers';
 
+/// [AgentException.code] when a pool / send-out names a delivery that came
+/// back (1.7.1, Pi 2.2.1: 409 `{"error":"came_back"}`) — it has to be sent
+/// to Unassigned first.
+const String kCameBack = 'came_back';
+
+/// [AgentException.code] for NOT DELIVERED / release on a Pi without the
+/// routes (≤ 2.2.0): "This Pi needs an update".
+const String kNotDeliveredUnsupported = 'not_delivered_unsupported';
+
 /// Send Out was refused: these orders aren't marked ready (409 `not_ready`).
 /// Ask "send anyway?" and retry with `markReady`.
 class NotReadyException extends AgentException {
@@ -421,10 +430,13 @@ class AgentClient {
   /// [includeOrderIds], pooled first in the same step) out now. Throws
   /// [NotReadyException] when something is still cooking and [markReady] is
   /// false; 400 `bad_request` = the pool is empty.
+  /// [excludeOrderIds] (2.2.1): pooled stops held back for a driver on his
+  /// way back — they go back to Unassigned.
   Future<List<StoredOrder>> sendOut(
     String driverId, {
     bool markReady = false,
     List<String>? includeOrderIds,
+    List<String>? excludeOrderIds,
     String? planId,
   }) => _poolsRoute(() async {
     try {
@@ -434,6 +446,7 @@ class AgentClient {
         body: {
           'mark_ready': markReady,
           if (includeOrderIds != null && includeOrderIds.isNotEmpty) 'include_order_ids': includeOrderIds,
+          if (excludeOrderIds != null && excludeOrderIds.isNotEmpty) 'exclude_order_ids': excludeOrderIds,
           if (planId != null && planId.isNotEmpty) 'plan_id': planId,
         },
         // Marking ready + dispatching can print nothing, but the Pi does a
@@ -516,16 +529,84 @@ class AgentClient {
     try {
       return await call();
     } on AgentException catch (e) {
+      // 2.2.1: a came-back delivery can't be pooled or sent (`{"error":
+      // "came_back"}`, no code).
+      if (e.statusCode == 409 && (e.code ?? e.message) == kCameBack) {
+        throw AgentException(e.message, statusCode: 409, code: kCameBack, body: e.body);
+      }
       final missing = e.statusCode == 405 || (e.statusCode == 404 && e.body.isEmpty);
       if (!missing) rethrow;
       throw AgentException(e.message, statusCode: e.statusCode, code: kPoolsUnsupported, body: e.body);
     }
   }
 
-  Future<List<StoredOrder>> driverReturned(String driverId) async {
-    final body = await _send('POST', '/api/drivers/${Uri.encodeComponent(driverId)}/returned');
-    return jList(body, StoredOrder.fromJson);
+  /// `GET /api/drivers/{id}/send-check?order_ids=` (2.2.1) — stops of the
+  /// send-out that are the other way and better held for a driver on his way
+  /// back. Null from an older Pi (404 / 405 — never unpairs); empty = send.
+  Future<List<HeldStop>?> sendCheck(String driverId, List<String> orderIds) async {
+    try {
+      final body = await _send(
+        'GET',
+        '/api/drivers/${Uri.encodeComponent(driverId)}/send-check',
+        query: {'order_ids': orderIds.join(',')},
+        mayRevoke: false,
+      );
+      return jList(jMap(body)['hold'], HeldStop.fromJson).where((h) => h.orderId.isNotEmpty).toList();
+    } on AgentException catch (e) {
+      if (e.statusCode == 404 || e.statusCode == 405) return null;
+      rethrow;
+    }
   }
+
+  // --- not delivered (2.2.1) ---------------------------------------------------
+
+  /// `POST /api/orders/{id}/not-delivered {action}` — the driver came back
+  /// with a delivery that is out (or marked delivered): `retry` puts it in
+  /// "Came back", `cancel` takes it off the floor. 409
+  /// `not_out_or_delivered`, 400 `bad_action`; an older Pi (no route: 404 /
+  /// 405) → [kNotDeliveredUnsupported]. Never unpairs the tablet.
+  Future<StoredOrder> notDelivered(String id, NotDeliveredAction action) => _notDeliveredRoute(
+    () async => StoredOrder.fromJson(
+      jMap(
+        await _send(
+          'POST',
+          '/api/orders/${Uri.encodeComponent(id)}/not-delivered',
+          body: {'action': action.wire},
+          mayRevoke: false,
+        ),
+      ),
+    ),
+  );
+
+  /// `POST /api/orders/{id}/release` — a came-back delivery goes back to
+  /// Unassigned (`came_back` false). 409 `not_came_back`.
+  Future<StoredOrder> releaseCameBack(String id) => _notDeliveredRoute(
+    () async => StoredOrder.fromJson(
+      jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/release', mayRevoke: false)),
+    ),
+  );
+
+  /// The 2.2.1 routes answer `{"error": "<code>"}`: the code moves to
+  /// [AgentException.code]. A missing route (405, or a 404 that isn't the
+  /// route's own `not_found`) is [kNotDeliveredUnsupported].
+  static Future<T> _notDeliveredRoute<T>(Future<T> Function() call) async {
+    try {
+      return await call();
+    } on AgentException catch (e) {
+      final code = e.code ?? (jStr(e.body['error']).isEmpty ? null : jStr(e.body['error']));
+      final missing = e.statusCode == 405 || (e.statusCode == 404 && code != 'not_found');
+      if (missing) {
+        throw AgentException(e.message, statusCode: e.statusCode, code: kNotDeliveredUnsupported, body: e.body);
+      }
+      if (code != e.code) throw AgentException(e.message, statusCode: e.statusCode, code: code, body: e.body);
+      rethrow;
+    }
+  }
+
+  /// The run's orders — and (2.2.1) what auto-assign pooled for the next
+  /// driver right after ([ReturnedResult.autoAssigned]).
+  Future<ReturnedResult> driverReturned(String driverId) async =>
+      ReturnedResult.fromJson(await _send('POST', '/api/drivers/${Uri.encodeComponent(driverId)}/returned?v=2'));
 
   /// `POST /api/drivers/{id}/undo-return` — the latest return (≤10 min) is
   /// undone: the driver is out again. 409 invalid_state otherwise.

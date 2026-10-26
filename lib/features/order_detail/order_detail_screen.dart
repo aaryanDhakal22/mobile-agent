@@ -11,6 +11,7 @@ import '../common/widgets.dart';
 import '../kitchen/resend_kitchen.dart';
 import '../maps/check_address_sheet.dart';
 import '../maps/delivery_map.dart';
+import 'not_delivered.dart';
 
 /// Full order: items (size / modifiers / notes), customer, address, kitchen
 /// number, and the floor timeline. Follows live updates for orders in the
@@ -141,7 +142,9 @@ class OrderDetailScreen extends ConsumerWidget {
                 if (so.status.posCheckNumber != null) _kv(context, 'POS check #', '${so.status.posCheckNumber}'),
                 _kv(context, 'Prep', so.status.prepMinutes == null ? '—' : '${so.status.prepMinutes} min'),
                 _kv(context, 'Batch', so.status.batchId == 0 ? '—' : '#${so.status.batchId}'),
-                if (so.status.driverName != null) _kv(context, 'Driver', so.status.driverName!),
+                // A cancelled order has no driver (1.7.1: NOT DELIVERED → CANCEL).
+                if (so.status.driverName != null && so.state != OrderState.cancelled)
+                  _kv(context, 'Driver', so.status.driverName!),
                 if (so.status.scheduledLeadMinutes != null)
                   _kv(context, 'Lead', '${so.status.scheduledLeadMinutes} min before due'),
                 if (o.sourceEventId.isNotEmpty) _kv(context, 'Vendor #', o.sourceEventId),
@@ -184,6 +187,7 @@ class OrderDetailScreen extends ConsumerWidget {
       ('Ready', st.readyAt),
       ('Out', st.outAt),
       ('Delivered', st.deliveredAt),
+      ('Came back', st.notDelivered?.at),
       ('Cancelled', st.cancelledAt),
     ];
     return [
@@ -349,9 +353,13 @@ class _ActionsState extends ConsumerState<_Actions> {
   Widget build(BuildContext context) {
     final so = widget.order;
     final floor = ref.read(floorProvider.notifier);
+    final notDelivered =
+        canMarkNotDelivered(so, ref.watch(floorProvider.select((s) => s.currentBatchId))) &&
+        !ref.watch(notDeliveredUnsupportedProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (so.isCameBack) const _CameBackNote(),
         if (so.state == OrderState.arrived) AcceptControls(key: ValueKey('accept-${so.id}'), order: so),
         if (so.state == OrderState.scheduled) _LaterPanel(order: so),
         if (so.state == OrderState.accepted)
@@ -415,9 +423,47 @@ class _ActionsState extends ConsumerState<_Actions> {
             ],
           ),
         ],
+        if (notDelivered) ...[
+          const SizedBox(height: 10),
+          NotDeliveredButton(
+            order: so,
+            busy: _busy,
+            onBusy: (b) {
+              if (mounted) setState(() => _busy = b);
+            },
+          ),
+        ],
       ],
     );
   }
+}
+
+/// A delivery that came back (1.7.1): where it is and how it goes out again.
+class _CameBackNote extends StatelessWidget {
+  const _CameBackNote();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey('came-back-note'),
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: QuiccColors.statusFiring.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(QuiccRadius.md),
+      border: Border.all(color: QuiccColors.statusFiring.withValues(alpha: 0.6)),
+    ),
+    child: const Row(
+      children: [
+        Icon(Icons.assignment_return_outlined, color: QuiccColors.statusFiring),
+        SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Came back with the driver. It waits on Deliveries under Came back — press and hold it there to send it to Unassigned.',
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 /// A scheduled future order: when it is due, when it rings again, and

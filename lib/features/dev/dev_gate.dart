@@ -11,6 +11,7 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
+import '../home/idle_kitchen.dart';
 import 'dev_log.dart';
 
 /// Developer mode relocks after this long without a touch.
@@ -285,8 +286,14 @@ class DevActivityListener extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) => Listener(
     behavior: HitTestBehavior.translucent,
-    onPointerDown: (_) => ref.read(devGateProvider.notifier).touch(),
-    onPointerSignal: (_) => ref.read(devGateProvider.notifier).touch(),
+    onPointerDown: (_) => _touch(ref),
+    onPointerSignal: (_) => _touch(ref),
     child: child,
   );
+
+  /// Developer mode's 15 min, and (1.7.1) the 1 min back to Kitchen.
+  static void _touch(WidgetRef ref) {
+    ref.read(devGateProvider.notifier).touch();
+    ref.read(idleTouchProvider.notifier).state++;
+  }
 }

@@ -337,7 +337,19 @@ void main() {
     testWidgets('the card has a white body and a header bar in the urgency colour', (tester) async {
       final fresh = StoredOrder.fromJson(_online('c-1'));
       final late = StoredOrder.fromJson(_online('c-2', ago: const Duration(minutes: 50)));
-      await _pump(tester, _Agent(), _floorState([fresh, late]), const Scaffold(body: KitchenPane()));
+      // Paid pickups: with the paid wave on their bar is the red "customer
+      // waiting" one (1.7.1) — switched off here to see the urgency colour.
+      await _pump(
+        tester,
+        _Agent(),
+        _floorState(
+          [fresh, late],
+          settings: {
+            'features': {'paid_wave': false},
+          },
+        ),
+        const Scaffold(body: KitchenPane()),
+      );
       Color barOf(String id) => tester
           .widget<Container>(
             find.descendant(of: find.byKey(ValueKey(id)), matching: find.byKey(const ValueKey('card-bar'))),

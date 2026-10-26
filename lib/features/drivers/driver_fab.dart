@@ -18,6 +18,7 @@ import '../common/widgets.dart';
 import '../deliveries/delivery_widgets.dart';
 import '../deliveries/send_out.dart';
 import '../home/home_nav.dart';
+import '../home/idle_kitchen.dart';
 import '../maps/geo_format.dart';
 import 'drivers_texts.dart';
 import 'next_rules.dart';
@@ -27,6 +28,13 @@ const double _toastInset = kSendOutToastInset;
 
 /// Hold the round button this long to undo the last return.
 const Duration kUndoHold = Duration(milliseconds: 2000);
+
+/// An auto-assign pop (2.2.1) closes again after this long without a touch
+/// (the pool stays).
+const Duration kFobPopIdle = Duration(seconds: 30);
+
+/// How often a pop waiting behind the ring or a dialog looks again.
+const Duration _popRetry = Duration(seconds: 1);
 
 /// Widest the open card gets.
 const double _cardWidth = 420;
@@ -48,6 +56,10 @@ const int _maxTickets = 5;
 ///   round       tap closes; hold 2 s = undo the last return (the agent allows
 ///               it for 10 minutes)
 ///   tap outside closes
+///   pops     (2.2.1) when the Pi's auto-assign pooled deliveries for the
+///            NEXT driver ([fobPopProvider]): opens on the NEXT card with the
+///            chime — never over the full-screen ring or a dialog (it waits)
+///            — and closes again after [kFobPopIdle] without a touch
 ///
 /// Must fill its parent (Positioned.fill): the invisible backdrop catches
 /// outside taps.
@@ -66,22 +78,69 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
   Timer? _holdTimer;
   bool _holdFired = false;
 
+  /// Opened by an auto-assign pop (closes itself after [kFobPopIdle]).
+  bool _popped = false;
+  Timer? _idle;
+  Timer? _retry;
+
   @override
   void initState() {
     super.initState();
     _holdCtrl = AnimationController(vsync: this, duration: kUndoHold);
+    ref.listenManual(fobPopProvider, (_, next) {
+      if (next != null) _tryPop();
+    });
+    ref.listenManual(alarmProvider, (_, _) => _tryPop());
+    // The idle return to Kitchen (1.7.1) folds it away.
+    ref.listenManual(fobCollapseProvider, (_, _) => _collapse());
+    // One waiting from before this button was built (another screen).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _tryPop());
   }
 
   @override
   void dispose() {
     _holdCtrl.dispose();
     _holdTimer?.cancel();
+    _idle?.cancel();
+    _retry?.cancel();
     super.dispose();
   }
 
   void _expand() => setState(() => _expanded = true);
   void _collapse() {
+    _popped = false;
+    _idle?.cancel();
     if (mounted) setState(() => _expanded = false);
+  }
+
+  /// Opens on the NEXT card for a pending auto-assign — unless the
+  /// full-screen ring is up or a dialog / screen sits on top: then it looks
+  /// again shortly.
+  void _tryPop() {
+    if (!mounted || ref.read(fobPopProvider) == null) return;
+    final alarm = ref.read(alarmProvider);
+    final route = ModalRoute.of(context);
+    if ((alarm.ringing && alarm.visible) || (route != null && !route.isCurrent)) {
+      _retry ??= Timer(_popRetry, () {
+        _retry = null;
+        _tryPop();
+      });
+      return;
+    }
+    ref.read(fobPopProvider.notifier).state = null;
+    ref.read(floorProvider.notifier).chime();
+    setState(() {
+      _expanded = true;
+      _popped = true;
+    });
+    _armIdle();
+  }
+
+  void _armIdle() {
+    _idle?.cancel();
+    _idle = Timer(kFobPopIdle, () {
+      if (mounted && _popped) _collapse();
+    });
   }
 
   Future<void> _returned(Driver d) async {
@@ -92,7 +151,9 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
       HapticFeedback.selectionClick();
       if (mounted) {
         toast(context, '${d.name} is back — end of the queue (hold the round button to undo)', rightInset: _toastInset);
-        _collapse();
+        // Auto-assign may have just given the next driver his run: stay
+        // open on NEXT then.
+        if (!_popped && ref.read(fobPopProvider) == null) _collapse();
       }
     } catch (e) {
       HapticFeedback.lightImpact();
@@ -195,107 +256,114 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
     final plan = _expanded ? planNext(ref.watch(floorProvider), ref.watch(autoPreviewProvider)) : null;
     Duration d(int ms) => m.full ? m.scale(Duration(milliseconds: ms)) : m.fade;
 
-    return Stack(
-      children: [
-        // Invisible backdrop: catches taps outside the button to collapse.
-        Positioned.fill(
-          child: IgnorePointer(
-            ignoring: !_expanded,
-            child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _collapse),
+    return Listener(
+      // Any touch keeps an auto-assign pop open.
+      onPointerDown: (_) {
+        if (_popped) _armIdle();
+      },
+      behavior: HitTestBehavior.translucent,
+      child: Stack(
+        children: [
+          // Invisible backdrop: catches taps outside the button to collapse.
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: !_expanded,
+              child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _collapse),
+            ),
           ),
-        ),
-        Positioned(
-          right: QuiccSpace.xl,
-          bottom: QuiccSpace.xl,
-          top: QuiccSpace.xl,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.end,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Flexible(
-                child: AnimatedSwitcher(
-                  duration: d(280),
+          Positioned(
+            right: QuiccSpace.xl,
+            bottom: QuiccSpace.xl,
+            top: QuiccSpace.xl,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: AnimatedSwitcher(
+                    duration: d(280),
+                    reverseDuration: d(180),
+                    switchInCurve: m.full ? Curves.easeOutBack : Curves.linear,
+                    switchOutCurve: Curves.easeInCubic,
+                    layoutBuilder: (current, previous) => Stack(
+                      alignment: Alignment.bottomRight,
+                      children: [...previous, ?current],
+                    ),
+                    transitionBuilder: (child, anim) => FadeTransition(
+                      opacity: anim,
+                      child: m.full
+                          ? SlideTransition(
+                              position: Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero).animate(anim),
+                              child: child,
+                            )
+                          : child,
+                    ),
+                    child: _expanded
+                        ? SingleChildScrollView(
+                            key: const ValueKey('fab-open'),
+                            reverse: true,
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: QuiccSpace.lg),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  _NextCard(plan: plan!, sending: _sending, onPressed: _onNext),
+                                  QuiccSpace.gapLg,
+                                  if (out.isEmpty)
+                                    const _Hint('No drivers out right now')
+                                  else
+                                    for (final d in out) ...[
+                                      _DriverPill(
+                                        driver: d,
+                                        orders: ref.watch(floorProvider.select((s) => s.outWith(d.id).length)),
+                                        busy: _busyId == d.id,
+                                        onTap: () => _returned(d),
+                                      ),
+                                      if (d != out.last) QuiccSpace.gapSm,
+                                    ],
+                                ],
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(key: ValueKey('fab-closed')),
+                  ),
+                ),
+                AnimatedSwitcher(
+                  duration: d(300),
                   reverseDuration: d(180),
                   switchInCurve: m.full ? Curves.easeOutBack : Curves.linear,
                   switchOutCurve: Curves.easeInCubic,
-                  layoutBuilder: (current, previous) => Stack(
+                  transitionBuilder: (child, anim) => ScaleTransition(
+                    scale: Tween<double>(begin: m.full ? 0.7 : 1, end: 1).animate(anim),
                     alignment: Alignment.bottomRight,
-                    children: [...previous, ?current],
-                  ),
-                  transitionBuilder: (child, anim) => FadeTransition(
-                    opacity: anim,
-                    child: m.full
-                        ? SlideTransition(
-                            position: Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero).animate(anim),
-                            child: child,
-                          )
-                        : child,
+                    child: FadeTransition(opacity: anim, child: child),
                   ),
                   child: _expanded
-                      ? SingleChildScrollView(
-                          key: const ValueKey('fab-open'),
-                          reverse: true,
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: QuiccSpace.lg),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                _NextCard(plan: plan!, sending: _sending, onPressed: _onNext),
-                                QuiccSpace.gapLg,
-                                if (out.isEmpty)
-                                  const _Hint('No drivers out right now')
-                                else
-                                  for (final d in out) ...[
-                                    _DriverPill(
-                                      driver: d,
-                                      orders: ref.watch(floorProvider.select((s) => s.outWith(d.id).length)),
-                                      busy: _busyId == d.id,
-                                      onTap: () => _returned(d),
-                                    ),
-                                    if (d != out.last) QuiccSpace.gapSm,
-                                  ],
-                              ],
-                            ),
-                          ),
+                      ? _CloseUndoButton(
+                          key: const ValueKey('fab-round'),
+                          canUndo: canUndo,
+                          holdAnimation: _holdCtrl,
+                          onTap: _onRoundTap,
+                          onHoldStart: _onHoldStart,
+                          onHoldEnd: _onHoldEnd,
                         )
-                      : const SizedBox.shrink(key: ValueKey('fab-closed')),
+                      : _RoundButton(
+                          key: const ValueKey('fab-collapsed'),
+                          size: 64,
+                          outCount: out.length,
+                          onTap: _expand,
+                          semantics: out.isEmpty
+                              ? 'Driver button. No drivers out'
+                              : 'Driver button. ${out.length} driver${out.length == 1 ? '' : 's'} out',
+                          child: const Icon(Icons.local_shipping_outlined, color: QuiccColors.brand900, size: 30),
+                        ),
                 ),
-              ),
-              AnimatedSwitcher(
-                duration: d(300),
-                reverseDuration: d(180),
-                switchInCurve: m.full ? Curves.easeOutBack : Curves.linear,
-                switchOutCurve: Curves.easeInCubic,
-                transitionBuilder: (child, anim) => ScaleTransition(
-                  scale: Tween<double>(begin: m.full ? 0.7 : 1, end: 1).animate(anim),
-                  alignment: Alignment.bottomRight,
-                  child: FadeTransition(opacity: anim, child: child),
-                ),
-                child: _expanded
-                    ? _CloseUndoButton(
-                        key: const ValueKey('fab-round'),
-                        canUndo: canUndo,
-                        holdAnimation: _holdCtrl,
-                        onTap: _onRoundTap,
-                        onHoldStart: _onHoldStart,
-                        onHoldEnd: _onHoldEnd,
-                      )
-                    : _RoundButton(
-                        key: const ValueKey('fab-collapsed'),
-                        size: 64,
-                        outCount: out.length,
-                        onTap: _expand,
-                        semantics: out.isEmpty
-                            ? 'Driver button. No drivers out'
-                            : 'Driver button. ${out.length} driver${out.length == 1 ? '' : 's'} out',
-                        child: const Icon(Icons.local_shipping_outlined, color: QuiccColors.brand900, size: 30),
-                      ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -476,6 +476,7 @@ Future<bool> confirmDialog(
   required String title,
   required String message,
   String confirm = 'CONFIRM',
+  String cancel = 'CANCEL',
   bool destructive = false,
 }) async {
   final r = await showDialog<bool>(
@@ -484,7 +485,7 @@ Future<bool> confirmDialog(
       title: Text(title),
       content: Text(message),
       actions: [
-        TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('CANCEL')),
+        TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text(cancel)),
         FilledButton(
           style: destructive ? FilledButton.styleFrom(backgroundColor: QuiccColors.statusVoided) : null,
           onPressed: () => Navigator.of(ctx).pop(true),
