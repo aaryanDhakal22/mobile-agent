@@ -12,6 +12,7 @@ import '../common/widgets.dart';
 import '../dev/dev_widgets.dart';
 import '../diagnose/report.dart';
 import '../settings/settings_card.dart';
+import 'update_prompt.dart' show kPlayProtectHint;
 import 'updater.dart';
 
 const kUpdatesInfo = InfoText(
@@ -20,8 +21,10 @@ const kUpdatesInfo = InfoText(
       'It installs a new version right after Close batch, when nothing is ringing or cooking, and '
       'comes back by itself a minute later. Nothing ever locks the tablet, and an order can always '
       'be accepted.\n\n'
-      'Android asks for one tap the first time Quibase installs itself; after that, updates need no '
-      'tap. If one ever needs a tap, Quibase asks "Install now?" when the store is quiet.\n\n'
+      'Android asks for one tap the first time Quibase installs itself; after that, Android needs no '
+      'tap. Google Play Protect still asks about each new version: tap More details → Install '
+      'without scanning. If an update is waiting on a tap, Quibase asks "Install now?" when the '
+      'store is quiet.\n\n'
       'INSTALL NOW installs a downloaded version straight away. CHECK NOW asks the Pi what it has.\n\n'
       'Reopen after an update: Android only lets Quibase bring its screen back by itself when it may '
       '"display over other apps". TURN ON opens that switch: turn it on for Quibase and come back.',
@@ -75,7 +78,10 @@ class _UpdateStatusCardState extends ConsumerState<UpdateStatusCard> {
           warn: u.wantsTap,
           bad: u.phase == UpdatePhase.failed,
         ),
-        KeyValueRow('Install', u.silent ? 'No tap needed' : 'The next update asks for one tap (Android)'),
+        KeyValueRow(
+          'Install',
+          u.silent ? 'No Android tap needed (Play Protect may still ask)' : 'The next update asks for one tap (Android)',
+        ),
         Row(
           children: [
             Expanded(
@@ -93,6 +99,11 @@ class _UpdateStatusCardState extends ConsumerState<UpdateStatusCard> {
               ),
           ],
         ),
+        if (u.wantsTap || u.phase == UpdatePhase.installing)
+          Padding(
+            padding: const EdgeInsets.only(top: QuiccSpace.sm),
+            child: Text(kPlayProtectHint, style: QuiccType.text(QuiccType.caption, color: context.palette.textMuted)),
+          ),
         if (u.phase == UpdatePhase.downloading && u.progress != null) ...[
           QuiccSpace.gapSm,
           LinearProgressIndicator(value: u.progress, minHeight: 6),

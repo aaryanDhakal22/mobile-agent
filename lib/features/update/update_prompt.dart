@@ -8,6 +8,11 @@ import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
 import 'updater.dart';
 
+/// Store tablets keep Google Play Protect on, and it asks about every new
+/// build of a sideloaded app — the one tap an update still needs.
+const kPlayProtectHint =
+    'If Google Play Protect asks to scan Quibase, tap More details → Install without scanning.';
+
 /// "Update ready — install now?" (1.6.1). Only shows when Android needs a
 /// tap for an install (or one failed), at a quiet moment — nothing ringing,
 /// waiting or cooking — and not while LATER's snooze runs. It never locks
@@ -84,6 +89,13 @@ class _Prompt extends ConsumerWidget {
                   Text(title, style: QuiccType.text(QuiccType.title, weight: FontWeight.w700)),
                   QuiccSpace.gapSm,
                   Text(message, style: QuiccType.text(QuiccType.body, color: palette.textSecondary, height: 1.4)),
+                  if (u.phase != UpdatePhase.needPermission) ...[
+                    QuiccSpace.gapMd,
+                    Text(
+                      kPlayProtectHint,
+                      style: QuiccType.text(QuiccType.label, color: palette.textMuted, height: 1.4),
+                    ),
+                  ],
                   if (u.phase == UpdatePhase.failed && (u.error?.details.isNotEmpty ?? false)) ...[
                     QuiccSpace.gapSm,
                     DetailsToggle(u.error!.details),

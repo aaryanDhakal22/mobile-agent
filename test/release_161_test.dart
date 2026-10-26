@@ -324,6 +324,7 @@ void main() {
       expect(prompt, findsOneWidget);
       expect(find.text('Quibase 1.6.1 is ready'), findsOneWidget);
       expect(find.text('floor underneath'), findsOneWidget, reason: 'no lock: the app is still there');
+      expect(find.textContaining('Install without scanning'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('update-later')));
       await tester.pump();
@@ -365,7 +366,7 @@ void main() {
       );
       await tester.pump();
       expect(find.text('1.6.1 downloaded — installs by itself after Close batch'), findsOneWidget);
-      expect(find.text('No tap needed'), findsOneWidget);
+      expect(find.text('No Android tap needed (Play Protect may still ask)'), findsOneWidget);
       expect(find.byKey(const ValueKey('update-reopen')), findsOneWidget, reason: 'reopen is off');
       await tester.tap(find.byKey(const ValueKey('update-install-now')));
       await tester.pump();

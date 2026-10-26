@@ -158,8 +158,14 @@ After the install the ring service comes back by itself (`RestartReceiver`,
 below); the **screen** comes back too only when Quibase may "display over
 other apps" — Android's rule for opening a screen from the background — so
 Updates has **Reopen after an update · TURN ON** (also used after a reboot).
-Google Play Protect may ask to scan the sideloaded app on an install ("Install
-without scanning" keeps it private). (≤ 1.6.0 locked behind "Updating Quibase"
+**Google Play Protect** (left on — the store tablets have no Google
+account) stops every new build with "App scan recommended": someone taps
+**More details → Install without scanning** (it keeps the app private; "Scan
+app" uploads it to Google). The prompt and the Updates screen say so. Turning
+off *Scan apps with Play Protect* (Android Settings → Security → Google Play
+Protect — no account needed) would make updates fully silent. Tested on the
+staging tablet 2026-10-26: download during service, install on Close batch,
+Android's own screen skipped once Quibase is its installer, screen reopens. (≤ 1.6.0 locked behind "Updating Quibase"
 until INSTALL was tapped.)
 
 **Driver name flash.** When a driver is sent out (from this tablet or anywhere
