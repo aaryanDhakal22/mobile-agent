@@ -22,7 +22,7 @@ const kUpdatesInfo = InfoText(
       'comes back by itself a minute later. Nothing ever locks the tablet, and an order can always '
       'be accepted.\n\n'
       'Android asks for one tap the first time Quibase installs itself; after that, Android needs no '
-      'tap. Google Play Protect still asks about each new version: tap More details → Install '
+      'tap. Google Play Protect still asks about each new version: tap More details, then Install '
       'without scanning. If an update is waiting on a tap, Quibase asks "Install now?" when the '
       'store is quiet.\n\n'
       'INSTALL NOW installs a downloaded version straight away. CHECK NOW asks the Pi what it has.\n\n'

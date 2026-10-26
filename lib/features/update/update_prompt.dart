@@ -11,7 +11,7 @@ import 'updater.dart';
 /// Store tablets keep Google Play Protect on, and it asks about every new
 /// build of a sideloaded app — the one tap an update still needs.
 const kPlayProtectHint =
-    'If Google Play Protect asks to scan Quibase, tap More details → Install without scanning.';
+    'If Google Play Protect asks to scan Quibase, tap More details, then Install without scanning.';
 
 /// "Update ready — install now?" (1.6.1). Only shows when Android needs a
 /// tap for an install (or one failed), at a quiet moment — nothing ringing,

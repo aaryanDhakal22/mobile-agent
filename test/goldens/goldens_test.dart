@@ -1,5 +1,5 @@
 // Golden screenshots of the key 1.6.0 screens, dark + light, at the
-// counter tablet's 1280×800. Real fonts (the bundled Inter + JetBrains Mono,
+// counter tablet's 1280×800. Real fonts (the bundled Barlow family,
 // Material icons from the Flutter SDK) and a pinned clock, so the images only
 // change when the UI does. After a deliberate UI change:
 //
@@ -42,8 +42,9 @@ Future<void> _loadFont(String family, List<String> paths) async {
 
 Future<void> _loadFonts() async {
   const w = ['Regular', 'Medium', 'SemiBold', 'Bold'];
-  await _loadFont('Inter', [for (final x in w) 'assets/fonts/Inter-$x.ttf']);
-  await _loadFont('JetBrainsMono', [for (final x in w) 'assets/fonts/JetBrainsMono-$x.ttf']);
+  for (final f in ['Barlow', 'BarlowCondensed', 'BarlowSemiCondensed']) {
+    await _loadFont(f, [for (final x in w) 'assets/fonts/$f-$x.ttf']);
+  }
   final root = Platform.environment['FLUTTER_ROOT'] ?? File(Platform.resolvedExecutable).parent.parent.parent.parent.parent.path;
   final mf = '$root/bin/cache/artifacts/material_fonts';
   await _loadFont('MaterialIcons', ['$mf/MaterialIcons-Regular.otf']);

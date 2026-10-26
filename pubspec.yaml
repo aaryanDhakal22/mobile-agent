@@ -37,24 +37,35 @@ flutter:
   uses-material-design: true
   assets:
     - assets/sounds/
-  # Bundled (OFL, licenses next to the files) so text renders the same offline
-  # and in golden tests. Inter = text, JetBrains Mono = numbers.
+  # Bundled (OFL, assets/fonts/Barlow-OFL.txt) so text renders the same
+  # offline and in golden tests. 1.6.1 "signage" set, one superfamily:
+  # Barlow = text, Barlow Condensed = titles / names / bold lines / buttons,
+  # Barlow Semi Condensed (tabular figures) = numbers.
   fonts:
-    - family: Inter
+    - family: Barlow
       fonts:
-        - asset: assets/fonts/Inter-Regular.ttf
-        - asset: assets/fonts/Inter-Medium.ttf
+        - asset: assets/fonts/Barlow-Regular.ttf
+        - asset: assets/fonts/Barlow-Medium.ttf
           weight: 500
-        - asset: assets/fonts/Inter-SemiBold.ttf
+        - asset: assets/fonts/Barlow-SemiBold.ttf
           weight: 600
-        - asset: assets/fonts/Inter-Bold.ttf
+        - asset: assets/fonts/Barlow-Bold.ttf
           weight: 700
-    - family: JetBrainsMono
+    - family: BarlowCondensed
       fonts:
-        - asset: assets/fonts/JetBrainsMono-Regular.ttf
-        - asset: assets/fonts/JetBrainsMono-Medium.ttf
+        - asset: assets/fonts/BarlowCondensed-Regular.ttf
+        - asset: assets/fonts/BarlowCondensed-Medium.ttf
           weight: 500
-        - asset: assets/fonts/JetBrainsMono-SemiBold.ttf
+        - asset: assets/fonts/BarlowCondensed-SemiBold.ttf
           weight: 600
-        - asset: assets/fonts/JetBrainsMono-Bold.ttf
+        - asset: assets/fonts/BarlowCondensed-Bold.ttf
+          weight: 700
+    - family: BarlowSemiCondensed
+      fonts:
+        - asset: assets/fonts/BarlowSemiCondensed-Regular.ttf
+        - asset: assets/fonts/BarlowSemiCondensed-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/BarlowSemiCondensed-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/BarlowSemiCondensed-Bold.ttf
           weight: 700
