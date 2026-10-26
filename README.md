@@ -13,13 +13,23 @@ the Pi) — never to `main/` or `online/`. The agent's API is specified in
 
 | Tab | What staff do there |
 |---|---|
-| **Kitchen** (start screen) | Compact tickets in masonry columns, **most urgent first** (earliest promised ready time): kitchen #, type, time since the order arrived, the customer's name, **every item** (small font), **Reprint receipt** (the customer receipt only), **Resend to kitchen** (1.3.5: every kitchen ticket again, `POST /api/orders/{id}/kitchen`, always asks "Send to the kitchen again?" first; an older Pi says it needs an update) and **Ready**. The order details screen has the same two buttons (Resend once the order has a kitchen number). Each ticket is tinted by lateness: **green** until *green till* minutes after it arrived (agent web UI setting, default 20), then amber, **fully red at twice that**. New orders don't have a tab — they ring full-screen (below) and are accepted there. |
+| **Kitchen** (start screen) | Compact tickets in masonry columns, **most urgent first** (earliest promised ready time). Each ticket (1.5.0) is a white "paper" body under a **card bar** in the lateness colour: the bar holds the big number (kitchen #, or the POS check # with a **POS** tag for a POS order; an online order the hub put into the POS also shows *POS #n*), **PAID** when settled, and the order type. The body: time since the order arrived, minutes left and the promised ready time (**LATE n min** past it), the customer's name, an order **flag** if any (e.g. "Settle manually: …", in the severity colour), **every item** (small font), the notes, then two icon buttons — **Reprint receipt** (the customer receipt only) and **Resend to kitchen** (1.3.5: every kitchen ticket again, `POST /api/orders/{id}/kitchen`, always asks "Send to the kitchen again?" first; an older Pi says it needs an update) — and **READY**. The order details screen has the same two buttons (Resend once the order has a kitchen number). Lateness: **green** until *green till* minutes after it arrived (agent web UI setting, default 20; a POS order counts from when the cashier pressed Send), then amber, **fully red at twice that**. A paid ticket that isn't ready (paid pickup, POS counter order) gets a slow soft green **paid wave** (feature switch). POS counter checks with nothing for the kitchen stay off the board (`board_hidden`). Scheduled **future orders** wait greyed in the **Later · N** strip at the end (due time, when it rings again, lead; tap = change the lead time). New orders don't have a tab — they ring full-screen (below) and are accepted there. |
 | **Deliveries** | (1.4.0) Two columns. **Left — Unassigned · N**: delivery orders that are cooking (greyed, "ready in ~4 min") or ready and in nobody's pool, oldest placed first: kitchen #, customer, address, **2.3 mi · 7 min** (amber *approx* / red *outside area* tags; *locating…* / *no location* while main hasn't found it), tip, **CASH $x** / **PAID** and minutes since placed (amber 10 min before the delivery target, red past it). **Right**: one box per **available** driver in queue order (**NEXT** on top; no reordering here), each holding that driver's **pool** — chips with kitchen #, street, tip, mi · min, tags and ✕ (back to the left) — and **SEND OUT** (asks "#1104 isn't marked ready — send anyway?" when something is cooking; yes marks it ready; the name flash follows). Fill pools by **long-press drag** (left → driver, driver → driver, driver → left) or **SELECT** (tap deliveries, then tap a driver box — or the left column to unassign; a bar shows "N selected · CANCEL"). Tapping a driver's name opens the **run map**. Below: **Out** — each driver out with a run timer, their kitchen numbers (tap = the order) and **I HAVE RETURNED**. A single tap on any delivery opens it. **AUTO** asks the Pi for fair, route-aware runs for every available driver: the suggestions slide into the boxes with a **yellow glow** and nothing is saved until **CONFIRM** — an edited preview confirms only the stops still showing (`order_ids`) — (**CLEAR** drops them; *estimated (offline)* when the Pi had to guess drive times). Send Out on a driver with yellow stops sends those too. The preview drops itself (with a toast) if the floor changes under it. Pools live on the Pi (`/api/deliveries/pool`, `/api/drivers/{id}/send-out`, `/api/deliveries/auto-plan[/{id}/confirm]`). |
-| **Drivers** | Driver roster in queue order: add, rename, remove, drag to reorder. Each driver shows **off** (clocked out) / **available** (in the queue) / **out** (on a run), the clock-in time and runs this batch. **Clock in** puts a driver at the back of the queue; **Clock out** works while they're available (out on a run → "tap I have returned first"). Shows the daily auto clock-out time ("Everyone is clocked out daily at 10:00 AM" — set in the agent web UI). **Shifts** lists the last 7 days of clock-in/out records (for reports, not wages). |
+| **Drivers** | Driver roster in queue order: add, edit (name + **Driver #** — optional, 1.5.0; the in-app help says "their SoftTouch login number", but at Lombardi's it is the driver's SoftTouch **Employee Number** — the hub matches `EMPLOYEENUMBER`, CUTOVER §3a — and the hub writes it onto the POS check when the driver goes out), remove, drag to reorder. Each driver shows **off** (clocked out) / **available** (in the queue) / **out** (on a run), the clock-in time and runs this batch. **Clock in** puts a driver at the back of the queue; **Clock out** works while they're available (out on a run → "tap I have returned first"). Shows the daily auto clock-out time ("Everyone is clocked out daily at 10:00 AM" — set in the agent web UI). **Shifts** lists the last 7 days of clock-in/out records (for reports, not wages). |
 | **History** | Current batch (live) or any kept closed batch; tap an order for full detail (items with size / modifiers / notes, customer, address, kitchen #, timeline, what was paid and the **CASH DUE**). |
 | **Batch** | The open batch and **Close batch**. If orders are unfinished the agent lists them; confirm to close anyway (they're auto-finished). CLOSE ANYWAY asks the agent again first: an order that came in while the list was open shows the list again (marked NEW) instead of being cancelled unseen. Kitchen numbers restart at 1100. Closing prints **one driver report per driver** on the receipt printer. Below: **Driver reports** for the open or any kept batch (deliveries, cash owed, tips after tip tax, owed to store) and **Print driver reports** to reprint. |
 | **Printers** | Read-only printer reachability. Printers are configured in the Quicc web app (main), not here. |
-| **Settings** | Big-button cards, each with an (i) explaining it in plain words: **Continue setup** (while the setup wizard is unfinished); **The Pi** — its address, checked live as you type ("Found the Pi ✓ — *store*" / "Nothing there ✗"; a bare IP gets `:8080`), SAVE keeps the pairing, plus live / last sync / sync backlog; **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code from the Pi, shown big with an expiry countdown and the steps for the new tablet: open Quibase → pick this Pi → I have a code → type it), **Unpair**; **Order chime** (sound + preview); **Receipts** — kitchen-ticket item / number size, the customer receipt's footer (store default, own text or none) and its size, copies (1 / 2), store name + address, customer phone, extra paper before the cut; SAVE, **PRINT SAMPLE** on a chosen printer (default the receipt printer; unsaved changes are saved first) and RESET TO DEFAULTS (`/api/settings/receipt`, `/api/printers/sample`; an older Pi shows "This Pi needs an update for receipt settings"); **Deliveries** — AUTO's delivery target (15–120 min, default 45) and "soon ready" minutes (0–30, default 5), − / + and SAVE (`PUT /api/settings/deliveries`); **Checks & tests** (tablet checks, test ring, test print); **Light / Dark / System** (remembered across restarts; the `q` logo still toggles light ↔ dark); **About & diagnostics**. |
+| **Settings** | Big-button cards, each with an (i) explaining it in plain words: **Continue setup** (while the setup wizard is unfinished); **The Pi** — its address, checked live as you type ("Found the Pi ✓ — *store*" / "Nothing there ✗"; a bare IP gets `:8080`), SAVE keeps the pairing, plus live / last sync / sync backlog; **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code from the Pi, shown big with an expiry countdown and the steps for the new tablet: open Quibase → pick this Pi → I have a code → type it), **Unpair**; **Order chime** (sound + preview); **Receipts** — kitchen-ticket item / number size, the customer receipt's footer (store default, own text or none) and its size, copies (1 / 2), store name + address, customer phone, extra paper before the cut; SAVE, **PRINT SAMPLE** on a chosen printer (default the receipt printer; unsaved changes are saved first) and RESET TO DEFAULTS (`/api/settings/receipt`, `/api/printers/sample`; an older Pi shows "This Pi needs an update for receipt settings"); **Deliveries** — AUTO's delivery target (15–120 min, default 45) and "soon ready" minutes (0–30, default 5), − / + and SAVE (`PUT /api/settings/deliveries`); **Default times** (1.5.0) — X for pickup / dine-in (default 15) and Y for delivery (default 35), 1–240 min, where the accept time picker starts (`PUT /api/settings/times`); **Features** — six switches saved one by one on the Pi (`/api/settings/features`): *POS orders pull-in*, *Online order insert*, *Driver write-back*, *Address heal*, *Future orders*, *Paid wave*; **Kitchen tickets** — which orders print station tickets by themselves (`/api/settings/tickets`): POS delivery / takeout / counter (usually off — SoftTouch prints those), online cash pickup, online cash delivery, online card (an older Pi shows "This Pi needs an update for these switches"); **Checks & tests** (tablet checks, test ring, test print); **Light / Dark / System** (remembered across restarts; the `q` logo still toggles light ↔ dark); **About & diagnostics**. |
+
+**Accepting (1.5.0).** The full-screen alert and the order details use one
+**time picker**: three buttons **X / X+5 / X+10** (X = the store's default
+time for the order type, preselected, so one CONFIRM tap is enough) with
+− / + beside X+10 (never below X+10, up to 240). A **future order** (the Pi
+marks it `future`: promised later than now + its default time) uses the same picker
+on its first ring to set the **lead time** (`POST /api/orders/{id}/schedule`
+— nothing prints; it goes to the Later strip); when it rings again
+(`rerung`) one CONFIRM prints it with the lead picked before. A timed-out
+accept is read back from the Pi before the tablet says it failed.
 
 **New-order alarm.** A new order opens a full-screen alert and loops the chosen
 sound on the Android *alarm* stream. Tapping does **not** silence it — it stops
@@ -79,6 +89,25 @@ the logo is green (live), amber (connecting) or red (retrying).
 
 The screen is kept on with `wakelock_plus`. There is no auto-accept in the app.
 
+## POS orders and hub alerts (1.5.0)
+
+With **quicc-hub** (the store's bridge to the old SoftTouch POS, Pi 2.1.0)
+checks the cashier sent arrive as SSE `order.added`: already accepted, they
+**never ring** — a new POS delivery plays a gentle **soft chime** once on the
+notification stream (`core/soft_chime.dart`). They show the POS check # with
+a POS tag, **PAID** when settled at the terminal, and the cash the hub read
+off the check (`cash_due_cents`); they are `local_only` (never synced to
+main). POS deliveries join the Deliveries columns and pools like any other.
+With *POS orders pull-in* off the tablet hides them (the Pi keeps them). An
+order the hub couldn't map carries a **flag**; the order details also show
+"POS says #12 (not clocked in)" when the POS's driver disagrees.
+
+The hub's problems come through the Pi: **info / warn** as a toast in the
+top-right corner (once per problem, fades by itself; SSE `integration.toast`
+too), **serious** ones ("POS link down", "Quicc batch not open in SoftTouch")
+as a full-width banner under the warning bars until the hub clears them.
+Code: `lib/features/integration/`.
+
 ## First-time setup (the wizard)
 
 A fresh install (or a tablet that lost its pairing) opens a step-by-step setup
@@ -108,7 +137,9 @@ for the **store manager** — big buttons, plain words, an (i) on every step:
    name it (chips Online / Pizza / Desi / Sub / Wings / Kitchen) →
    `POST /api/printers/add` (the Pi asks main; the first printer becomes the
    receipt printer). A Pi without these routes hides the section.
-8. **Drivers** ("Who drives tonight?") and the **order chime**.
+8. **Drivers** ("Who drives tonight?", each with an optional Driver #),
+   **Default times** ("How long do orders usually take?" — X / Y for the
+   time picker; an older Pi offers SKIP) and the **order chime**.
 9. **All set** → START TAKING ORDERS (sends a setup report to the owner).
 
 Progress is saved on every step (`setup_progress_v1`, never the password);
@@ -155,7 +186,10 @@ place pin"; never located (geo `unavailable`) → "No map location — tap to
 place pin":
 tap where the door is, **SAVE PIN** (`POST /api/orders/{id}/pin`; main
 remembers it for the address and the route arrives as an order update). A
-located order can be re-pinned too (pin button). Without a map file on the Pi
+located order can be re-pinned too (pin button). **Check address** (1.5.0):
+when main found more than one place for the address (geo `check`), an amber
+CHECK ADDRESS tag / button offers up to 3 candidates
+(`POST /api/orders/{id}/geo/choose`) or a full-screen pin. Without a map file on the Pi
 yet: a plain card with the distance and "Map not downloaded yet". The **run
 map** (driver name on the Deliveries screen) numbers the pool's stops in the
 fastest driving order (`GET /api/drivers/{id}/pool/trip`), with the route
@@ -186,7 +220,8 @@ owner** sends a report: via the Pi, else straight to main with a report-only
 key, else an outbox retried later. Code: `lib/features/diagnose/`,
 `lib/features/illustrations/`.
 
-**Cash vs prepaid.** One rule, the same as the agent's receipt: cash to
+**Cash vs prepaid.** A POS order: the hub's `cash_due_cents` (0 once
+**PAID**). An online order — one rule, the same as the agent's receipt: cash to
 collect = the sum of the payments whose method is `cash` (main sends cash
 owing as an explicit cash payment; part-paid = card + cash); an older order
 with **no payments at all** is cash for the whole total; `other` (third party /
@@ -240,6 +275,7 @@ lib/
     diag_models.dart         /api/diag, printer test, pairing code, report token
     receipt_models.dart      ReceiptPrefs (receipt settings) + the GET/PUT answer
     alert_player.dart        looping alarm sound (audioplayers)
+    soft_chime.dart          one-shot soft chime for a new POS delivery
     format.dart, json.dart   formatting + defensive JSON readers
     delivery_models.dart     AUTO plan / confirm / pool trip / delivery settings
     auto_preview.dart        the AUTO yellow preview (tablet memory only)
@@ -249,11 +285,14 @@ lib/
                               (+ driver reports), printers, settings, setup,
                               diagnose (Help + guides), illustrations,
                               order_detail, maps (delivery map, run map,
-                              offline tiles), alert (+ accept controls), update
+                              offline tiles, check address), alert, arrived
+                              (accept controls + time picker), integration
+                              (hub toasts + banner), update
                               (forced self-update gate), home (nav rail),
                               common (shared widgets)
   theme/                     QuiccColors / QuiccPalette / QuiccTheme
 test/                        model parsing, SSE parsing + reducer (incl.
                              drivers.dispatched), driver filter, alarm rule,
-                             API client (MockClient), screen smoke tests
+                             API client (MockClient), screen smoke tests,
+                             POS / future-order models + widgets (release_150_*)
 ```
