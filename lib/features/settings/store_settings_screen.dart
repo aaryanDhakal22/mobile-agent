@@ -8,7 +8,9 @@ import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
 import '../setup/setup_entry.dart';
+import 'auto_accept_card.dart';
 import 'chime_picker.dart';
+import 'delivery_area_card.dart';
 import 'deliveries_settings_card.dart';
 import 'pos_settings_cards.dart';
 import 'receipt_settings_card.dart';
@@ -34,13 +36,13 @@ class StoreSettingsScreen extends StatelessWidget {
           key: ValueKey('group-deliveries'),
           title: 'Deliveries',
           caption: 'How AUTO plans runs, and which deliveries count as close to a run.',
-          children: [_ComingSoonCard(), DeliveriesSettingsCard()],
+          children: [DeliveryAreaCard(), DeliveriesSettingsCard()],
         ),
         SettingsGroup(
           key: ValueKey('group-times'),
-          title: 'Default times',
-          caption: 'Where the time picker starts when you accept an order.',
-          children: [DefaultTimesSettingsCard()],
+          title: 'New orders',
+          caption: 'Auto-accept, and where the time picker starts when you accept an order.',
+          children: [AutoAcceptCard(), DefaultTimesSettingsCard()],
         ),
         SettingsGroup(
           key: ValueKey('group-tickets'),
@@ -72,34 +74,6 @@ class StoreSettingsScreen extends StatelessWidget {
       ],
     );
   }
-}
-
-/// The two delivery settings 1.7.0 fills in, shown greyed so staff know
-/// they are coming.
-class _ComingSoonCard extends StatelessWidget {
-  const _ComingSoonCard();
-
-  @override
-  Widget build(BuildContext context) => const SettingsCard(
-    title: 'Delivery area and nearby',
-    info: kComingInfo,
-    children: [
-      // 1.7.0: a radius slider synced to main (PUT /api/settings/deliveries
-      // {radius_m}) and the nearby rule + threshold.
-      ComingSoonRow(
-        key: ValueKey('coming-radius'),
-        icon: Icons.radar,
-        title: 'Delivery radius',
-        explanation: 'How far the store delivers. Farther orders get the "outside area" tag.',
-      ),
-      ComingSoonRow(
-        key: ValueKey('coming-nearby'),
-        icon: Icons.near_me_outlined,
-        title: 'Nearby rule',
-        explanation: 'When NEXT on the driver button sends you to Deliveries for a close-by order first.',
-      ),
-    ],
-  );
 }
 
 class ThemeSettingsCard extends ConsumerWidget {

@@ -139,23 +139,109 @@ class PoolTrip {
 }
 
 /// `PUT /api/settings/deliveries`.
+/// The "nearby" rule (2.2.0): when the driver button's NEXT sends you to
+/// Deliveries because an unassigned delivery is close to the next driver's run.
+enum NearbyRule {
+  /// Adds at most N minutes of driving to his run.
+  detour,
+
+  /// Within X miles (straight line) of a stop in his pool.
+  distance,
+
+  /// AUTO would put it in his run.
+  bundle,
+  off;
+
+  static NearbyRule? parse(Object? raw) => switch ('$raw') {
+    'detour' => NearbyRule.detour,
+    'distance' => NearbyRule.distance,
+    'bundle' => NearbyRule.bundle,
+    'off' => NearbyRule.off,
+    _ => null,
+  };
+}
+
+/// `PUT /api/settings/deliveries` (2.0.9; nearby + radius 2.2.0). The 2.2.0
+/// fields are sent only when set, so an older Pi still takes the rest.
 class DeliverySettings {
   final int soonReadyMinutes;
   final int deliveryTargetMinutes;
-  const DeliverySettings({required this.soonReadyMinutes, required this.deliveryTargetMinutes});
+  final NearbyRule? nearbyRule;
+  final int? nearbyDetourMinutes;
+  final double? nearbyDistanceMi;
+
+  /// Synced to main (RPC `location.radius`); main pushes the store back.
+  final int? deliveryRadiusM;
+
+  const DeliverySettings({
+    required this.soonReadyMinutes,
+    required this.deliveryTargetMinutes,
+    this.nearbyRule,
+    this.nearbyDetourMinutes,
+    this.nearbyDistanceMi,
+    this.deliveryRadiusM,
+  });
 
   static const int minSoonReady = 0, maxSoonReady = 30;
   static const int minTarget = 15, maxTarget = 120;
+  static const int minDetour = 1, maxDetour = 30, defaultDetour = 5;
+  static const double minDistanceMi = 0.1, maxDistanceMi = 10, defaultDistanceMi = 1.0;
+  static const int minRadiusM = 500, maxRadiusM = 80467;
 
   factory DeliverySettings.fromJson(Map<String, dynamic> json) => DeliverySettings(
     soonReadyMinutes: jInt(json['soon_ready_minutes']),
     deliveryTargetMinutes: jInt(json['delivery_target_minutes']),
+    nearbyRule: NearbyRule.parse(json['nearby_rule']),
+    nearbyDetourMinutes: jIntOrNull(json['nearby_detour_minutes']),
+    nearbyDistanceMi: json['nearby_distance_mi'] is num ? (json['nearby_distance_mi'] as num).toDouble() : null,
+    deliveryRadiusM: jIntOrNull(json['delivery_radius_m']),
   );
 
   Map<String, Object> toJson() => {
     'soon_ready_minutes': soonReadyMinutes,
     'delivery_target_minutes': deliveryTargetMinutes,
+    'nearby_rule': ?nearbyRule?.name,
+    'nearby_detour_minutes': ?nearbyDetourMinutes,
+    'nearby_distance_mi': ?nearbyDistanceMi,
+    'delivery_radius_m': ?deliveryRadiusM,
   };
+}
+
+/// `GET /api/deliveries/next-check` (2.2.0): unassigned deliveries "nearby"
+/// the next driver's run, by the store's rule.
+class NextCheck {
+  final String? driverId;
+  final NearbyRule? rule;
+  final List<String> nearbyOrderIds;
+  final String reason;
+  const NextCheck({this.driverId, this.rule, this.nearbyOrderIds = const [], this.reason = ''});
+
+  bool get redirect => nearbyOrderIds.isNotEmpty;
+
+  factory NextCheck.fromJson(Map<String, dynamic> json) => NextCheck(
+    driverId: jStrOrNull(jStr(json['driver_id'])),
+    rule: NearbyRule.parse(json['rule']),
+    nearbyOrderIds: _ids(json['nearby_order_ids']),
+    reason: jStr(json['reason']).trim(),
+  );
+}
+
+/// One line of the Pi's own log (`GET /api/dev/events`, 2.2.0). No PII.
+class PiEvent {
+  final int seq;
+  final DateTime? at;
+  final String level;
+  final String kind;
+  final String text;
+  const PiEvent({required this.seq, this.at, this.level = 'info', this.kind = 'system', this.text = ''});
+
+  factory PiEvent.fromJson(Map<String, dynamic> json) => PiEvent(
+    seq: jInt(json['seq']),
+    at: jDate(json['at']),
+    level: jStr(json['level'], 'info'),
+    kind: jStr(json['kind'], 'system'),
+    text: jStr(json['text']),
+  );
 }
 
 List<String> _ids(Object? raw) => raw is List

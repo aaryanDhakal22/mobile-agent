@@ -9,6 +9,7 @@ import '../../theme/quicc_type.dart';
 import '../arrived/accept_controls.dart';
 import '../common/widgets.dart';
 import '../drivers/dispatch_flash.dart';
+import 'auto_accept_banner.dart';
 import '../maps/delivery_map.dart';
 
 /// Stacks, above every route: the driver name flash, the "still ringing"
@@ -42,6 +43,7 @@ class AlarmHost extends ConsumerWidget {
           ),
         ),
         const Positioned.fill(child: DispatchFlash()),
+        const Positioned.fill(child: AutoAcceptBanner()),
         if (alarm.ringing && alarm.visible) const Positioned.fill(child: NewOrderAlert()),
       ],
     );

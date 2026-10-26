@@ -36,13 +36,19 @@ class FloorState {
   final int dispatches;
 
   /// Bumped once per new POS delivery that asked for the soft chime (SSE
-  /// `order.added` with `chime:true`) — the ring bridge plays it.
+  /// `order.added` with `chime:true`), and per auto-accepted order (2.2.0) —
+  /// the ring bridge plays it.
   final int chimes;
 
   /// The latest SSE `integration.toast`, and a counter bumped per toast —
   /// the top-right toast host listens for it.
   final IntegrationToast? toast;
   final int toasts;
+
+  /// The latest order the Pi's auto-accept took (2.2.0), and a counter bumped
+  /// per one — the 3 s "auto-accepted" banner listens for it.
+  final String? autoAccepted;
+  final int autoAccepts;
 
   const FloorState({
     this.floor,
@@ -59,6 +65,8 @@ class FloorState {
     this.chimes = 0,
     this.toast,
     this.toasts = 0,
+    this.autoAccepted,
+    this.autoAccepts = 0,
   });
 
   FloorState copyWith({
@@ -76,6 +84,8 @@ class FloorState {
     int? chimes,
     IntegrationToast? toast,
     int? toasts,
+    String? autoAccepted,
+    int? autoAccepts,
   }) {
     return FloorState(
       floor: floor ?? this.floor,
@@ -92,6 +102,8 @@ class FloorState {
       chimes: chimes ?? this.chimes,
       toast: toast ?? this.toast,
       toasts: toasts ?? this.toasts,
+      autoAccepted: autoAccepted ?? this.autoAccepted,
+      autoAccepts: autoAccepts ?? this.autoAccepts,
     );
   }
 
@@ -344,7 +356,17 @@ FloorUpdate applySseEvent(FloorState s, SseEvent ev) {
       final o = StoredOrder.fromJson(jMap(payload));
       if (o.id.isEmpty) return FloorUpdate(s);
       if (ev.event == 'order.arrived' && s.isPastArrived(o.id, incoming: o)) return FloorUpdate(s);
-      return FloorUpdate(s.withOrder(o));
+      final next = s.withOrder(o);
+      // 2.2.0: auto-accepted by the Pi — new to this tablet (or it last saw
+      // it waiting): the soft chime and the 3 s banner, never the ring.
+      final before = s.orders[o.id];
+      final fresh = before == null || before.state == OrderState.arrived;
+      if (o.status.autoAccepted && o.state == OrderState.accepted && fresh) {
+        return FloorUpdate(
+          next.copyWith(chimes: s.chimes + 1, autoAccepted: o.id, autoAccepts: s.autoAccepts + 1),
+        );
+      }
+      return FloorUpdate(next);
     case 'order.added': // 2.1.0: a POS order from the hub — never rings
       if (payload is! Map) return FloorUpdate(s);
       final m = jMap(payload);

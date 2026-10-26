@@ -55,7 +55,7 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
     if (ok && mounted) toast(context, '${r.name} added — clock them in when they start');
   }
 
-  /// Name and Driver # (their SoftTouch login #); only what changed is sent.
+  /// Name and Driver # (their SoftTouch Employee Number); only what changed is sent.
   Future<void> _edit(Driver d) async {
     final r = await driverDialog(context, title: 'Edit driver', name: d.name, posNumber: d.posNumber ?? '');
     if (r == null || r.name.isEmpty || !mounted) return;

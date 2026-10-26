@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auto_preview.dart';
 import '../../core/floor_state.dart';
 import '../../core/models.dart';
+import '../../core/providers.dart';
 import '../deliveries/send_out.dart';
 
 /// Where the driver button's NEXT takes you.
@@ -81,13 +82,32 @@ NextPlan planNext(FloorState fs, AutoPreview? preview) {
 /// sending him out.
 class NearbyResult {
   final List<String> orderIds;
-  const NearbyResult([this.orderIds = const []]);
+
+  /// The Pi's plain words for why ("#1105 adds 3 min to Juma's run.").
+  final String reason;
+  const NearbyResult([this.orderIds = const [], this.reason = '']);
   bool get redirect => orderIds.isNotEmpty;
 }
 
-/// HOOK for 1.7.0: asks the Pi (`GET /api/deliveries/next-check`) whether an
+/// How long NEXT waits for the Pi's answer before sending anyway.
+const Duration kNearbyCheckTimeout = Duration(seconds: 4);
+
+/// Asks the Pi (`GET /api/deliveries/next-check`, 2.2.0) whether an
 /// unassigned delivery is "nearby" [driver]'s run, by the rule picked in Store
-/// settings → Deliveries (detour minutes / straight-line miles / AUTO would
-/// bundle it). Until the Pi has that endpoint it never redirects.
-Future<NearbyResult> nearbyCheck(ProviderContainer c, Driver driver, List<SendOutStop> stops) async =>
-    const NearbyResult();
+/// settings → Deliveries (extra driving minutes / straight-line miles / AUTO
+/// would bundle it). Never blocks a send-out: an older Pi, no answer within
+/// [kNearbyCheckTimeout] or any error means "no redirect". Only deliveries
+/// still unassigned on this tablet count (one taken meanwhile is skipped).
+Future<NearbyResult> nearbyCheck(ProviderContainer c, Driver driver, List<SendOutStop> stops) async {
+  final client = c.read(agentClientProvider);
+  if (client == null || stops.isEmpty) return const NearbyResult();
+  try {
+    final r = await client.nextCheck(driverId: driver.id).timeout(kNearbyCheckTimeout);
+    if (r == null || !r.redirect) return const NearbyResult();
+    final open = {for (final o in c.read(floorProvider).unassignedDeliveries) o.id};
+    final ids = r.nearbyOrderIds.where(open.contains).toList(growable: false);
+    return NearbyResult(ids, ids.isEmpty ? '' : r.reason);
+  } catch (_) {
+    return const NearbyResult();
+  }
+}

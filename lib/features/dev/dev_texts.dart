@@ -26,7 +26,6 @@ abstract final class DevText {
       'refreshes. Kept until the app restarts.';
   static const errorsTitle = 'Errors staff saw';
   static const errorsLine = 'Kept on the tablet across restarts, and sent with every diagnostics report.';
-  static const piLogsSoon = 'The Pi\'s own log comes with the next Pi update.';
 
   // Tests
   static const testsTitle = 'Tests';

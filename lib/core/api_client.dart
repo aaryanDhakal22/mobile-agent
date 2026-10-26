@@ -550,6 +550,48 @@ class AgentClient {
     ),
   );
 
+  // --- 2.2.0: nearby, auto-accept, Pi log -------------------------------------
+
+  /// `GET /api/deliveries/next-check` — deliveries "nearby" the next driver's
+  /// run by the store's rule; null from a Pi without it (≤ 2.1.x).
+  Future<NextCheck?> nextCheck({String? driverId}) async {
+    try {
+      final body = await _get('/api/deliveries/next-check', driverId == null ? null : {'driver_id': driverId});
+      return NextCheck.fromJson(jMap(body));
+    } on AgentException catch (e) {
+      if (e.statusCode == 404 || e.statusCode == 405) return null;
+      rethrow;
+    }
+  }
+
+  /// `GET /api/settings/auto-accept` (tablets may since 2.2.0). Null when this
+  /// Pi keeps it for its web UI only — never unpairs on that 401.
+  Future<bool?> autoAccept() async {
+    try {
+      return jBool(jMap(await _send('GET', '/api/settings/auto-accept', mayRevoke: false))['auto_accept']);
+    } on AgentException catch (e) {
+      if (e.statusCode == 401 || e.statusCode == 403 || e.statusCode == 404 || e.statusCode == 405) return null;
+      rethrow;
+    }
+  }
+
+  /// `PUT /api/settings/auto-accept` → the saved value.
+  Future<bool> setAutoAccept(bool on) async => jBool(
+    jMap(await _send('PUT', '/api/settings/auto-accept', body: {'auto_accept': on}, mayRevoke: false))['auto_accept'],
+  );
+
+  /// `GET /api/dev/events?since=` — the Pi's recent events, oldest first, and
+  /// the last seq; null from a Pi without it.
+  Future<(List<PiEvent>, int)?> piEvents({int since = 0}) async {
+    try {
+      final m = jMap(await _get('/api/dev/events', {'since': '$since'}));
+      return (jList(m['events'], PiEvent.fromJson), jInt(m['last_seq']));
+    } on AgentException catch (e) {
+      if (e.statusCode == 404 || e.statusCode == 405) return null;
+      rethrow;
+    }
+  }
+
   // --- app updates -------------------------------------------------------------
 
   /// `GET /api/app/latest` — the Quibase release the agent has cached, or
@@ -600,7 +642,7 @@ class AgentClient {
 
   Future<List<Driver>> listDrivers() async => jList(await _get('/api/drivers'), Driver.fromJson);
 
-  /// [posNumber]: their SoftTouch login # (2.1.0), sent only when given.
+  /// [posNumber]: their SoftTouch Employee Number (2.1.0), sent only when given.
   Future<Driver> createDriver(String name, {String? posNumber}) async => Driver.fromJson(
     jMap(
       await _send(
@@ -834,6 +876,7 @@ class AgentClient {
     Map<String, String>? query,
     Object? body,
     Duration? timeout,
+    bool mayRevoke = true,
   }) async {
     final req = http.Request(method, uri(path, query));
     req.headers.addAll(body == null ? _headers : _jsonHeaders);
@@ -848,7 +891,9 @@ class AgentClient {
     try {
       _check(resp);
     } on AgentException catch (e) {
-      if (e.isDeviceRevoked) onDeviceRevoked?.call();
+      // [mayRevoke] false: a route an older Pi keeps for web sessions only
+      // also answers device_required — that must not unpair the tablet.
+      if (e.isDeviceRevoked && mayRevoke) onDeviceRevoked?.call();
       rethrow;
     }
     if (resp.body.trim().isEmpty) return null;

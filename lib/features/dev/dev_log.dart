@@ -77,7 +77,11 @@ class DevLog extends Notifier<List<DevLogEntry>> {
       add(DevLogKind.floor, 'Driver sent out with ${[for (final o in d.orders) _num(o)].join(' ')}');
     }
     if (next.toasts > prev.toasts && next.toast != null) add(DevLogKind.floor, 'Hub: ${next.toast!.text}');
-    if (next.chimes > prev.chimes) add(DevLogKind.floor, 'POS delivery chime');
+    if (next.autoAccepts > prev.autoAccepts) {
+      add(DevLogKind.floor, 'Auto-accepted ${next.orders[next.autoAccepted]?.displayNumber ?? 'an order'}');
+    } else if (next.chimes > prev.chimes) {
+      add(DevLogKind.floor, 'POS delivery chime');
+    }
     if (!identical(prev.orders, next.orders)) _orderChanges(prev.orders, next.orders);
   }
 

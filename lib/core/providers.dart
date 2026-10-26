@@ -469,6 +469,12 @@ class FloorController extends Notifier<FloorState> {
           floor: f.copyWith(
             soonReadyMinutes: saved.soonReadyMinutes,
             deliveryTargetMinutes: saved.deliveryTargetMinutes,
+            nearbyRule: saved.nearbyRule,
+            nearbyDetourMinutes: saved.nearbyDetourMinutes,
+            nearbyDistanceMi: saved.nearbyDistanceMi,
+            store: saved.deliveryRadiusM == null || f.store == null
+                ? null
+                : StoreGeo(lat: f.store!.lat, lng: f.store!.lng, deliveryRadiusM: saved.deliveryRadiusM!),
           ),
         ),
       );
@@ -519,7 +525,7 @@ class FloorController extends Notifier<FloorState> {
     await _reloadDrivers();
   }
 
-  /// Name and / or Driver # (POS login #; '' clears it).
+  /// Name and / or Driver # (SoftTouch Employee Number; '' clears it).
   Future<void> updateDriver(String id, {String? name, String? posNumber}) async {
     await _requireClient(ref).updateDriver(id, name: name, posNumber: posNumber);
     await _reloadDrivers();

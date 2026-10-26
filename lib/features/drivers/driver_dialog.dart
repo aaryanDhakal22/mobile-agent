@@ -7,9 +7,9 @@ import '../../theme/quicc_type.dart';
 typedef DriverInput = ({String name, String posNumber});
 
 /// Help under the Driver # field.
-const String kDriverNumberHelp = 'Their SoftTouch login number. The POS gets it when they go out.';
+const String kDriverNumberHelp = 'Their SoftTouch Employee Number. The POS gets it when they go out.';
 
-/// Add / edit a driver: name + Driver # (their SoftTouch login #, optional).
+/// Add / edit a driver: name + Driver # (their SoftTouch Employee Number, optional).
 /// Resolves the trimmed values, or null when cancelled.
 Future<DriverInput?> driverDialog(
   BuildContext context, {

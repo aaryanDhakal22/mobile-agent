@@ -137,6 +137,7 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
         c.read(deliveryHighlightProvider.notifier).show(near.orderIds);
         nav.go(HomeDestination.deliveries);
         _collapse();
+        if (near.reason.isNotEmpty) toast(context, '${near.reason} Plan it first, then SEND OUT.');
         return;
       }
       final sent = await sendOutDriver(

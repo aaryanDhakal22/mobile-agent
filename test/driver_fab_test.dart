@@ -105,12 +105,6 @@ void main() {
       expect([for (final x in p.stops) (x.order.id, x.suggested)], [('d3', false), ('d1', true)]);
     });
 
-    test('nearbyCheck is a no-redirect hook until the Pi has next-check (1.7.0)', () async {
-      final c = ProviderContainer();
-      addTearDown(c.dispose);
-      final r = await nearbyCheck(c, const Driver(id: 'd-ana', name: 'Ana'), const []);
-      expect(r.redirect, isFalse);
-    });
   });
 
   testWidgets('badge = drivers out; the card shows NEXT, his tickets and SEND OUT', (tester) async {

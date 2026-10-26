@@ -137,6 +137,9 @@ class SettingsStepper extends StatelessWidget {
   final int min;
   final int max;
   final ValueChanged<int> onChanged;
+
+  /// How the value reads (default "N min").
+  final String Function(int value)? format;
   const SettingsStepper({
     super.key,
     required this.label,
@@ -146,6 +149,7 @@ class SettingsStepper extends StatelessWidget {
     required this.min,
     required this.max,
     required this.onChanged,
+    this.format,
   });
 
   @override
@@ -169,7 +173,7 @@ class SettingsStepper extends StatelessWidget {
       SizedBox(
         width: 96,
         child: Text(
-          '$value min',
+          format?.call(value) ?? '$value min',
           textAlign: TextAlign.center,
           style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700, color: QuiccColors.brand400),
         ),

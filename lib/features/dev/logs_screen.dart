@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/delivery_models.dart';
 import '../../core/local_log.dart';
+import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
@@ -12,8 +16,9 @@ import 'dev_widgets.dart';
 
 enum _Filter { all, connection, floor, errors }
 
-/// Developer mode → Logs: this tablet's recent events (in memory) and the
-/// errors staff saw (kept on the tablet). The Pi's own log is 1.7.0.
+/// Developer mode → Logs: this tablet's recent events (in memory), the Pi's
+/// own recent events (2.2.0, `GET /api/dev/events`, polled while shown) and
+/// the errors staff saw (kept on the tablet).
 class DevLogsScreen extends ConsumerStatefulWidget {
   const DevLogsScreen({super.key});
 
@@ -89,10 +94,9 @@ class _DevLogsScreenState extends ConsumerState<DevLogsScreen> {
                       itemBuilder: (_, i) => _LogLine(entries[i]),
                     ),
             ),
-            QuiccSpace.gapSm,
-            Text(DevText.piLogsSoon, style: QuiccType.text(QuiccType.caption, color: palette.textMuted)),
           ],
         ),
+        const _PiLogCard(),
         SettingsCard(
           title: DevText.errorsTitle,
           info: kLogsInfo,
@@ -109,6 +113,141 @@ class _DevLogsScreenState extends ConsumerState<DevLogsScreen> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// The Pi's recent events, newest first, polled every [_piPoll] while shown.
+class _PiLogCard extends ConsumerStatefulWidget {
+  const _PiLogCard();
+
+  @override
+  ConsumerState<_PiLogCard> createState() => _PiLogCardState();
+}
+
+const Duration _piPoll = Duration(seconds: 5);
+const int _piKeep = 300;
+
+class _PiLogCardState extends ConsumerState<_PiLogCard> {
+  final List<PiEvent> _events = [];
+  int _since = 0;
+  bool _unsupported = false;
+  String? _error;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _poll();
+    _timer = Timer.periodic(_piPoll, (_) => _poll());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _poll() async {
+    final client = ref.read(agentClientProvider);
+    if (client == null || _unsupported) return;
+    try {
+      final r = await client.piEvents(since: _since);
+      if (!mounted) return;
+      setState(() {
+        _error = null;
+        if (r == null) {
+          _unsupported = true;
+          return;
+        }
+        final (events, last) = r;
+        _events.addAll(events);
+        if (_events.length > _piKeep) _events.removeRange(0, _events.length - _piKeep);
+        if (last > _since) _since = last;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = "Can't reach the Pi");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final shown = _events.reversed.toList(growable: false);
+    return SettingsCard(
+      title: 'The Pi',
+      info: kLogsInfo,
+      subtitle: "The Pi's own recent events: orders, printing, the live link, the POS hub, updates. No names.",
+      children: [
+        if (_unsupported)
+          Text(
+            "This Pi doesn't share its log yet — it needs the 2.2 update.",
+            style: QuiccType.text(QuiccType.body, color: palette.textMuted),
+          )
+        else ...[
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: QuiccSpace.sm),
+              child: Text(_error!, style: QuiccType.text(QuiccType.label, color: QuiccColors.statusVoided)),
+            ),
+          Container(
+            constraints: const BoxConstraints(minHeight: 120, maxHeight: 420),
+            decoration: BoxDecoration(
+              color: palette.bgCanvas,
+              borderRadius: BorderRadius.circular(QuiccRadius.sm),
+              border: Border.all(color: palette.borderSoft),
+            ),
+            child: shown.isEmpty
+                ? Center(
+                    child: Text('Nothing yet.', style: QuiccType.text(QuiccType.body, color: palette.textMuted)),
+                  )
+                : ListView.builder(
+                    key: const ValueKey('pi-log-list'),
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.all(QuiccSpace.sm),
+                    itemCount: shown.length,
+                    itemBuilder: (_, i) => _PiLine(shown[i]),
+                  ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _PiLine extends StatelessWidget {
+  final PiEvent e;
+  const _PiLine(this.e);
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final color = switch (e.level) {
+      'error' => QuiccColors.statusVoided,
+      'warn' => QuiccColors.statusFiring,
+      _ => palette.textSecondary,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 96,
+            child: Text(
+              e.at == null ? '' : clockSeconds(e.at!),
+              style: QuiccType.number(QuiccType.label, color: palette.textMuted),
+            ),
+          ),
+          SizedBox(
+            width: 72,
+            child: Text(e.kind, style: QuiccType.text(QuiccType.caption, weight: FontWeight.w600, color: color)),
+          ),
+          Expanded(
+            child: Text(e.text, style: QuiccType.text(QuiccType.label, color: e.level == 'info' ? null : color)),
+          ),
+        ],
+      ),
     );
   }
 }

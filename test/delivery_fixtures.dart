@@ -146,6 +146,9 @@ class FakeDeliveryFloor extends FloorController {
   PlanConfirmResult confirmResult = const PlanConfirmResult();
   PoolTrip trip = const PoolTrip();
 
+  /// The next delivery-settings save throws this (then is cleared).
+  AgentException? settingsError;
+
   @override
   FloorState build() => initial;
 
@@ -216,10 +219,22 @@ class FakeDeliveryFloor extends FloorController {
   @override
   Future<DeliverySettings> setDeliverySettings(DeliverySettings s) async {
     calls.add((op: 'settings', ids: const [], driver: null, extra: s.toJson()));
+    final err = settingsError;
+    if (err != null) {
+      settingsError = null;
+      throw err;
+    }
+    final f = state.floor!;
     state = state.copyWith(
-      floor: state.floor!.copyWith(
+      floor: f.copyWith(
         soonReadyMinutes: s.soonReadyMinutes,
         deliveryTargetMinutes: s.deliveryTargetMinutes,
+        nearbyRule: s.nearbyRule,
+        nearbyDetourMinutes: s.nearbyDetourMinutes,
+        nearbyDistanceMi: s.nearbyDistanceMi,
+        store: s.deliveryRadiusM == null || f.store == null
+            ? null
+            : StoreGeo(lat: f.store!.lat, lng: f.store!.lng, deliveryRadiusM: s.deliveryRadiusM!),
       ),
     );
     return s;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/diag_models.dart';
 import '../../core/format.dart';
 import '../../core/providers.dart';
 import '../../core/sse.dart';
@@ -172,6 +173,14 @@ class _VersionsCardState extends ConsumerState<_VersionsCard> {
           warn: d != null && !d.connectedToMain,
         ),
         KeyValueRow('Pi health', piHealthSummary(d)),
+        for (final t in d?.tablets ?? const <DiagTablet>[])
+          KeyValueRow(
+            t.name.isEmpty ? 'Tablet' : t.name,
+            '${t.appVersion.isEmpty ? 'version unknown' : 'Quibase ${t.appVersion}'}'
+                '${t.connected ? ' · live' : t.lastSeenAt == null ? '' : ' · seen ${dateClock(t.lastSeenAt)}'}',
+            mono: t.appVersion.isNotEmpty,
+            warn: !t.connected,
+          ),
       ],
     );
   }
