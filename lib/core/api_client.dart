@@ -606,7 +606,7 @@ class AgentClient {
   /// The run's orders — and (2.2.1) what auto-assign pooled for the next
   /// driver right after ([ReturnedResult.autoAssigned]).
   Future<ReturnedResult> driverReturned(String driverId) async =>
-      ReturnedResult.fromJson(await _send('POST', '/api/drivers/${Uri.encodeComponent(driverId)}/returned'));
+      ReturnedResult.fromJson(await _send('POST', '/api/drivers/${Uri.encodeComponent(driverId)}/returned?v=2'));
 
   /// `POST /api/drivers/{id}/undo-return` — the latest return (≤10 min) is
   /// undone: the driver is out again. 409 invalid_state otherwise.
