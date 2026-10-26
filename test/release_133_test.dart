@@ -1,5 +1,5 @@
-// 1.3.3 pre-production fixes: the ring service follows pairing only, the
-// update lock can't hide the new-order alert or brick the counter, closing a
+// 1.3.3 pre-production fixes: the ring service follows pairing only (the
+// update lock is gone since 1.6.1 — release_161_test), closing a
 // batch never cancels an order nobody saw, and the setup tests don't touch a
 // real order's ring.
 import 'dart:convert';
@@ -10,7 +10,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:mobile_agent/app.dart';
 import 'package:mobile_agent/core/alarm.dart';
 import 'package:mobile_agent/core/alert_player.dart';
 import 'package:mobile_agent/core/api_client.dart';
@@ -23,13 +22,11 @@ import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/batch/batch_pane.dart';
 import 'package:mobile_agent/features/setup/steps/test_print_step.dart';
 import 'package:mobile_agent/features/setup/steps/test_ring_step.dart';
-import 'package:mobile_agent/features/update/update_gate.dart';
+import 'package:mobile_agent/features/update/updater.dart';
 import 'package:mobile_agent/theme/quicc_colors.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'fixtures.dart';
-
-StoredOrder _parse(String raw) => StoredOrder.fromJson(jsonDecode(raw) as Map<String, dynamic>);
 
 StoredOrder _arrived(String id) {
   final m = jsonDecode(arrivedPickupJson) as Map<String, dynamic>;
@@ -100,17 +97,6 @@ class QuietSink implements AlarmSink {
   void haptic() {}
 }
 
-class FakeUpdatePlatform extends UpdatePlatform {
-  @override
-  Future<int?> installedVersion() async => 10;
-  @override
-  Future<String> updatesDir() async => '/nonexistent/updates';
-  @override
-  Future<bool> canInstall() async => true;
-  @override
-  Future<void> install(String path) async {}
-}
-
 /// A ringing alarm the test switches on.
 class FakeAlarm extends AlarmNotifier {
   @override
@@ -126,22 +112,6 @@ Future<SharedPreferences> _prefs([Map<String, Object> values = const {}]) async 
   SharedPreferences.setMockInitialValues(values);
   return SharedPreferences.getInstance();
 }
-
-/// An agent whose latest release is [latest] (null = withdrawn → 404) and
-/// whose APK download always fails.
-AgentClient _updateAgent(Map<String, Object?>? Function() latest) => AgentClient(
-  baseUrl: 'http://10.0.0.5:8080',
-  deviceKey: 'qagt_k',
-  client: MockClient((req) async {
-    if (req.url.path == '/api/app/latest') {
-      final l = latest();
-      return l == null
-          ? http.Response(jsonEncode({'error': 'no release'}), 404)
-          : http.Response(jsonEncode(l), 200, headers: {'content-type': 'application/json'});
-    }
-    return http.Response(jsonEncode({'error': 'apk cache broken'}), 500);
-  }),
-);
 
 Future<void> _settle(WidgetTester tester) async {
   for (var i = 0; i < 6; i++) {
@@ -211,104 +181,6 @@ void main() {
 
     await c.read(pairingProvider.notifier).setAddress('10.0.0.6');
     expect(c.read(agentClientProvider)!.baseUrl, 'http://10.0.0.6:8080');
-  });
-
-  group('update lock', () {
-    Future<ProviderContainer> pumpGate(
-      WidgetTester tester,
-      Map<String, Object?>? Function() latest, {
-      Widget? app,
-    }) async {
-      final c = ProviderContainer(
-        overrides: [
-          sharedPrefsProvider.overrideWithValue(await _prefs(_paired)),
-          floorProvider.overrideWith(
-            () => FakeFloor(
-              const FloorState(connection: SseStatus.connected).withSnapshot(
-                floor: Floor.fromJson(jsonDecode(floorJson) as Map<String, dynamic>),
-                current: const [],
-                arrived: app == null ? const [] : [_parse(arrivedPickupJson)],
-                drivers: const [],
-                at: DateTime.now(),
-              ),
-            ),
-          ),
-          agentClientProvider.overrideWithValue(_updateAgent(latest)),
-          updatePlatformProvider.overrideWithValue(FakeUpdatePlatform()),
-        ],
-      );
-      addTearDown(c.dispose);
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: c,
-          child:
-              app ??
-              MaterialApp(
-                theme: _theme(),
-                home: const UpdateGate(child: Text('floor underneath')),
-              ),
-        ),
-      );
-      await _settle(tester);
-      return c;
-    }
-
-    testWidgets('LATER after two failed attempts, back after an hour; a withdrawn release unlocks', (tester) async {
-      Map<String, Object?>? latest = {'version_code': 20, 'version_name': '1.3.4', 'sha256': ''};
-      await pumpGate(tester, () => latest);
-      expect(find.text('Update not finished'), findsOneWidget);
-      expect(find.text('LATER'), findsNothing, reason: 'one failure: forced');
-
-      await tester.tap(find.text('TRY AGAIN'));
-      await _settle(tester);
-      expect(find.text('LATER'), findsOneWidget);
-
-      await tester.tap(find.text('LATER'));
-      await tester.pump();
-      expect(find.text('Update not finished'), findsNothing);
-      expect(find.text('floor underneath'), findsOneWidget);
-
-      await tester.pump(kUpdateSnooze);
-      await _settle(tester);
-      expect(find.text('Update not finished'), findsOneWidget, reason: 'the snooze ran out');
-
-      latest = null; // withdrawn on the agent
-      await tester.pump(kUpdateCheckInterval);
-      await _settle(tester);
-      expect(find.text('Update not finished'), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-    });
-
-    testWidgets('a release no longer newer than the installed one unlocks', (tester) async {
-      var code = 20;
-      await pumpGate(tester, () => {'version_code': code, 'version_name': 'x'});
-      expect(find.text('Update not finished'), findsOneWidget);
-      code = 10; // same as installed (FakeUpdatePlatform)
-      await tester.pump(kUpdateCheckInterval);
-      await _settle(tester);
-      expect(find.text('Update not finished'), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-    });
-
-    testWidgets('the new-order alert sits above the update lock', (tester) async {
-      tester.view.physicalSize = const Size(1280, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      await pumpGate(
-        tester,
-        () => {'version_code': 20, 'version_name': '1.3.4'},
-        app: MaterialApp(
-          theme: _theme(),
-          builder: (context, child) => pairedOverlays(child!),
-          home: const Scaffold(body: Text('floor underneath')),
-        ),
-      );
-      expect(find.text('Update not finished'), findsOneWidget);
-      expect(find.text('New order').hitTestable(), findsOneWidget);
-      expect(find.text('ACCEPT · 15 MIN').hitTestable(), findsOneWidget);
-      expect(find.text('TRY AGAIN').hitTestable(), findsNothing, reason: 'the lock is underneath');
-      await tester.pumpWidget(const SizedBox());
-    });
   });
 
   test('old APKs are deleted when a new one is downloaded', () async {

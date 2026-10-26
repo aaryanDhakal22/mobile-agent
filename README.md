@@ -16,9 +16,11 @@ in one of three modes:
 
 | Mode | Rail | How you get there |
 |---|---|---|
-| **Kitchen** (start) | Kitchen · Deliveries · Drivers · History | tap the `q` from store mode |
-| **Store** | Batch · Printers · Help · Settings | tap the `q` from kitchen mode |
-| **Developer** | Connections · Logs · Tests · Config | **hold** the `q` (any mode) → the store **manager login** |
+| **Kitchen** (start) | Kitchen · Deliveries · Map · Drivers · History | tap the `q` from store mode |
+| **Store** | Batch · Printers · Updates · Help · Settings | tap the `q` from kitchen mode |
+| **Developer** | Connections · POS hub · Logs · Tests · Config | **hold** the `q` (any mode) → the store **manager login** |
+
+(Five per mode since 1.6.1: Map, Updates and POS hub.)
 
 Switching plays the mode change: the old icons drop off the rail under
 gravity, each tumbling a little (its centre of mass is off-centre), then the
@@ -43,15 +45,18 @@ from `lib/theme/quicc_spacing.dart`; CAPS only on primary actions.
 |---|---|
 | **Kitchen** (start screen) | Tickets in masonry columns, **most urgent first** (1.6.0: fewer, larger tickets — three columns on the 1280×800 tablet, about six on screen; the kitchen # and the timer in JetBrains Mono, items a step above body size; a **›** at the end of the card bar shows that tapping a ticket opens the order details) (earliest promised ready time). Each ticket (1.5.0) is a white "paper" body under a **card bar** in the lateness colour: the bar holds the big number (kitchen #, or the POS check # with a **POS** tag for a POS order; an online order the hub put into the POS also shows *POS #n*), **PAID** when settled, and the order type. The body: time since the order arrived, minutes left and the promised ready time (**LATE n min** past it), the customer's name, an order **flag** if any (e.g. "Settle manually: …", in the severity colour), **every item** (small font), the notes, then two icon buttons — **Reprint receipt** (the customer receipt only) and **Resend to kitchen** (1.3.5: every kitchen ticket again, `POST /api/orders/{id}/kitchen`, always asks "Send to the kitchen again?" first; an older Pi says it needs an update) — and **READY**. The order details screen has the same two buttons (Resend once the order has a kitchen number). Lateness: **green** until *green till* minutes after it arrived (agent web UI setting, default 20; a POS order counts from when the cashier pressed Send), then amber, **fully red at twice that**. A paid ticket that isn't ready (paid pickup, POS counter order) gets a slow soft green **paid wave** (feature switch). POS counter checks with nothing for the kitchen stay off the board (`board_hidden`). Scheduled **future orders** wait greyed in the **Later · N** strip at the end (due time, when it rings again, lead; tap = change the lead time). New orders don't have a tab — they ring full-screen (below) and are accepted there. |
 | **Deliveries** | (1.4.0) Two columns. **Left — Unassigned · N**: delivery orders that are cooking (greyed, "ready in ~4 min") or ready and in nobody's pool, oldest placed first: kitchen #, customer, address, **2.3 mi · 7 min** (amber *approx* / red *outside area* tags; *locating…* / *no location* while main hasn't found it), tip, **CASH $x** / **PAID** and minutes since placed (amber 10 min before the delivery target, red past it). **Right**: one box per **available** driver in queue order (**NEXT** on top; no reordering here), each holding that driver's **pool** — chips with kitchen #, street, tip, mi · min, tags and ✕ (back to the left) — and (1.6.0) **one SEND OUT** for the whole screen, pinned at the bottom of the pools column — **SEND OUT · JUMA · 3 orders**, always the NEXT driver, since drivers leave in queue order (greyed with a hint while his box is empty). It asks "#1104 isn't marked ready — send anyway?" when something is cooking; yes marks it ready; the name flash follows. Fill pools by **long-press drag** (left → driver, driver → driver, driver → left) or **SELECT** (tap deliveries, then tap a driver box — or the left column to unassign; a bar shows "N selected · CANCEL"). Tapping a driver's name opens the **run map**. Below: **Out** — each driver out with a run timer, their kitchen numbers (tap = the order) and **I HAVE RETURNED**. A single tap on any delivery opens it. **AUTO** asks the Pi for fair, route-aware runs for every available driver: the suggestions slide into the boxes with a **yellow glow** and nothing is saved until **CONFIRM** — an edited preview confirms only the stops still showing (`order_ids`) — (**CLEAR** drops them; *estimated (offline)* when the Pi had to guess drive times). SEND OUT for a driver with yellow stops sends those too. The **AUTO** button glows with a slow yellow "lava lamp" while there is something to plan (one still glow with Motion off). Deliveries the driver button sent you to look at **glow** yellow until you act. The preview drops itself (with a toast) if the floor changes under it. Pools live on the Pi (`/api/deliveries/pool`, `/api/drivers/{id}/send-out`, `/api/deliveries/auto-plan[/{id}/confirm]`). |
+| **Map** (1.6.1) | Every driver who is **out**, his route in his own colour (road route from the Pi's `pool/trip`, which takes orders already out; dashed straight lines when there is none) with kitchen-# pins, and a legend on the right — name, stops, minutes out, miles, kitchen numbers. Colours follow roster order, so a driver keeps his colour all shift. A static overview: no gestures, no positions (the Pi has no GPS). |
 | **Drivers** | Driver roster in queue order: add, edit (name + **Driver #** — optional, 1.5.0; the in-app help says "their SoftTouch login number", but at Lombardi's it is the driver's SoftTouch **Employee Number** — the hub matches `EMPLOYEENUMBER`, CUTOVER §3a — and the hub writes it onto the POS check when the driver goes out), remove, drag to reorder. Each driver shows **off** (clocked out) / **available** (in the queue) / **out** (on a run), the clock-in time and runs this batch. **Clock in** puts a driver at the back of the queue; **Clock out** works while they're available (out on a run → "tap I have returned first"). Shows the daily auto clock-out time ("Everyone is clocked out daily at 10:00 AM" — set in the agent web UI). **Shifts** lists the last 7 days of clock-in/out records (for reports, not wages). |
 | **History** | Current batch (live) or any kept closed batch; tap an order for full detail (items with size / modifiers / notes, customer, address, kitchen #, timeline, what was paid and the **CASH DUE**). |
 | **Batch** | The open batch and **Close batch**. If orders are unfinished the agent lists them; confirm to close anyway (they're auto-finished). CLOSE ANYWAY asks the agent again first: an order that came in while the list was open shows the list again (marked NEW) instead of being cancelled unseen. Kitchen numbers restart at 1100. Closing prints **one driver report per driver** on the receipt printer. Below: **Driver reports** for the open or any kept batch (deliveries, cash owed, tips after tip tax, owed to store) and **Print driver reports** to reprint. |
 | **Printers** | Read-only printer reachability. Printers are configured in the Quicc web app (main), not here. |
+| **Updates** (store, 1.6.1) | This tablet's Quibase: installed version, status (*up to date* / *downloading* / *downloaded — installs by itself after Close batch* / *ready — tap INSTALL NOW*), whether installs need a tap, **INSTALL NOW**, **CHECK NOW**, and what the Pi holds. |
 | **Settings** (store mode) | (1.6.0) What the store decides, in groups, each card with an (i) in plain words. **Continue setup** (while the setup wizard is unfinished). **Deliveries** — AUTO's delivery target (15–120 min, default 45) and "soon ready" minutes (0–30, default 5), − / + and SAVE (`PUT /api/settings/deliveries`); greyed *coming with the next Pi update*: the **delivery radius** and the **nearby rule** (1.7.0). **Default times** (1.5.0) — X for pickup / dine-in (default 15) and Y for delivery (default 35), 1–240 min, where the accept time picker starts (`PUT /api/settings/times`). **Kitchen tickets** — which orders print station tickets by themselves (`/api/settings/tickets`): POS delivery / takeout / counter (usually off — SoftTouch prints those), online cash pickup, online cash delivery, online card. **Receipts** — kitchen-ticket item / number size, the customer receipt's footer (store default, own text or none) and its size, copies (1 / 2), store name + address, customer phone, extra paper before the cut; SAVE, **PRINT SAMPLE** on a chosen printer and RESET TO DEFAULTS (`/api/settings/receipt`, `/api/printers/sample`). **Sound & look** (this tablet only) — **Order chime** (sound + preview), **Light or dark** (dark by default, remembered), **Motion** on / off and **Animation speed**. An older Pi shows "This Pi needs an update for …" on the cards it can't serve. |
-| **Connections** (developer) | **The Pi** — its address, checked live as you type ("Found the Pi ✓ — *store*" / "Nothing there ✗"; a bare IP gets `:8080`), SAVE keeps the pairing; the **live link** (last event, last full refresh, drops since start, last refresh error); **printers** as the Pi sees them; the **POS link** (hub, order-insert mode, last heard from, problems); **versions** of this tablet and the Pi plus the Pi's health. |
+| **Connections** (developer) | **The Pi** — its address, checked live as you type ("Found the Pi ✓ — *store*" / "Nothing there ✗"; a bare IP gets `:8080`), SAVE keeps the pairing; the **live link** (last event, last full refresh, drops since start, last refresh error); **printers** as the Pi sees them; **versions** of this tablet and the Pi plus the Pi's health. |
+| **POS hub** (developer, 1.6.1) | The link to the old POS (SoftTouch): hub connected / problems, order-insert mode, last heard from, problems — and the four POS switches (*POS orders pull-in*, *Online order insert*, *Driver write-back*, *Address heal*). Moved out of Connections and Config. |
 | **Logs** (developer) | This tablet's recent events (in memory; order ids, kitchen # and state changes — no names) and the **errors staff saw** (kept across restarts, sent with diagnostics). The Pi's own log comes in 1.7.0. |
 | **Tests** (developer) | The full check (Wi-Fi, Pi, its internet, printers, tablet), the tablet checks, **test ring**, **test print** (every printer, no failover) and **send diagnostics** — each with a line on what it does; nothing here changes an order. |
-| **Config** (developer) | **Features** — six switches saved one by one on the Pi (`/api/settings/features`): *POS orders pull-in*, *Online order insert*, *Driver write-back*, *Address heal*, *Future orders*, *Paid wave*; **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code with an expiry countdown and the steps for the new tablet), **Unpair**; **Quibase updates** (installed vs on the Pi, check now); **About & diagnostics** (COPY / SEND). Every hard setting has an explanation line under it. |
+| **Config** (developer) | **Features** — *Future orders* and *Paid wave*, saved on the Pi (`/api/settings/features`; the POS switches are on POS hub); **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code with an expiry countdown and the steps for the new tablet), **Unpair**; **Quibase updates** (the Updates card); **About & diagnostics** (COPY / SEND). Every hard setting has an explanation line under it. |
 
 **Accepting (1.5.0).** The full-screen alert and the order details use one
 **time picker**: three buttons **X / X+5 / X+10** (X = the store's default
@@ -126,19 +131,31 @@ The round button closes the card; **hold it 2 s** to undo the last return
 (the agent allows it for 10 minutes; the driver is out again, their orders
 stay delivered). Tap outside to close.
 
-**Updates (forced).** The console's **Release Quibase** uploads a signed APK
-to main; the agent caches it and the tablet (checking on start, resume,
-reconnect and every 10 min) locks behind **Updating Quibase**, downloads it
-from the agent, checks its sha256 and opens Android's installer — one tap on
-**Install**. The first time, Android asks to allow installs from Quibase
-(**Allow installs** → switch on → back). Releases are pushed after close.
-The new-order alert stays **above** the lock, so an order can always be
-accepted. A release withdrawn on the agent (or no longer newer than what's
-installed) unlocks the tablet at the next check. After 2 failed attempts
-(download, damaged file, installer cancelled / failed) **LATER** hides the lock
-for an hour, so a broken APK can't take the counter down. Older APKs in the
-cache are deleted when a new one is downloaded. After the install Quibase
-comes back by itself (`RestartReceiver`, below) — nobody needs to open it.
+**Updates (1.6.1).** The console's **Release Quibase** (`Q`) uploads a
+signed APK to staging main, and **Promote Quibase to prod** (owner-run,
+`--do quibase-promote`) sends that exact build — same version code and
+sha256 — to prod main. The Pi caches it; the tablet (checking on start,
+resume, reconnect and every 10 min while paired) **downloads it quietly**,
+checks its sha256 and **installs it by itself right after Close batch**: when
+the open batch has had no orders yet and nothing is ringing, waiting or
+cooking (so a release that lands after close installs straight away). The
+install is a PackageInstaller session asking for no user action
+(`InstallChannel.kt`, engine-level so it works with the screen off):
+**silent** once Quibase installed the running version itself (Android 12+).
+The first update after the switch (or any install Android still wants
+confirmed) comes back as *pending user action*, and the tablet asks
+**"Quibase x.y.z is ready — install now?"** at the next quiet moment —
+**INSTALL NOW** opens Android's one-tap screen, **Later** hides it for 2 h. It
+**never locks** the tablet, and the new-order alert sits above the prompt. A
+downloaded update shows as a dot on the `q` and a badge on **Updates** (store
+mode: status, **INSTALL NOW**, **CHECK NOW**, what the Pi holds); developer
+mode → Config has the same card. If Android doesn't let Quibase install apps
+yet, the prompt says **ALLOW INSTALLS** (switch on, come back). A failed
+install asks again; after two failed sessions INSTALL NOW uses Android's own
+install screen. A release withdrawn on the agent is dropped at the next
+check; older APKs in the cache are deleted when a new one is downloaded.
+After the install Quibase comes back by itself (`RestartReceiver`, below).
+(≤ 1.6.0 locked behind "Updating Quibase" until INSTALL was tapped.)
 
 **Driver name flash.** When a driver is sent out (from this tablet or anywhere
 else — SSE `drivers.dispatched`) the driver's name fills the screen with the
@@ -356,12 +373,14 @@ lib/
                               offline tiles, check address), alert, arrived
                               (accept controls + time picker), integration
                               (hub toasts + banner), update
-                              (forced self-update gate), home (rail modes,
+                              (self-update: updater + prompt + Updates screen),
+                              home (rail modes,
                               the q, mode-switch motion, blob highlight),
                               dev (developer mode: gate + Connections / Logs /
                               Tests / Config), common (shared widgets)
   theme/                     QuiccColors / QuiccPalette / QuiccTheme,
                              QuiccType (type scale), QuiccSpace (spacing)
+  core/time.dart             timeNow() — use it, never DateTime.now() (goldens)
   core/motion.dart           Motion on/off + animation speed (one setting
                              for every decorative animation)
 assets/fonts/                Inter + JetBrains Mono (OFL), bundled

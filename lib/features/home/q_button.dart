@@ -16,12 +16,16 @@ class QButton extends StatefulWidget {
   final VoidCallback onLongPress;
   final Motion motion;
 
+  /// A small dot on the corner: a Quibase update is waiting (Store → Updates).
+  final bool dot;
+
   const QButton({
     super.key,
     required this.mode,
     required this.onTap,
     required this.onLongPress,
     this.motion = const Motion(full: true, speed: 1),
+    this.dot = false,
   });
 
   @override
@@ -62,7 +66,7 @@ class _QButtonState extends State<QButton> with SingleTickerProviderStateMixin {
       RailMode.dev => (QuiccColors.brand900, QuiccColors.brand400, QuiccColors.brand400),
     };
     final spin = widget.motion.full ? widget.motion.scale(const Duration(milliseconds: 520)) : Duration.zero;
-    return Semantics(
+    final q = Semantics(
       button: true,
       label: switch (widget.mode) {
         RailMode.kitchen => 'Kitchen mode. Tap for store mode, hold for developer mode',
@@ -113,6 +117,27 @@ class _QButtonState extends State<QButton> with SingleTickerProviderStateMixin {
           ),
         ),
       ),
+    );
+    if (!widget.dot) return q;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        q,
+        Positioned(
+          key: const ValueKey('q-update-dot'),
+          top: -3,
+          right: -3,
+          child: Container(
+            width: 14,
+            height: 14,
+            decoration: BoxDecoration(
+              color: QuiccColors.statusFiring,
+              shape: BoxShape.circle,
+              border: Border.all(color: context.palette.bgSurface, width: 2),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

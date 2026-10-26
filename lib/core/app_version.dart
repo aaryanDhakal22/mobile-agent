@@ -19,13 +19,12 @@ String quibaseVersionString(String name, Object? code) {
 }
 
 /// The installed Quibase version, read once from the Android side
-/// ('quibase/install' channel, MainActivity) and then kept.
+/// ('quibase/install' channel, InstallChannel.kt — engine-level since 1.6.1,
+/// so it answers headless too) and then kept.
 ///
-/// Never awaited on the request path: with no Activity (the process started
-/// headless by RingService) the channel has no handler, and in widget tests
-/// it never answers. Until it is known (the first few ms after start, or a
-/// headless process) requests simply go without the header; [current] asks
-/// again at most every [retryEvery].
+/// Never awaited on the request path: in widget tests the channel never
+/// answers. Until it is known (the first few ms after start) requests simply
+/// go without the header; [current] asks again at most every [retryEvery].
 class QuibaseVersion {
   QuibaseVersion._();
 

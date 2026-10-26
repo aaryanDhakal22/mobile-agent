@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app.dart';
 import 'core/providers.dart';
 import 'core/ring_bridge.dart';
+import 'features/update/updater.dart';
 
 // On Android this runs once per process, at process start (QuibaseApp keeps
 // one engine), possibly before any screen exists — so nothing here may need
@@ -28,5 +29,8 @@ Future<void> main() async {
   final prefs = await SharedPreferences.getInstance();
   final container = ProviderContainer(overrides: [sharedPrefsProvider.overrideWithValue(prefs)]);
   startRingBridge(container);
+  // Self-update runs headless too: it installs after Close batch even with
+  // the screen off (features/update/updater.dart).
+  container.read(updaterProvider);
   runApp(UncontrolledProviderScope(container: container, child: const MobileAgentApp()));
 }

@@ -14,6 +14,7 @@ import '../dev/connections_screen.dart';
 import '../dev/dev_gate.dart';
 import '../dev/dev_log.dart';
 import '../dev/logs_screen.dart';
+import '../dev/pos_hub_screen.dart';
 import '../dev/tests_screen.dart';
 import '../diagnose/diagnose_entry.dart';
 import '../diagnose/guide_session.dart';
@@ -22,8 +23,11 @@ import '../drivers/drivers_pane.dart';
 import '../history/history_pane.dart';
 import '../integration/integration_alerts.dart';
 import '../kitchen/kitchen_pane.dart';
+import '../maps/runs_map_pane.dart';
 import '../printers/printers_pane.dart';
 import '../settings/store_settings_screen.dart';
+import '../update/updater.dart';
+import '../update/updates_screen.dart';
 import 'home_nav.dart';
 import 'pi_unreachable_banner.dart';
 import 'q_button.dart';
@@ -129,6 +133,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final kitchen = ref.watch(floorProvider.select((s) => s.kitchen.length));
     // Matches the Deliveries pane's "Unassigned · N".
     final unassigned = ref.watch(floorProvider.select((s) => s.unassignedDeliveries.length));
+    // A downloaded update not installed yet: a dot on the q, a badge on Updates.
+    final updateWaiting = ref.watch(
+      updaterProvider.select((u) => u.available && u.phase != UpdatePhase.downloading && u.phase != UpdatePhase.installing),
+    );
     final motion = Motion.of(context, ref);
     final mode = _mode;
     final list = kRailDestinations[mode]!;
@@ -147,7 +155,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onDestinationSelected: (i) => _go(list[i]),
               header: Column(
                 children: [
-                  QButton(mode: mode, motion: motion, onTap: _onQTap, onLongPress: _onQLongPress),
+                  QButton(
+                    mode: mode,
+                    motion: motion,
+                    onTap: _onQTap,
+                    onLongPress: _onQLongPress,
+                    dot: updateWaiting,
+                  ),
                   QuiccSpace.gapMd,
                   const _ConnectionDot(),
                 ],
@@ -159,6 +173,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     badge: switch (d) {
                       HomeDestination.kitchen => kitchen,
                       HomeDestination.deliveries => unassigned,
+                      HomeDestination.updates => updateWaiting ? 1 : 0,
                       _ => 0,
                     },
                   ),
@@ -220,13 +235,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final pane = switch (d) {
       HomeDestination.kitchen => const KitchenPane(),
       HomeDestination.deliveries => const DeliveriesPane(),
+      HomeDestination.map => const RunsMapPane(),
       HomeDestination.drivers => const DriversPane(),
       HomeDestination.history => const HistoryPane(),
       HomeDestination.batch => const BatchPane(),
       HomeDestination.printers => const PrintersPane(),
+      HomeDestination.updates => const UpdatesScreen(),
       HomeDestination.help => const HelpPane(),
       HomeDestination.settings => const StoreSettingsScreen(),
       HomeDestination.connections => const ConnectionsScreen(),
+      HomeDestination.posHub => const PosHubScreen(),
       HomeDestination.logs => const DevLogsScreen(),
       HomeDestination.tests => const DevTestsScreen(),
       HomeDestination.config => const DevConfigScreen(),

@@ -18,6 +18,7 @@ import 'package:mobile_agent/features/dev/connections_screen.dart';
 import 'package:mobile_agent/features/dev/dev_gate.dart';
 import 'package:mobile_agent/features/dev/dev_log.dart';
 import 'package:mobile_agent/features/dev/logs_screen.dart';
+import 'package:mobile_agent/features/dev/pos_hub_screen.dart';
 import 'package:mobile_agent/features/dev/tests_screen.dart';
 import 'package:mobile_agent/features/diagnose/diagnose_entry.dart';
 import 'package:mobile_agent/features/drivers/driver_fab.dart';
@@ -135,9 +136,9 @@ Future<void> _unlock(WidgetTester tester) async {
 
 void main() {
   group('rail modes', () {
-    testWidgets('tap q: kitchen ↔ store, each with its own four destinations', (tester) async {
+    testWidgets('tap q: kitchen ↔ store, each with its own five destinations', (tester) async {
       final c = await _pumpHome(tester);
-      for (final l in ['Kitchen', 'Deliveries', 'Drivers', 'History']) {
+      for (final l in ['Kitchen', 'Deliveries', 'Map', 'Drivers', 'History']) {
         expect(find.text(l), findsWidgets, reason: l);
       }
       expect(find.text('Batch'), findsNothing);
@@ -148,7 +149,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await _switchDone(tester);
       expect(c.read(homeNavProvider), HomeDestination.batch);
-      for (final l in ['Batch', 'Printers', 'Help', 'Settings']) {
+      for (final l in ['Batch', 'Printers', 'Updates', 'Help', 'Settings']) {
         expect(find.text(l), findsWidgets, reason: l);
       }
       expect(find.text('Deliveries'), findsNothing, reason: 'the kitchen icons fell off');
@@ -212,7 +213,7 @@ void main() {
       await _switchDone(tester);
       expect(c.read(devGateProvider), isTrue);
       expect(c.read(homeNavProvider), HomeDestination.connections);
-      for (final l in ['Connections', 'Logs', 'Tests', 'Config']) {
+      for (final l in ['Connections', 'POS hub', 'Logs', 'Tests', 'Config']) {
         expect(find.text(l), findsWidgets, reason: l);
       }
       expect(find.byType(ConnectionsScreen), findsOneWidget);
@@ -257,6 +258,7 @@ void main() {
       final c = await _pumpHome(tester);
       await _unlock(tester);
       for (final (label, type) in [
+        ('POS hub', PosHubScreen),
         ('Logs', DevLogsScreen),
         ('Tests', DevTestsScreen),
         ('Config', DevConfigScreen),

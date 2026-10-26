@@ -45,3 +45,5 @@ app.*.map.json
 /android/app/release
 .claude
 CLAUDE.md
+# Golden test diff output
+test/goldens/failures/

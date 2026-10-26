@@ -16,6 +16,7 @@ class QuibaseApp : Application() {
         super.onCreate()
         val engine = FlutterEngine(this) // registers the plugins
         RingChannel.attach(this, engine)
+        InstallChannel.attach(this, engine)
         engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         FlutterEngineCache.getInstance().put(ENGINE_ID, engine)
     }

@@ -10,7 +10,7 @@ import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/drivers/driver_fab.dart';
 import 'package:mobile_agent/features/kitchen/kitchen_pane.dart';
-import 'package:mobile_agent/features/update/update_gate.dart';
+import 'package:mobile_agent/features/update/updater.dart';
 import 'package:mobile_agent/theme/quicc_colors.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

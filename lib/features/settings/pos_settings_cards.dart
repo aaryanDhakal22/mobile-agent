@@ -114,15 +114,33 @@ class _SwitchCardState extends ConsumerState<_SwitchCard> {
   }
 }
 
+/// The POS hub's feature switches (developer mode → POS hub, 1.6.1).
+const kPosFeatureKeys = {'pos_pull', 'order_insert', 'driver_writeback', 'address_heal'};
+
+/// Feature switches, saved one by one on the Pi. [keys] shows only those
+/// (the others keep their saved value).
 class FeaturesSettingsCard extends StatelessWidget {
-  const FeaturesSettingsCard({super.key});
+  final Set<String>? keys;
+  final bool exclude;
+  final String title;
+  final String subtitle;
+  const FeaturesSettingsCard({
+    super.key,
+    this.keys,
+    this.exclude = false,
+    this.title = 'Features',
+    this.subtitle = 'Turn the newer parts on or off. Saved on the Pi.',
+  });
 
   @override
   Widget build(BuildContext context) => _SwitchCard(
-    title: 'Features',
-    subtitle: 'Turn the newer parts on or off. Saved on the Pi.',
+    title: title,
+    subtitle: subtitle,
     info: kFeaturesInfo,
-    switches: kFeatureSwitches,
+    switches: [
+      for (final s in kFeatureSwitches)
+        if (keys == null || keys!.contains(s.key) != exclude) s,
+    ],
     read: (s) => s.features.toJson(),
     save: (floor, next) => floor.saveFeatures(FeatureToggles.fromJson(next)),
   );

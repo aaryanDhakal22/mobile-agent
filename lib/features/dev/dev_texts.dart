@@ -42,6 +42,10 @@ abstract final class DevText {
   // Config
   static const configTitle = 'Config';
   static const configSubtitle = 'Features, pairing and versions';
+
+  // POS hub
+  static const posHubTitle = 'POS hub';
+  static const posHubSubtitle = 'The link to the old POS (SoftTouch)';
   static const update = 'Quibase updates';
   static const updateLine =
       'New versions come from the Pi. The tablet checks every 10 minutes and installs them by itself '
@@ -97,8 +101,8 @@ const kTestsInfo = InfoText(
 
 const kUpdateInfo = InfoText(
   'Quibase updates',
-  'The owner sends new versions of Quibase to the Pi. When the Pi has a newer one, the tablet '
-      'locks behind "Updating Quibase", downloads it and asks Android to install it: one tap on '
-      'Install. An order can always be accepted, even while it updates.\n\n'
-      'CHECK NOW asks the Pi what it has.',
+  'The owner sends new versions of Quibase to the Pi. The tablet downloads them by itself and '
+      'installs them right after Close batch, when nothing is ringing or cooking — no lock, and an '
+      'order can always be accepted.\n\n'
+      'INSTALL NOW installs a downloaded version straight away; CHECK NOW asks the Pi what it has.',
 );

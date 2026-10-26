@@ -1,19 +1,23 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Every screen the rail can show, across the three rail modes (1.6.0):
-///   kitchen mode: kitchen · deliveries · drivers · history
-///   store mode:   batch · printers · help · settings
-///   dev mode:     connections · logs · tests · config
+/// Every screen the rail can show, across the three rail modes (1.6.0;
+/// five each since 1.6.1):
+///   kitchen mode: kitchen · deliveries · map · drivers · history
+///   store mode:   batch · printers · updates · help · settings
+///   dev mode:     connections · pos hub · logs · tests · config
 enum HomeDestination {
   kitchen,
   deliveries,
+  map,
   drivers,
   history,
   batch,
   printers,
+  updates,
   help,
   settings,
   connections,
+  posHub,
   logs,
   tests,
   config,
