@@ -19,4 +19,8 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter analyze
+      # Goldens render clock times in local time and were made in the
+      # store's timezone; the runner is UTC.
       - run: flutter test
+        env:
+          TZ: America/New_York
