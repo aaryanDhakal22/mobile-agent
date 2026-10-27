@@ -31,6 +31,22 @@ const int kSessionFailuresBeforeScreen = 2;
 /// it counts the route as not working and tries the other one (1.8.4).
 const Duration kScreenWait = Duration(seconds: 4);
 
+/// A damaged download (sha256 mismatch) is fetched again only after
+/// 10 min × 2ⁿ (n = damaged downloads of this version so far), capped at
+/// [kDamagedRetryCap] (1.9.0) — the Pi serving a bad file shouldn't make the
+/// tablet pull 25 MB every 10 minutes all day.
+const Duration kDamagedRetryBase = Duration(minutes: 10);
+const Duration kDamagedRetryCap = Duration(hours: 4);
+
+/// How long to wait after the [damaged]-th damaged download (1-based).
+Duration damagedRetryDelay(int damaged) {
+  if (damaged <= 0) return Duration.zero;
+  final shift = damaged - 1;
+  if (shift >= 10) return kDamagedRetryCap;
+  final d = kDamagedRetryBase * (1 << shift);
+  return d > kDamagedRetryCap ? kDamagedRetryCap : d;
+}
+
 /// Android 12 (API 31): the first version that can install an update without
 /// a tap. Older ones (the store's Neostra, Android 11) always ask.
 const int kSilentInstallSdk = 31;
@@ -267,6 +283,15 @@ class Updater extends Notifier<UpdateState> {
   bool _checking = false;
   int _sessionFailures = 0;
 
+  /// Damaged downloads of the current target, and when the next automatic
+  /// download may start (1.9.0). Reset on a new version or a manual retry.
+  int _damaged = 0;
+  DateTime? _retryAfter;
+
+  /// When the next automatic download of a damaged release may start.
+  @visibleForTesting
+  DateTime? get damagedRetryAfter => _retryAfter;
+
   @override
   UpdateState build() {
     // Checks only while paired (an unpaired tablet has no Pi to ask).
@@ -329,6 +354,7 @@ class Updater extends Notifier<UpdateState> {
       if (state.target?.versionCode == rel!.versionCode && state.phase != UpdatePhase.failed) return;
       if (state.target?.versionCode != rel.versionCode) {
         _sessionFailures = 0;
+        _resetDamaged();
         state = UpdateState(
           target: rel,
           phase: UpdatePhase.downloading,
@@ -337,7 +363,11 @@ class Updater extends Notifier<UpdateState> {
           lastCheck: state.lastCheck,
         );
       }
-      if (state.apkPath == null) await _download();
+      if (state.apkPath == null) {
+        final wait = _retryAfter;
+        if (wait != null && timeNow().isBefore(wait)) return; // damaged before: backing off
+        await _download();
+      }
     } catch (_) {
       // Pi unreachable / old Pi: try again on the next tick.
     } finally {
@@ -362,6 +392,10 @@ class Updater extends Notifier<UpdateState> {
       if (!identical(state.target, rel)) return; // withdrawn / replaced meanwhile
       if (rel.sha256.isNotEmpty && sum != rel.sha256) {
         await file.delete().catchError((Object _) => file);
+        _damaged++;
+        final wait = damagedRetryDelay(_damaged);
+        _retryAfter = timeNow().add(wait);
+        _log.add('update', 'download damaged ($_damaged×): next try in ${wait.inMinutes} min');
         return _fail(
           FriendlyError(
             'The download was damaged',
@@ -393,14 +427,28 @@ class Updater extends Notifier<UpdateState> {
   Future<void> installNow() async {
     final path = state.apkPath;
     if (state.target == null) return;
-    if (path == null) return _download();
+    if (path == null) return _manualDownload();
     if (state.phase == UpdatePhase.installing) return; // one install at a time
     // Installing from here on, before any await: the floor and the alarm can
     // both ask for the install in the same moment.
     state = state.copyWith(phase: UpdatePhase.installing, clearError: true);
     final platform = ref.read(updatePlatformProvider);
-    if (!await platform.canInstall()) {
-      state = state.copyWith(phase: UpdatePhase.needPermission);
+    // 1.9.0: a canInstall() that throws (or says no) must never leave the
+    // phase at installing — that blocked every later INSTALL NOW.
+    final bool allowed;
+    try {
+      allowed = await platform.canInstall();
+    } catch (e) {
+      return _fail(
+        FriendlyError(
+          "Couldn't ask Android whether Quibase may install",
+          whatToDo: 'Tap TRY AGAIN',
+          details: FriendlyError.from(e).details,
+        ),
+      );
+    }
+    if (!allowed) {
+      if (state.phase == UpdatePhase.installing) state = state.copyWith(phase: UpdatePhase.needPermission);
       return;
     }
     _installTimer?.cancel();
@@ -444,7 +492,7 @@ class Updater extends Notifier<UpdateState> {
   /// other one is tried.
   Future<void> _openInstallScreen() async {
     final path = state.apkPath;
-    if (path == null) return _download();
+    if (path == null) return _manualDownload();
     final platform = ref.read(updatePlatformProvider);
     final sdk = await platform.sdk();
     Future<bool> apkScreen() async {
@@ -479,6 +527,18 @@ class Updater extends Notifier<UpdateState> {
         details: 'Android API $sdk; tried ${oldAndroid ? 'the APK screen, then the confirm screen' : 'the confirm screen, then the APK screen'}',
       ),
     );
+  }
+
+  /// TRY AGAIN with no download in hand: fetch it now, whatever the
+  /// damaged-download back-off says, and start the back-off afresh.
+  Future<void> _manualDownload() {
+    _resetDamaged();
+    return _download();
+  }
+
+  void _resetDamaged() {
+    _damaged = 0;
+    _retryAfter = null;
   }
 
   /// LATER on the prompt.
