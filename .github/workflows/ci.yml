@@ -113,8 +113,11 @@ jobs:
           signer=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           echo "apksigner: $signer"
           out=$("$signer" verify --print-certs out/quibase-*.apk 2>&1) || { echo "$out"; exit 1; }
-          got=$(printf '%s\n' "$out" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          # "Signer #1 certificate …" (older build-tools) or "V2 Signer: certificate …"
+          # (37+): every certificate listed must be the release one.
+          got=$(printf '%s\n' "$out" | sed -nE 's/^.*[Ss]igner.*certificate SHA-256 digest: //p' | sort -u)
           [ "$got" = "$RELEASE_CERT_SHA256" ] || { echo "$out"; echo "APK is not signed with the Quibase release key ($got)"; exit 1; }
+          echo "signed with the Quibase release certificate"
       - name: Remove the key
         if: always()
         run: rm -f "$RUNNER_TEMP/quibase-release.jks" "$RUNNER_TEMP/key.properties"
