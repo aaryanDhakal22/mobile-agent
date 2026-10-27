@@ -9,9 +9,11 @@ import 'core/frame_stats.dart';
 import 'core/providers.dart';
 import 'core/storage.dart';
 import 'features/alert/new_order_alert.dart';
+import 'features/common/island.dart';
 import 'features/dev/dev_gate.dart';
 import 'features/diagnose/diagnose_entry.dart';
 import 'features/home/home_screen.dart';
+import 'features/integration/integration_alerts.dart';
 import 'features/setup/setup_controller.dart';
 import 'features/setup/setup_entry.dart';
 import 'features/setup/setup_wizard.dart';
@@ -28,6 +30,9 @@ class MobileAgentApp extends ConsumerStatefulWidget {
 class _MobileAgentAppState extends ConsumerState<MobileAgentApp> {
   late final AppLifecycleListener _lifecycle;
   final _navigator = GlobalKey<NavigatorState>();
+
+  /// Keeps the island (and its pills) when pairing changes the layers.
+  final _island = GlobalKey();
 
   @override
   void initState() {
@@ -105,17 +110,31 @@ class _MobileAgentAppState extends ConsumerState<MobileAgentApp> {
       home: setup ? const SetupWizard() : const HomeScreen(),
       // The alarm (full-screen alert + "still ringing" banner) rides above
       // every route — the setup wizard included, once paired — so it shows
-      // over order detail screens and dialogs too. Below it, the "Update
-      // ready — install now?" prompt (UpdatePrompt) when Android wants a tap
-      // for a self-update; it never locks the tablet.
+      // over order detail screens and dialogs too. Below it the notification
+      // island (1.9.0, top-right pills — every toast), so a ringing order is
+      // never covered; below that the "Update ready — install now?" prompt
+      // (UpdatePrompt) when Android wants a tap for a self-update (it never
+      // locks the tablet), so its dim layer never hides a notice.
       // Any touch restarts developer mode's idle clock (it relocks after 15 min).
-      builder: (context, child) => DevActivityListener(
-        child: paired ? pairedOverlays(child ?? const SizedBox.shrink()) : (child ?? const SizedBox.shrink()),
-      ),
+      builder: (context, child) {
+        final routes = child ?? const SizedBox.shrink();
+        return DevActivityListener(
+          child: paired
+              ? pairedOverlays(routes, islandKey: _island, navigatorKey: _navigator)
+              : IslandHost(key: _island, navigatorKey: _navigator, child: routes),
+        );
+      },
     );
   }
 }
 
-/// What rides above every route once paired: the alarm on top of the update
+/// What rides above every route once paired: the alarm on top of the
+/// notification island (fed the hub's toasts too) on top of the update
 /// prompt (UpdatePrompt) on top of the app.
-Widget pairedOverlays(Widget child) => AlarmHost(child: UpdatePrompt(child: child));
+Widget pairedOverlays(Widget child, {Key? islandKey, GlobalKey<NavigatorState>? navigatorKey}) => AlarmHost(
+  child: IslandHost(
+    key: islandKey,
+    navigatorKey: navigatorKey,
+    child: IntegrationIslandFeed(child: UpdatePrompt(child: child)),
+  ),
+);

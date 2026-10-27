@@ -14,10 +14,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile_agent/app.dart';
+import 'package:mobile_agent/core/api_client.dart';
 import 'package:mobile_agent/core/floor_state.dart';
+import 'package:mobile_agent/core/format.dart' show toast;
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/features/alert/new_order_alert.dart';
+import 'package:mobile_agent/features/common/island.dart';
+import 'package:mobile_agent/features/common/widgets.dart';
 import 'package:mobile_agent/features/dev/dev_gate.dart';
 import 'package:mobile_agent/features/home/home_nav.dart';
 import 'package:mobile_agent/features/home/home_screen.dart';
@@ -200,6 +205,7 @@ Future<ProviderContainer> _pump(
   bool cameBack = false,
   StoredOrder? extra,
   UpdateState? update,
+  bool island = false,
 }) async {
   tester.view.physicalSize = const Size(1280, 800);
   tester.view.devicePixelRatio = 1;
@@ -215,7 +221,7 @@ Future<ProviderContainer> _pump(
     },
     extra: [
       agentClientProvider.overrideWith((ref) => null),
-      if (update != null) updaterProvider.overrideWith(() => _FixedUpdater(update)),
+      if (update != null || island) updaterProvider.overrideWith(() => _FixedUpdater(update ?? const UpdateState())),
     ],
   );
   addTearDown(c.dispose);
@@ -226,7 +232,9 @@ Future<ProviderContainer> _pump(
         debugShowCheckedModeBanner: false,
         theme: dark ? QuiccTheme.dark() : QuiccTheme.light(),
         home: const HomeScreen(),
-        builder: (context, child) => ringing
+        builder: (context, child) => island
+            ? pairedOverlays(child!) // the app's own layers, island included
+            : ringing
             ? AlarmHost(child: child!)
             : update != null
             ? UpdatePrompt(child: child!)
@@ -271,6 +279,27 @@ void main() {
     golden('kitchen', (tester) async {
       await _pump(tester, dark: dark);
       await _golden(tester, 'kitchen_$theme');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    golden('notification island over Kitchen', (tester) async {
+      await _pump(tester, dark: dark, island: true);
+      // The island rides under the alarm and over the update prompt.
+      expect(find.ancestor(of: find.byType(IslandHost), matching: find.byType(AlarmHost)), findsOneWidget);
+      expect(find.ancestor(of: find.byType(UpdatePrompt), matching: find.byType(IslandHost)), findsOneWidget);
+      final ctx = tester.element(find.byType(HomeScreen));
+      toastError(
+        ctx,
+        const AgentException('nothing printed', statusCode: 502, code: 'nothing_printed'),
+        lead: 'Not reprinted',
+      );
+      toast(ctx, "Printed Juma's report");
+      Island.maybeOf(ctx)!.show('Juma is out — 3 orders', kind: IslandKind.success);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(find.byType(IslandPill), findsNWidgets(3));
+      await _golden(tester, 'island_$theme');
       await tester.pumpWidget(const SizedBox());
     });
 

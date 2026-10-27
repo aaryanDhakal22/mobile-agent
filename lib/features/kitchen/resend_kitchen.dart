@@ -28,7 +28,7 @@ Future<bool> confirmResendKitchen(BuildContext context, StoredOrder so) => confi
   confirm: 'SEND',
 );
 
-/// The snackbar after a resend: which stations printed (and which didn't).
+/// The toast after a resend: which stations printed (and which didn't).
 String resendKitchenMessage(KitchenResend r) {
   final ok = r.printed.isEmpty ? 'Sent to the kitchen' : 'Sent to the kitchen — ${r.printed.join(', ')}';
   return r.failed.isEmpty ? ok : '$ok. Not printed: ${r.failed.join(', ')}';

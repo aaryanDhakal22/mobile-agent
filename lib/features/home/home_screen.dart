@@ -325,8 +325,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                               ),
                             ),
                           ),
-                          // Hub info / warnings, top-right over every pane.
-                          const Positioned(top: QuiccSpace.md, right: QuiccSpace.lg, child: IntegrationToastHost()),
                         ],
                       ),
                     ),

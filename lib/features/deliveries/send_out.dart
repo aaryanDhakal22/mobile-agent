@@ -17,7 +17,9 @@ import '../common/widgets.dart';
 import '../home/home_nav.dart';
 import 'delivery_widgets.dart';
 
-/// Toasts from a send-out stay left of the bottom-right driver button.
+/// Room left for the bottom-right driver button (the select bar stops short
+/// of it). Toasts used it too until the notification island (1.9.0), where
+/// `rightInset` does nothing.
 const double kSendOutToastInset = 160;
 
 /// A pool / send-out named a delivery that came back (409 `came_back`).

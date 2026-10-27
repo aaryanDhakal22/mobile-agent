@@ -11,6 +11,7 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
+import '../common/island.dart';
 import '../common/widgets.dart';
 import '../maps/geo_format.dart';
 import 'delivery_widgets.dart';
@@ -106,27 +107,18 @@ class _CameBackRowState extends ConsumerState<CameBackRow> with SingleTickerProv
     super.dispose();
   }
 
-  /// A toast beside the came-back list, not over it: the section sits at the
-  /// bottom of the left column, where a toast would cover the row you are
-  /// about to hold.
-  void _say(String msg, {bool error = false}) {
+  /// A pill in the notification island (top-right, so nothing near the
+  /// came-back rows is covered).
+  void _say(String msg, {bool error = false, bool done = false}) {
     if (!mounted) return;
-    final m = ScaffoldMessenger.maybeOf(context);
-    final box = context.findRenderObject();
-    if (m == null || box is! RenderBox || !box.hasSize) return;
-    final width = MediaQuery.sizeOf(context).width;
-    var left = box.localToGlobal(Offset(box.size.width, 0)).dx + QuiccSpace.lg;
-    // Too little room on the right (a narrow screen): the usual place.
-    if (width - left - kSendOutToastInset < 240) left = QuiccSpace.xl;
-    m.hideCurrentSnackBar();
-    m.showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: EdgeInsets.fromLTRB(left, 0, kSendOutToastInset, QuiccSpace.xl),
-        backgroundColor: error ? QuiccColors.statusVoided : null,
-        duration: const Duration(seconds: 3),
-        content: Text(msg),
-      ),
+    Island.show(
+      context,
+      msg,
+      kind: error
+          ? IslandKind.error
+          : done
+          ? IslandKind.success
+          : IslandKind.info,
     );
   }
 
@@ -158,7 +150,7 @@ class _CameBackRowState extends ConsumerState<CameBackRow> with SingleTickerProv
     setState(() => _busy = true);
     try {
       await ref.read(floorProvider.notifier).releaseCameBack(widget.order.id);
-      _say('$n is back in Unassigned');
+      _say('$n is back in Unassigned', done: true);
     } catch (e) {
       if (!mounted) return;
       final msg = switch (e) {

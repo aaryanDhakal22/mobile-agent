@@ -21,7 +21,7 @@ import 'delivery_widgets.dart';
 import 'lava_glow.dart';
 import 'send_out.dart';
 
-/// Keeps toasts clear of the bottom-right driver button.
+/// Keeps the select bar clear of the bottom-right driver button.
 const double _toastInset = kSendOutToastInset;
 
 /// Room under the left column's last card so it scrolls clear of the select

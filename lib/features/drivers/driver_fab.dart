@@ -23,7 +23,7 @@ import '../maps/geo_format.dart';
 import 'drivers_texts.dart';
 import 'next_rules.dart';
 
-/// Snackbars from the button stay left of it.
+/// Passed as `rightInset` to the toasts (a no-op since the island, 1.9.0).
 const double _toastInset = kSendOutToastInset;
 
 /// Hold the round button this long to undo the last return.
