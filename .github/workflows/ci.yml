@@ -7,7 +7,9 @@ name: Analyze + test (+ signed APK on tags)
 #     beside the checks and published only when both are green: a GitHub
 #     release with quibase-<code>.apk + quibase-<code>.json (version code =
 #     Unix seconds at build time, version name, sha256), the same files the
-#     console keeps in ~/.quibase/releases. The console's Release Quibase
+#     console keeps in ~/.quibase/releases, plus quibase-<code>-symbols.tar.gz
+#     (1.9.0: the Dart debug symbols split out of the APK, for `flutter
+#     symbolize` on a stack trace from that build). The console's Release Quibase
 #     uploads that APK to staging main; Promote sends the same bytes to prod.
 #
 # The release key comes from two secrets (QUIBASE_KEYSTORE_B64 = the .jks,
@@ -103,9 +105,11 @@ jobs:
         run: |
           code=$(date +%s)
           name=${{ steps.ver.outputs.name }}
-          flutter build apk --release --target-platform android-arm64 --build-number="$code" --build-name="$name"
+          flutter build apk --release --target-platform android-arm64 --build-number="$code" --build-name="$name" \
+            --split-debug-info=build/symbols
           mkdir -p out
           cp build/app/outputs/flutter-apk/app-release.apk "out/quibase-$code.apk"
+          tar -czf "out/quibase-$code-symbols.tar.gz" -C build symbols
           sha=$(sha256sum "out/quibase-$code.apk" | cut -d' ' -f1)
           printf '{\n  "version_code": %s,\n  "version_name": "%s",\n  "sha256": "%s"\n}\n' "$code" "$name" "$sha" > "out/quibase-$code.json"
       - name: Signed with the release certificate
@@ -145,3 +149,4 @@ jobs:
           files: |
             quibase-*.apk
             quibase-*.json
+            quibase-*-symbols.tar.gz

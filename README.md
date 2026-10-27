@@ -47,9 +47,9 @@ from `lib/theme/quicc_spacing.dart`; CAPS only on primary actions.
 
 | Screen | What staff do there |
 |---|---|
-| **Kitchen** (start screen) | Tickets in masonry columns, **most urgent first** (1.6.0: fewer, larger tickets — three columns on the 1280×800 tablet, about six on screen; the kitchen # and the timer in Barlow Semi Condensed, items a step above body size; a **›** at the end of the card bar shows that tapping a ticket opens the order details) (earliest promised ready time). Each ticket (1.5.0) is a white "paper" body under a **card bar** in the lateness colour: the bar holds the big number (kitchen #, or the POS check # with a **POS** tag for a POS order; an online order the hub put into the POS also shows *POS #n*), **PAID** when settled, and the order type. The body: time since the order arrived, minutes left and the promised ready time (**LATE n min** past it), the customer's name, an order **flag** if any (e.g. "Settle manually: …", in the severity colour), **every item** (small font), the notes, then two icon buttons — **Reprint receipt** (the customer receipt only) and **Resend to kitchen** (1.3.5: every kitchen ticket again, `POST /api/orders/{id}/kitchen`, always asks "Send to the kitchen again?" first; an older Pi says it needs an update) — and **READY**. The order details screen has the same two buttons (Resend once the order has a kitchen number). Lateness: **green** until *green till* minutes after it arrived (agent web UI setting, default 20; a POS order counts from when the cashier pressed Send), then amber, **fully red at twice that**. A paid ticket that isn't ready (a pickup paid at the store; since 1.8.3 not a POS counter check — that one is a plain ticket whose bar says **COUNTER** instead of DINE-IN) shows **customer waiting** (1.7.1, replaces the soft green wave; feature switch *Paid wave*): its bar turns into **red lava** (slow drifting red blobs — the AUTO glow's painter in red — full from the first frame), a **red halo** breathes round the card (~1 s, never below half), the bar says **CUSTOMER WAITING · N min** (since it was paid and accepted — `paid_at` when the Pi sends it, else since accepted), it gets **brighter and faster after 5 min**, and such tickets go **first** on the board. Motion off: a solid red bar and a thick red outline, nothing moving. One ticker per waiting ticket, muted offstage. POS counter checks with nothing for the kitchen stay off the board (`board_hidden`). Scheduled **future orders** wait greyed in the **Later · N** strip at the end (due time, when it rings again, lead; tap = change the lead time). New orders don't have a tab — they ring full-screen (below) and are accepted there. |
+| **Kitchen** (start screen) | Tickets in masonry columns, **most urgent first** (1.6.0: fewer, larger tickets — three columns on the 1280×800 tablet, about six on screen; the kitchen # and the timer in Barlow Semi Condensed, items a step above body size; a **›** at the end of the card bar shows that tapping a ticket opens the order details) (earliest promised ready time). Each ticket (1.5.0) is a white "paper" body under a **card bar** in the lateness colour: the bar holds the big number (kitchen #, or the POS check # with a **POS** tag for a POS order; an online order the hub put into the POS also shows *POS #n*), **PAID** when settled, and the order type. The body: time since the order arrived, minutes left and the promised ready time (**LATE n min** past it), the customer's name — for a **delivery** (online or POS, 1.9.0) its **street** instead, e.g. *4108 Old Court* (below) — an order **flag** if any (e.g. "Settle manually: …", in the severity colour), **every item** (small font), the notes, then two icon buttons — **Reprint receipt** (the customer receipt only) and **Resend to kitchen** (1.3.5: every kitchen ticket again, `POST /api/orders/{id}/kitchen`, always asks "Send to the kitchen again?" first; an older Pi says it needs an update) — and **READY**. The order details screen has the same two buttons (Resend once the order has a kitchen number). Lateness: **green** until *green till* minutes after it arrived (agent web UI setting, default 20; a POS order counts from when the cashier pressed Send), then amber, **fully red at twice that**. A paid ticket that isn't ready (a pickup paid at the store; since 1.8.3 not a POS counter check — that one is a plain ticket whose bar says **COUNTER** instead of DINE-IN) shows **customer waiting** (1.7.1, replaces the soft green wave; feature switch *Paid wave*): its bar turns into **red lava** (slow drifting red blobs — the AUTO glow's painter in red — full from the first frame), a **red halo** breathes round the card (~1 s, never below half), the bar says **CUSTOMER WAITING · N min** (since it was paid and accepted — `paid_at` when the Pi sends it, else since accepted), it gets **brighter and faster after 5 min**, and such tickets go **first** on the board. Motion off: a solid red bar and a thick red outline, nothing moving. One ticker per waiting ticket, muted offstage. (1.9.0) A newly accepted ticket **pops in**, a READY one **shrinks away** while the others **glide** to their new places, and READY **squishes** when pressed (below). POS counter checks with nothing for the kitchen stay off the board (`board_hidden`). Scheduled **future orders** wait greyed in the **Later · N** strip at the end (due time, when it rings again, lead; tap = change the lead time). New orders don't have a tab — they ring full-screen (below) and are accepted there. |
 | **Deliveries** | (1.4.0) Two columns. **Left — Unassigned · N**: delivery orders that are cooking (greyed, "ready in ~4 min") or ready and in nobody's pool, oldest placed first: kitchen #, customer, address, **2.3 mi · 7 min** (amber *approx* / red *outside area* tags; *locating…* / *no location* while main hasn't found it), tip, **CASH $x** / **PAID** and minutes since placed (amber 10 min before the delivery target, red past it). **Right**: one box per **available** driver in queue order (**NEXT** on top; no reordering here), each holding that driver's **pool** — chips with kitchen #, street, tip, mi · min, tags and ✕ (back to the left) — and (1.6.0) **one SEND OUT** for the whole screen, pinned at the bottom of the pools column — **SEND OUT · JUMA · 3 orders**, always the NEXT driver, since drivers leave in queue order (greyed with a hint while his box is empty). It asks "#1104 isn't marked ready — send anyway?" when something is cooking; yes marks it ready; the name flash follows. Fill pools by **long-press drag** (left → driver, driver → driver, driver → left) or **SELECT** (tap deliveries, then tap a driver box — or the left column to unassign; a bar shows "N selected · CANCEL"). Tapping a driver's name opens the **run map**. Below: **Out** — each driver out with a run timer, his stops **in stop order** as address markers (1.7.1: a pin in his map colour + the street, e.g. *531 Stevenson Ln*, or the kitchen # without an address; tap = the order; the order comes from the Pi's `run_order_ids` on the driver — `kDriverRunOrderField` in `models.dart` — else the run's own order) and **I HAVE RETURNED**. **Came back · N** (1.7.1, Pi 2.2.1): under the Unassigned list, below a rule and only while there is one, the deliveries a driver brought back that staff chose to **TRY AGAIN** with (order details → NOT DELIVERED, below). The Unassigned list keeps its room and scrolls on its own; the section takes at most ~45 % of the column and scrolls too. Came-back deliveries can't be dragged or selected into a pool, and NEXT / AUTO / the nearby check leave them alone (the Pi refuses them too: 409 `came_back`). **Press and hold** one (~1 s at animation speed 1×, a bar fills left to right; let go early = nothing) to send it to **Unassigned** (`POST /api/orders/{id}/release`); a single tap says "Press and hold to send to Unassigned" (beside the list, not over it). A single tap on any delivery opens it. **AUTO** asks the Pi for fair, route-aware runs for every available driver: the suggestions slide into the boxes with a **yellow glow** and nothing is saved until **CONFIRM** — an edited preview confirms only the stops still showing (`order_ids`) — (**CLEAR** drops them; *estimated (offline)* when the Pi had to guess drive times). SEND OUT for a driver with yellow stops sends those too. The **AUTO** button glows with a slow yellow "lava lamp" while there is something to plan (one still glow with Motion off). A delivery AUTO kept for a driver on his way back (2.2.1 `held_for_returning_driver`) is tagged **Held for Abdul · ~6 min** on the left. Deliveries the driver button sent you to look at **glow** yellow until you act. The preview drops itself (with a toast) if the floor changes under it. Pools live on the Pi (`/api/deliveries/pool`, `/api/drivers/{id}/send-out`, `/api/deliveries/auto-plan[/{id}/confirm]`). |
-| **Map** (1.6.1) | Every driver who is **out**, his route in his own colour (road route from the Pi's `pool/trip`, which takes orders already out; dashed straight lines when there is none) with kitchen-# pins, and a legend on the right — name, stops, minutes out, miles, and (1.7.1) his stops' addresses in stop order with pins in his colour. Colours follow roster order, so a driver keeps his colour all shift. A static overview: no gestures, no positions (the Pi has no GPS). 1.7.1: the map is **kept built** — made once at start (as soon as the Pi has a map file) and kept offstage with its tickers off between visits, so the tab opens at once instead of drawing every vector tile again; hidden, it rebuilds only when the runs change (road routes are still fetched, the camera refit through its controller). One FlutterMap with its 3 MB tile cache stays in memory. The **refresh** button (top-right of the map) opens the map file again (new base layer) and refits to the drivers out. |
+| **Map** (1.6.1) | Every driver who is **out**, his route in his own colour (road route from the Pi's `pool/trip`, which takes orders already out; dashed straight lines when there is none) with kitchen-# pins, and a legend on the right — name, stops, minutes out, miles, and (1.7.1) his stops' addresses in stop order with pins in his colour. Colours follow roster order, so a driver keeps his colour all shift. A static overview: no gestures, no positions (the Pi has no GPS). 1.7.1: the map is **kept built** — made on the first visit (1.9.0; 1.7.1–1.8 made it at start, which slowed the start) and kept offstage with its tickers off between visits, so the tab opens at once instead of drawing every vector tile again; hidden, it rebuilds only when the runs change (road routes are still fetched, the camera refit through its controller). One FlutterMap with its 3 MB tile cache stays in memory. The **refresh** button (top-right of the map) opens the map file again (new base layer) and refits to the drivers out. |
 | **Drivers** | Driver roster in queue order: add, edit (name + **Driver #** — optional, 1.5.0: the driver's SoftTouch **Employee Number** (1.7.0 wording) — the hub matches `EMPLOYEENUMBER`, CUTOVER §3a — and writes it onto the POS check when the driver goes out), remove, drag to reorder. Each driver shows **off** (clocked out) / **available** (in the queue) / **out** (on a run), the clock-in time and runs this batch. **Clock in** puts a driver at the back of the queue; **Clock out** works while they're available (out on a run → "tap I have returned first"). Shows the daily auto clock-out time ("Everyone is clocked out daily at 10:00 AM" — set in the agent web UI). **Shifts** lists the last 7 days of clock-in/out records (for reports, not wages). (1.7.3, Pi 2.2.3) **PRINT REPORT** on every driver row (any status) prints that driver's report for the open batch so far on the receipt printer (`POST /api/drivers/{id}/report/print`) — "Printed Juma's report" (plus *on Front (Kitchen was down)* after a failover); 502 → "didn't print — check the receipt printer", an older Pi → "This Pi needs an update to print one driver's report" (never unpairs). **Clock out** prints the report too (Pi 2.3): the Pi answers at once with `report_printing` — "Juma clocked out — printing his report…" — and prints in the background; when it's done the SSE `driver.report_printed` shows an app-wide toast top-right, wherever you are: "Printed Juma's report" (*on Front (Kitchen was down)* after a failover) or a red "Juma's report didn't print — check the receipt printer" with the Pi's reason; an older Pi just clocks out. The Pi merges SoftTouch's delivery checks for that driver with Quibase's own deliveries and marks anything only one side had (the Batch tab's driver reports show those remarks and *POS not checked*). |
 | **History** | Current batch (live) or any kept closed batch; tap an order for full detail (items with size / modifiers / notes, customer, address, kitchen #, timeline, what was paid and the **CASH DUE**). A delivery cancelled with NOT DELIVERED shows **CANCELLED** with no driver. |
 | **Batch** | The open batch and **Close batch**. If orders are unfinished the agent lists them; confirm to close anyway (they're auto-finished). CLOSE ANYWAY asks the agent again first: an order that came in while the list was open shows the list again (marked NEW) instead of being cancelled unseen. Kitchen numbers restart at 1100. Closing prints **one driver report per driver** on the receipt printer. Below: **Driver reports** for the open or any kept batch (deliveries, cash owed, tips after tip tax, owed to store — Pi 2.3: rounded to whole dollars, the exact amount small beside it, `owed_rounded_cents`) and **Print driver reports** to reprint. **Show deliveries** lists a driver's deliveries as the printed slip does: cash first, then card; `1104 531 Stevenson Ln` (kitchen # for an online order, POS check # otherwise, no "#"; the street only — `street`, else `address`), then *Tip* left and *Total* right (`order_tip_cents` / `slip_total_cents`, else `tip_cents` / `total_cents`), and the Pi's remark small under it. No customer names. |
@@ -60,7 +60,7 @@ from `lib/theme/quicc_spacing.dart`; CAPS only on primary actions.
 | **POS hub** (developer, 1.6.1) | The link to the old POS (SoftTouch): hub connected / problems, order-insert mode, last heard from, problems — and the four POS switches (*POS orders pull-in*, *Online order insert*, *Driver write-back*, *Address heal*). Moved out of Connections and Config. |
 | **Logs** (developer) | This tablet's recent events (in memory; order ids, kitchen # and state changes — no names), **the Pi's own recent events** (1.7.0, `GET /api/dev/events`, polled every 5 s while shown: orders, printing, the live link, the POS hub, updates — no names; an older Pi says it needs the 2.2 update) and the **errors staff saw** (kept across restarts, sent with diagnostics). |
 | **Tests** (developer) | The full check (Wi-Fi, Pi, its internet, printers, tablet), the tablet checks, **test ring**, **test print** (every printer, no failover) and **send diagnostics** — each with a line on what it does; nothing here changes an order. |
-| **Config** (developer) | **Features** — *Future orders* and *Paid wave*, saved on the Pi (`/api/settings/features`; the POS switches are on POS hub); **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code with an expiry countdown and the steps for the new tablet), **Unpair**; **Quibase updates** (the Updates card); **About & diagnostics** (COPY / SEND). Every hard setting has an explanation line under it. |
+| **Config** (developer) | **Features** — *Future orders* and *Paid wave*, saved on the Pi (`/api/settings/features`; the POS switches are on POS hub); **This tablet** — its name with **Rename** (saved on the Pi too), **Pair another tablet** (a 6-digit code with an expiry countdown and the steps for the new tablet), **Unpair**; **Quibase updates** (the Updates card); **Performance** (1.9.0) — the **performance overlay** switch (Flutter's frame graphs over the app; off after a restart) and the last 5 min of frames (count, jank %, p50 / p90 / max build and raster ms), also sent with diagnostics as `tablet.frames`; **About & diagnostics** (COPY / SEND). Every hard setting has an explanation line under it. |
 
 **Accepting (1.5.0).** The full-screen alert and the order details use one
 **time picker**: three buttons **X / X+5 / X+10** (X = the store's default
@@ -247,7 +247,9 @@ on top of it if both are up.
 **Live data.** The app holds an SSE connection to `GET /api/events` (auto
 reconnect with 1 s → 30 s backoff, dropped after 70 s of silence) and refetches
 `/api/floor`, `/api/orders?batch=current`, `/api/orders/arrived` and
-`/api/drivers` on every (re)connect, plus every 20 s as a fallback (the batch is
+`/api/drivers` on every (re)connect, plus a full refresh as a fallback — every
+**3 min while the live link is up**, every 20 s while it is down (1.9.0; it was
+always 20 s) (the batch is
 paged 200 at a time, up to 2000 orders). If the agent closes the stream (e.g.
 the tablet fell behind) the app reconnects and refetches. A late or repeated
 `order.arrived` for an order already taken never flips it back. The dot under
@@ -268,6 +270,67 @@ auto-accepted · 45 min"** at the top for 3 s (customer and type, a small map
 for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
+
+## 1.9.0 — the base release (folds 1.8.3 and 1.8.4)
+
+1.8.3 and 1.8.4 were never released on their own; they ship in 1.9.0.
+
+* **COUNTER tickets (1.8.3).** A POS counter check (terminal dine-in) is a
+  plain Kitchen ticket whose bar says **COUNTER** (register icon) instead of
+  DINE-IN, without the customer-waiting lava; pickups paid at the store keep
+  it.
+* **INSTALL NOW on Android 11 (1.8.4).** When Android asked for a tap, INSTALL
+  NOW makes sure a screen really opens: Android 11 and older (the store's
+  Neostra) first the APK install screen, Android 12+ first the session's
+  confirm screen, the other one after 4 s without a screen; every step
+  logged; a clear message if neither opens; the prompt offers **ALLOW
+  REOPEN** and stops promising a reopen while it is off (details under
+  *Updates* above).
+* **Updater (1.9.0).** INSTALL NOW never sticks in *installing*: if Android
+  can't say whether Quibase may install (the channel throws) the install
+  fails with TRY AGAIN, and a "no" asks for the permission. A **damaged
+  download** (sha256 mismatch) is fetched again only after 10 min × 2ⁿ
+  (20 min, 40 min … capped at 4 h) instead of every 10 min; a new version on
+  the Pi or TRY AGAIN starts over.
+* **Street on delivery tickets.** A delivery's Kitchen ticket (and its Later
+  tile) is headed by the street — house number + the first one or two street
+  words, the suffix shortened, no apartment and no town: *4108 Old Court Rd,
+  Apt 2* → **4108 Old Court**, *12 Main Street* → **12 Main St**, a POS's
+  *931 TAYLOR AVE* → **931 Taylor Ave**. Without a house number it shows the
+  name. Pickups and the order details keep the name. `ticketStreet` in
+  `features/maps/geo_format.dart`, a port of the agent's tested `StreetOnly`
+  (driver report slips) with the same test table.
+* **Bubbly Kitchen** (`features/kitchen/ticket_motion.dart`). A newly
+  accepted ticket **pops in** — 0 → 110 % → 95 % → 100 % with a small jiggle
+  — only an id Kitchen hasn't shown yet, accepted in the last 60 s; what is on
+  the board when the floor first loads is "seen", so nothing pops on start, a
+  refresh or a pane switch. **READY**: the ticket stays as an untouchable
+  ghost that shrinks to 85 % and fades (~220 ms) while the others **glide**
+  to their new places (260 ms, measured relative to the board, so the deal
+  into columns can move a ticket across). **ACCEPT**, **READY** and **SEND
+  OUT** squish to 94 % when pressed and spring back
+  (`features/common/squish.dart`). All at the Motion speed; Motion off =
+  fades only, no transforms. The customer-waiting lava and halo are
+  unchanged.
+* **Speed, same look.** The full refresh runs every 3 min while live (20 s
+  only while the link is down). Responses are decoded once from their bytes
+  and order lists over 64 KB are parsed on a background isolate
+  (`parseOffUiThread`; off in tests via `test/flutter_test_config.dart`). A
+  refresh keeps the instance of every order whose JSON didn't change
+  (`StoredOrder.sig`, a 64-bit FNV-1a of the JSON — never mutate a parsed
+  order), and Kitchen compares its lists instance by instance (`SameOrders`),
+  so nothing rebuilds for an unchanged floor. One shared 1 s clock
+  (`core/clock.dart`: `clockProvider`, `ClockBuilder`, `ClockText`) replaces
+  the timer per ticket: a ticket rebuilds only when its colour (10 s steps),
+  waiting minutes or CHANGED tag change; the timers and ages redraw only their
+  text. Each kitchen ticket, the rail and each pane are repaint boundaries.
+  The Map is built on its first visit. Developer Config → **Performance**
+  (overlay + frame stats, `core/frame_stats.dart`).
+* **Build.** iOS / Linux / macOS / web / Windows folders are gone (Android
+  only). Gradle: build cache, parallel, incremental Kotlin, 3 GB heap (no
+  configuration cache — the Flutter plugin can't use it yet). CI builds the
+  release APK with `--split-debug-info` and attaches
+  `quibase-<code>-symbols.tar.gz` to the tag's release.
 
 ## POS orders and hub alerts (1.5.0)
 
@@ -439,8 +502,14 @@ flutter pub get
 flutter analyze
 flutter test                      # unit tests + screen smoke tests (offline)
 flutter run -d <android-device>   # debug on a connected tablet
-flutter build apk --release --target-platform android-arm64   # signed with ~/.quibase
+flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols   # signed with ~/.quibase
 ```
+
+`--split-debug-info` keeps the Dart symbols out of the APK (smaller) in
+`build/symbols/`; keep them with the release to read a stack trace
+(`flutter symbolize -i <trace> -d build/symbols/app.android-arm64.symbols`).
+CI attaches them to each tag's release as `quibase-<code>-symbols.tar.gz`.
+Android only — the other platform folders were removed in 1.9.0.
 
 **Release signing.** The release key is `~/.quibase/quibase-release.jks` +
 `~/.quibase/key.properties` (outside the repo; override with
@@ -500,6 +569,9 @@ lib/
   core/time.dart             timeNow() — use it, never DateTime.now() (goldens)
   core/motion.dart           Motion on/off + animation speed (one setting
                              for every decorative animation)
+  core/clock.dart            the shared 1 s clock (clockProvider, ClockBuilder,
+                             ClockText) — use it for anything that counts time
+  core/frame_stats.dart      frame times (developer Config, tablet.frames)
 assets/fonts/                Barlow / Condensed / Semi Condensed (OFL), bundled
 test/                        model parsing, SSE parsing + reducer (incl.
                              drivers.dispatched), driver filter, alarm rule,
