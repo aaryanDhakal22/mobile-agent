@@ -382,20 +382,42 @@ class _ReportRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final owes = r.owedCents >= 0;
+    final pos = r.pos;
+    // Pi 2.2.3: the POS cross-check's remarks, small and muted.
+    final remarks = [
+      ...r.notes,
+      for (final l in r.lines)
+        if (l.note.isNotEmpty) '#${l.displayNumber ?? l.kitchenNumber ?? '?'} ${l.note}',
+    ];
+    final row = Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Text(r.driverName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        ),
+        Expanded(flex: 2, child: _Stat('Deliveries', '${r.deliveries}')),
+        Expanded(flex: 2, child: _Stat('Cash owed', money(r.cashCents))),
+        Expanded(flex: 2, child: _Stat('Tips (A/T)', money(r.tipAfterTaxCents))),
+        Expanded(flex: 3, child: _Stat(owes ? 'Owed to store' : 'Store owes driver', money(r.owedCents.abs()))),
+      ],
+    );
+    final unchecked = pos == null || pos.checked
+        ? null
+        : 'POS not checked${pos.note.isEmpty ? '' : ' — ${pos.note}'}';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: Text(r.driverName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-          ),
-          Expanded(flex: 2, child: _Stat('Deliveries', '${r.deliveries}')),
-          Expanded(flex: 2, child: _Stat('Cash owed', money(r.cashCents))),
-          Expanded(flex: 2, child: _Stat('Tips (A/T)', money(r.tipAfterTaxCents))),
-          Expanded(flex: 3, child: _Stat(owes ? 'Owed to store' : 'Store owes driver', money(r.owedCents.abs()))),
-        ],
-      ),
+      child: unchecked == null && remarks.isEmpty
+          ? row
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                row,
+                if (unchecked != null)
+                  Text(unchecked, style: const TextStyle(fontSize: 14, color: QuiccColors.statusFiring)),
+                if (remarks.isNotEmpty)
+                  Text(remarks.join(' · '), style: TextStyle(fontSize: 14, color: context.palette.textMuted)),
+              ],
+            ),
     );
   }
 }

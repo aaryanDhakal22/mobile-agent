@@ -18,6 +18,36 @@ import 'drivers_texts.dart';
 String removeDriverOutMessage(String name) =>
     "Can't remove a driver who is out on a run — tap I HAVE RETURNED for $name on Deliveries first.";
 
+/// "Printed Juma's report" — plus where, when the Pi failed over from
+/// [reroutedFrom] (" on Front (Kitchen was down)").
+String driverReportPrintedMessage(String name, {String printedOn = '', String? reroutedFrom}) {
+  final base = "Printed $name's report";
+  if (reroutedFrom == null || reroutedFrom.isEmpty) return base;
+  return printedOn.isEmpty ? '$base ($reroutedFrom was down)' : '$base on $printedOn ($reroutedFrom was down)';
+}
+
+/// What PRINT REPORT says when the Pi refused (null = the generic error).
+String? driverReportErrorMessage(String name, Object e) => switch (e) {
+  AgentException(code: kDriverReportUnsupported) => "This Pi needs an update to print one driver's report.",
+  AgentException(code: 'nothing_printed') => "$name's report didn't print — check the receipt printer.",
+  AgentException(code: 'printing_unavailable') => 'No printers are set up on the Pi — nothing to print on.',
+  AgentException(code: 'driver_not_found') => '$name was removed from the roster.',
+  _ => null,
+};
+
+/// The toast after a clock-out: (message, error). A Pi ≥ 2.2.3 printed (or
+/// tried to print) the driver's report; an older Pi says nothing about it.
+(String, bool) clockedOutMessage(String name, ReportPrintOutcome? p) {
+  if (p == null) return ('$name clocked out', false);
+  final who = p.driverName.isEmpty ? name : p.driverName;
+  if (p.printed) {
+    final printed = driverReportPrintedMessage(who, printedOn: p.printedOn, reroutedFrom: p.reroutedFrom);
+    return ('$name clocked out · $printed', false);
+  }
+  final why = p.error.isEmpty ? '' : ': ${p.error}';
+  return ("$name clocked out — report didn't print$why", true);
+}
+
 /// Driver roster in queue order. Drivers clock in when they arrive (joining
 /// the back of the queue) and out when they leave; the first available
 /// driver is next up. Drag to reorder.
@@ -31,6 +61,9 @@ class DriversPane extends ConsumerStatefulWidget {
 class _DriversPaneState extends ConsumerState<DriversPane> {
   /// Drivers with a clock-in / clock-out in flight.
   final Set<String> _busy = {};
+
+  /// Drivers whose report is printing.
+  final Set<String> _printing = {};
 
   FloorController get _floor => ref.read(floorProvider.notifier);
 
@@ -116,8 +149,11 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
   Future<void> _clockOut(Driver d) async {
     setState(() => _busy.add(d.id));
     try {
-      await _floor.clockOut(d.id);
-      if (mounted) toast(context, '${d.name} clocked out');
+      final r = await _floor.clockOut(d.id);
+      if (mounted) {
+        final (msg, error) = clockedOutMessage(d.name, r.reportPrint);
+        toast(context, msg, error: error);
+      }
     } catch (e) {
       if (!mounted) return;
       final msg = switch (e) {
@@ -133,6 +169,28 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
           : toast(context, msg, error: true);
     } finally {
       if (mounted) setState(() => _busy.remove(d.id));
+    }
+  }
+
+  /// PRINT REPORT: this driver's report for the open batch so far, on the
+  /// receipt printer (Pi 2.2.3).
+  Future<void> _printReport(Driver d) async {
+    if (_printing.contains(d.id)) return;
+    setState(() => _printing.add(d.id));
+    try {
+      final r = await _floor.printDriverReport(d.id);
+      if (mounted) {
+        final name = r.driverName.isEmpty ? d.name : r.driverName;
+        toast(context, driverReportPrintedMessage(name, printedOn: r.printedOn, reroutedFrom: r.reroutedFrom));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      final msg = driverReportErrorMessage(d.name, e);
+      msg == null
+          ? toastError(context, e, lead: "${d.name}'s report didn't print", area: 'drivers')
+          : toast(context, msg, error: true);
+    } finally {
+      if (mounted) setState(() => _printing.remove(d.id));
     }
   }
 
@@ -238,6 +296,8 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
                           driver: d,
                           rank: rank[d.id],
                           busy: _busy.contains(d.id),
+                          printing: _printing.contains(d.id),
+                          onPrintReport: () => _printReport(d),
                           onClockIn: () => _clockIn(d),
                           onClockOut: () => _clockOut(d),
                           onEdit: () => _edit(d),
@@ -260,6 +320,10 @@ class _DriverRow extends StatelessWidget {
   /// Position among available drivers (1 = next up); null if not in queue.
   final int? rank;
   final bool busy;
+
+  /// Their report is printing (PRINT REPORT shows a spinner).
+  final bool printing;
+  final VoidCallback onPrintReport;
   final VoidCallback onClockIn;
   final VoidCallback onClockOut;
   final VoidCallback onEdit;
@@ -270,6 +334,8 @@ class _DriverRow extends StatelessWidget {
     required this.driver,
     required this.rank,
     required this.busy,
+    required this.printing,
+    required this.onPrintReport,
     required this.onClockIn,
     required this.onClockOut,
     required this.onEdit,
@@ -326,6 +392,16 @@ class _DriverRow extends StatelessWidget {
               ),
               _DriverStatusPill(d.status),
               const SizedBox(width: 12),
+              SizedBox(
+                height: 48,
+                child: TextButton.icon(
+                  key: ValueKey('print-report-${d.id}'),
+                  onPressed: printing ? null : onPrintReport,
+                  icon: printing ? const _Spinner() : const Icon(Icons.print_outlined),
+                  label: const Text('PRINT REPORT'),
+                ),
+              ),
+              const SizedBox(width: 8),
               SizedBox(
                 width: 150,
                 height: 48,

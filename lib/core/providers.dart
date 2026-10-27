@@ -617,23 +617,30 @@ class FloorController extends Notifier<FloorState> {
 
   /// Clock in: joins the back of the queue. On a 409 (already clocked in
   /// elsewhere) the roster is reloaded before the error reaches the UI.
-  Future<Driver> clockIn(String id) => _clock(id, (c) => c.clockIn(id));
+  Future<Driver> clockIn(String id) => _clock(id, (c) => c.clockIn(id), (d) => d);
 
   /// Clock out (only while available). 409 `driver_not_available` = out on a
-  /// run (or already off).
-  Future<Driver> clockOut(String id) => _clock(id, (c) => c.clockOut(id));
+  /// run (or already off). A Pi ≥ 2.2.3 prints the driver's report on the way
+  /// ([ClockOutResult.reportPrint]).
+  Future<ClockOutResult> clockOut(String id) => _clock(id, (c) => c.clockOut(id), (r) => r.driver);
 
-  Future<Driver> _clock(String id, Future<Driver> Function(AgentClient) op) async {
+  Future<T> _clock<T>(String id, Future<T> Function(AgentClient) op, Driver Function(T) driverOf) async {
     try {
-      final d = await op(_requireClient(ref));
+      final r = await op(_requireClient(ref));
+      final d = driverOf(r);
       final i = state.drivers.indexWhere((x) => x.id == id);
       if (i >= 0 && d.id == id) _set(state.copyWith(drivers: [...state.drivers]..[i] = d));
-      return d;
+      return r;
     } finally {
       // The queue position changes on clock-in; resync either way.
       unawaited(_reloadDrivers());
     }
   }
+
+  /// Prints one driver's report for the open batch so far (Pi 2.2.3; an
+  /// older Pi throws [kDriverReportUnsupported]).
+  Future<DriverReportPrint> printDriverReport(String driverId) =>
+      _requireClient(ref).printDriverReport(driverId);
 
   /// Optimistic: the list reorders at once, then the agent confirms.
   Future<void> reorderDrivers(List<Driver> ordered) async {

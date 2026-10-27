@@ -7,7 +7,11 @@ const kClockInfo = InfoText(
   'Tap CLOCK IN when a driver starts their shift. They join the back of the queue and can be '
       'sent out with orders.\n\n'
       'Tap CLOCK OUT when they go home. You can only clock out a driver who is here — if they are '
-      'out on a run, tap I HAVE RETURNED first.\n\n'
+      'out on a run, tap I HAVE RETURNED first. Clocking out prints their driver report on the '
+      'receipt printer.\n\n'
+      'PRINT REPORT prints one driver\'s report for this batch so far, any time: their deliveries, '
+      'the cash they collected, their tips and what they owe the store. When the store uses the POS, '
+      'the Pi checks the POS\'s deliveries for that driver too and marks anything only one side had.\n\n'
       'Everyone is clocked out automatically once a day (the time is shown on this screen).',
 );
 

@@ -1606,6 +1606,22 @@ class DriverReportLine {
   final int cashCents;
   final int totalCents;
 
+  /// (Pi 2.2.3) The POS check behind the line, when the Pi cross-checked
+  /// with the POS: its reference and check # (null = none).
+  final String extRef;
+  final int? displayNumber;
+
+  /// Where the line came from (e.g. "online", "pos"); '' from an older Pi.
+  final String source;
+
+  /// Who had it: [DriverReportMatch.both], or only one side.
+  final DriverReportMatch match;
+
+  /// A short remark from the Pi, e.g. "POS only", "Quibase had Ali".
+  final String note;
+  final DateTime? outAt;
+  final DateTime? deliveredAt;
+
   const DriverReportLine({
     required this.orderId,
     this.kitchenNumber,
@@ -1615,6 +1631,13 @@ class DriverReportLine {
     this.cash = false,
     this.cashCents = 0,
     this.totalCents = 0,
+    this.extRef = '',
+    this.displayNumber,
+    this.source = '',
+    this.match = DriverReportMatch.both,
+    this.note = '',
+    this.outAt,
+    this.deliveredAt,
   });
 
   factory DriverReportLine.fromJson(Map<String, dynamic> json) => DriverReportLine(
@@ -1626,7 +1649,40 @@ class DriverReportLine {
     cash: json['cash'] == true,
     cashCents: jInt(json['cash_cents']),
     totalCents: jInt(json['total_cents']),
+    extRef: jStr(json['ext_ref']),
+    displayNumber: jIntOrNull(json['display_number']),
+    source: jStr(json['source']),
+    match: DriverReportMatch.parse(json['match']),
+    note: jStr(json['note']).trim(),
+    outAt: jDate(json['out_at']),
+    deliveredAt: jDate(json['delivered_at']),
   );
+}
+
+/// Which side had a driver-report line (Pi 2.2.3 cross-checks with the POS).
+enum DriverReportMatch {
+  both,
+  posOnly,
+  quibaseOnly;
+
+  /// Missing or unknown (an older Pi) reads as [both].
+  static DriverReportMatch parse(Object? v) => switch (jStr(v)) {
+    'pos_only' => posOnly,
+    'quibase_only' => quibaseOnly,
+    _ => both,
+  };
+}
+
+/// Whether the Pi cross-checked a driver report with the POS (Pi 2.2.3;
+/// absent when the store has no POS hub).
+class DriverReportPos {
+  final bool checked;
+  final DateTime? asOf;
+  final String note;
+  const DriverReportPos({this.checked = false, this.asOf, this.note = ''});
+
+  factory DriverReportPos.fromJson(Map<String, dynamic> json) =>
+      DriverReportPos(checked: jBool(json['checked']), asOf: jDate(json['as_of']), note: jStr(json['note']).trim());
 }
 
 /// A driver's slip for a batch: what they collected in cash, their tips after
@@ -1642,6 +1698,12 @@ class DriverReport {
   final int tipAfterTaxCents;
   final int owedCents;
 
+  /// (Pi 2.2.3) The driver's POS Employee Number, the POS cross-check (null
+  /// = no POS hub, or an older Pi) and the Pi's remarks.
+  final String? driverPosNumber;
+  final DriverReportPos? pos;
+  final List<String> notes;
+
   const DriverReport({
     required this.batchId,
     required this.driverId,
@@ -1652,6 +1714,9 @@ class DriverReport {
     this.tipCents = 0,
     this.tipAfterTaxCents = 0,
     this.owedCents = 0,
+    this.driverPosNumber,
+    this.pos,
+    this.notes = const [],
   });
 
   factory DriverReport.fromJson(Map<String, dynamic> json) => DriverReport(
@@ -1664,6 +1729,13 @@ class DriverReport {
     tipCents: jInt(json['tip_cents']),
     tipAfterTaxCents: jInt(json['tip_after_tax_cents']),
     owedCents: jInt(json['owed_cents']),
+    driverPosNumber: jStrOrNull(jStr(json['driver_pos_number']).trim()),
+    pos: json['pos'] is Map ? DriverReportPos.fromJson(jMap(json['pos'])) : null,
+    notes: [
+      if (json['notes'] is List)
+        for (final n in json['notes'] as List)
+          if (jStr(n).trim().isNotEmpty) jStr(n).trim(),
+    ],
   );
 }
 
@@ -1678,6 +1750,79 @@ class ReportPrintResult {
         raw is List ? raw.map((e) => e is Map ? jStr(jMap(e)['driver_name']) : '').toList(growable: false) : const [];
     return ReportPrintResult(printed: names(json['printed']), failed: names(json['failed']));
   }
+}
+
+/// `POST /api/drivers/{id}/report/print` (Pi 2.2.3) — one driver's report
+/// for the open batch so far, printed on the receipt printer.
+class DriverReportPrint {
+  final String driverId;
+  final String driverName;
+
+  /// The printer that printed it, and the one it failed over from (null
+  /// unless it was rerouted).
+  final String printedOn;
+  final String? reroutedFrom;
+  final DriverReport? report;
+
+  const DriverReportPrint({
+    this.driverId = '',
+    this.driverName = '',
+    this.printedOn = '',
+    this.reroutedFrom,
+    this.report,
+  });
+
+  factory DriverReportPrint.fromJson(Map<String, dynamic> json) => DriverReportPrint(
+    driverId: jStr(json['driver_id']),
+    driverName: jStr(json['driver_name']),
+    printedOn: jStr(json['printed_on']),
+    reroutedFrom: jStrOrNull(jStr(json['rerouted_from']).trim()),
+    report: json['report'] is Map ? DriverReport.fromJson(jMap(json['report'])) : null,
+  );
+}
+
+/// What clock-out did with the driver's report (Pi 2.2.3 prints it): the
+/// `report_print` key on the clock-out answer.
+class ReportPrintOutcome {
+  final bool printed;
+  final String driverName;
+  final String printedOn;
+  final String? reroutedFrom;
+
+  /// Why it didn't print (e.g. "printer offline") and its code.
+  final String error;
+  final String? code;
+
+  const ReportPrintOutcome({
+    required this.printed,
+    this.driverName = '',
+    this.printedOn = '',
+    this.reroutedFrom,
+    this.error = '',
+    this.code,
+  });
+
+  factory ReportPrintOutcome.fromJson(Map<String, dynamic> json) => ReportPrintOutcome(
+    printed: jBool(json['printed']),
+    driverName: jStr(json['driver_name']),
+    printedOn: jStr(json['printed_on']),
+    reroutedFrom: jStrOrNull(jStr(json['rerouted_from']).trim()),
+    error: jStr(json['error']).trim(),
+    code: jStrOrNull(json['code']),
+  );
+}
+
+/// `POST /api/drivers/{id}/clock-out`: the driver (as before) and — from a
+/// Pi >= 2.2.3 with printers — what happened to their report.
+class ClockOutResult {
+  final Driver driver;
+  final ReportPrintOutcome? reportPrint;
+  const ClockOutResult(this.driver, {this.reportPrint});
+
+  factory ClockOutResult.fromJson(Map<String, dynamic> json) => ClockOutResult(
+    Driver.fromJson(json),
+    reportPrint: json['report_print'] is Map ? ReportPrintOutcome.fromJson(jMap(json['report_print'])) : null,
+  );
 }
 
 /// A Quibase release the agent has cached for its tablets.

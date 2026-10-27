@@ -80,6 +80,10 @@ class KitchenResend {
   );
 }
 
+/// [AgentException.code] for `POST /api/drivers/{id}/report/print` on a Pi
+/// older than 2.2.3: "This Pi needs an update to print one driver's report".
+const String kDriverReportUnsupported = 'driver_report_unsupported';
+
 /// [AgentException.code] for a 2.1.0 route an older Pi doesn't have
 /// (features / kitchen tickets / default times, schedule, geo choose): "This
 /// Pi needs an update".
@@ -656,6 +660,30 @@ class AgentClient {
   Future<List<DriverReport>> driverReports(int batchId) async =>
       jList(await _get('/api/batches/${batchId <= 0 ? 'current' : batchId}/driver-reports'), DriverReport.fromJson);
 
+  /// `POST /api/drivers/{id}/report/print` (Pi 2.2.3) — one driver's report
+  /// for the open batch so far, on the receipt printer (the Pi may first
+  /// cross-check with the POS for a few seconds). 404 `driver_not_found`;
+  /// 502 `nothing_printed`; 503 `printing_unavailable` (no printers). An older
+  /// Pi without the route (405, or a 404 that isn't `driver_not_found`) →
+  /// [kDriverReportUnsupported]. Never unpairs the tablet.
+  Future<DriverReportPrint> printDriverReport(String driverId) async {
+    try {
+      final body = await _send(
+        'POST',
+        '/api/drivers/${Uri.encodeComponent(driverId)}/report/print',
+        timeout: printTimeout,
+        mayRevoke: false,
+      );
+      return DriverReportPrint.fromJson(jMap(body));
+    } on AgentException catch (e) {
+      final missing = e.statusCode == 405 || (e.statusCode == 404 && e.code != 'driver_not_found');
+      if (missing) {
+        throw AgentException(e.message, statusCode: e.statusCode, code: kDriverReportUnsupported, body: e.body);
+      }
+      rethrow;
+    }
+  }
+
   /// `POST /api/batches/{id}/driver-reports/print` → how many slips printed
   /// (502 nothing_printed throws).
   Future<ReportPrintResult> printDriverReports(int batchId) async => ReportPrintResult.fromJson(
@@ -799,9 +827,12 @@ class AgentClient {
       Driver.fromJson(jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(id)}/clock-in')));
 
   /// `available` → `off` (closes the shift). 409 `driver_not_available` = off
-  /// already, or out on a run.
-  Future<Driver> clockOut(String id) async =>
-      Driver.fromJson(jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(id)}/clock-out')));
+  /// already, or out on a run. A Pi ≥ 2.2.3 prints the driver's report first
+  /// and adds `report_print` ([ClockOutResult.reportPrint]) — hence
+  /// [printTimeout].
+  Future<ClockOutResult> clockOut(String id) async => ClockOutResult.fromJson(
+    jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(id)}/clock-out', timeout: printTimeout)),
+  );
 
   /// Shift records of the last [days] days, newest first.
   Future<List<Shift>> listShifts({int days = 7}) async =>
