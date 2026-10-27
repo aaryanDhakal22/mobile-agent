@@ -353,9 +353,11 @@ const double kTicketItemSize = 18;
 const double kTicketButtonHeight = 52;
 
 /// What of a ticket changes with the clock, besides its timer text: the
-/// lateness colour (from the time since arrival, in 10 s steps), the
-/// customer-waiting minutes and heat, and the CHANGED tag.
-typedef _CardTime = ({Color tone, int waitedMinutes, bool hot, bool changed});
+/// lateness colour (in 5 s steps, as the old per-ticket timer redrew it —
+/// constant while green or fully red), the customer-waiting minutes and
+/// heat, and the CHANGED tag. The card draws the exact colour of the moment
+/// it rebuilds.
+typedef _CardTime = ({Color toneStep, int waitedMinutes, bool hot, bool changed});
 
 /// Clamped: a tablet clock a little behind the Pi's would count below zero.
 Duration _sinceArrived(DateTime now, DateTime? arrived) {
@@ -365,12 +367,12 @@ Duration _sinceArrived(DateTime now, DateTime? arrived) {
 
 _CardTime _cardTimeFor(DateTime now, StoredOrder so, DateTime? arrived, bool wave, int greenTill) {
   final since = _sinceArrived(now, arrived);
-  final tone = lateColor(Duration(seconds: since.inSeconds - since.inSeconds % 10), greenTill);
+  final toneStep = lateColor(Duration(seconds: since.inSeconds - since.inSeconds % 5), greenTill);
   final waitStart = so.waitingSince;
   final waitedRaw = waitStart == null ? Duration.zero : now.difference(waitStart);
   final waited = waitedRaw.isNegative ? Duration.zero : waitedRaw;
   return (
-    tone: tone,
+    toneStep: toneStep,
     waitedMinutes: wave ? waited.inMinutes : 0,
     hot: wave && waited >= kWaitingEscalate,
     changed: so.changedTag(now),
@@ -495,7 +497,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
     return ClockBuilder<_CardTime>(
       select: (now) => _cardTime(now, so, arrived, wave),
       builder: (context, t, now) {
-        final tone = t.tone;
+        final tone = lateColor(_sinceArrived(now, arrived), widget.greenTill);
         final waited = Duration(minutes: t.waitedMinutes);
         final hot = t.hot;
         _syncWave(wave && motion.full, motion.scale(hot ? kWaitingLavaHot : kWaitingLava));
