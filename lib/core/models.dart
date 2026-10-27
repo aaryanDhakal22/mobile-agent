@@ -73,7 +73,12 @@ class StoredOrder {
   /// null until main has looked it up (or on an older Pi).
   final OrderGeo? geo;
 
-  const StoredOrder({required this.order, required this.status, this.geo});
+  /// The [jsonSig] of the JSON this order was read from (1.9.0); null for
+  /// one built or changed here. A refresh whose JSON has the same sig keeps
+  /// this instance (FloorState.withSnapshot). Never mutate a parsed order.
+  final int? sig;
+
+  const StoredOrder({required this.order, required this.status, this.geo, this.sig});
 
   /// Also accepts the SSE `order.arrived` / `order.escalated` payloads, which
   /// are `{order, status, ...extras}` — the extras are ignored.
@@ -81,6 +86,7 @@ class StoredOrder {
     order: OrderSnapshot.fromJson(jMap(json['order'])),
     status: OrderStatus.fromJson(jMap(json['status'])),
     geo: json['geo'] is Map ? OrderGeo.fromJson(jMap(json['geo'])) : null,
+    sig: jsonSig(json),
   );
 
   StoredOrder copyWith({OrderStatus? status}) => StoredOrder(order: order, status: status ?? this.status, geo: geo);

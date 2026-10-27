@@ -141,10 +141,17 @@ AgentClient _requireClient(Ref ref) {
 }
 
 // =============================================================================
-// Live floor state: SSE + refetch + 20 s poll
+// Live floor state: SSE + refetch + a full refresh every 3 min (20 s while
+// the live link is down)
 // =============================================================================
 
+/// Full floor refresh while the live link (SSE) is down.
 const Duration kPollInterval = Duration(seconds: 20);
+
+/// Full floor refresh while the live link is up (1.9.0): the frames keep the
+/// floor current, so this is only a safety net — every 20 s re-parsed every
+/// order of the batch for nothing.
+const Duration kLivePollInterval = Duration(minutes: 3);
 
 /// HTTP client per SSE connection attempt — overridden in tests.
 final sseClientFactoryProvider = Provider<http.Client Function()>((_) => http.Client.new);
@@ -155,6 +162,7 @@ final sseBackoffProvider = Provider<Duration Function(int attempt)>((_) => sseBa
 class FloorController extends Notifier<FloorState> {
   AgentEventStream? _sse;
   Timer? _poll;
+  Duration? _pollEvery;
   bool _disposed = false;
 
   /// Bumped on every (re)build; callbacks from an older build's SSE stream or
@@ -176,6 +184,7 @@ class FloorController extends Notifier<FloorState> {
       _sse = null;
       _poll?.cancel();
       _poll = null;
+      _pollEvery = null;
     });
     if (pairing == null) return const FloorState(connection: SseStatus.disconnected);
 
@@ -186,7 +195,9 @@ class FloorController extends Notifier<FloorState> {
         if (gen == _gen) _onEvent(ev);
       },
       onStatus: (st) {
-        if (gen == _gen) _set(state.copyWith(connection: st));
+        if (gen != _gen) return;
+        _set(state.copyWith(connection: st));
+        _armPoll(st);
       },
       onConnected: () {
         if (gen == _gen) unawaited(refresh());
@@ -197,12 +208,27 @@ class FloorController extends Notifier<FloorState> {
       clientFactory: ref.read(sseClientFactoryProvider),
       backoff: ref.read(sseBackoffProvider),
     )..start();
-    _poll = Timer.periodic(kPollInterval, (_) => unawaited(refresh()));
+    _armPoll(SseStatus.connecting);
     // The SSE connect triggers the first refresh; this covers an agent whose
     // SSE is down but whose REST still answers.
     scheduleMicrotask(() => unawaited(refresh()));
     return const FloorState();
   }
+
+  /// The safety-net refresh: every [kLivePollInterval] while the live link is
+  /// up, every [kPollInterval] while it is down (re-armed on each change).
+  void _armPoll(SseStatus st) {
+    if (_disposed) return;
+    final every = st == SseStatus.connected ? kLivePollInterval : kPollInterval;
+    if (_poll != null && _pollEvery == every) return;
+    _poll?.cancel();
+    _pollEvery = every;
+    _poll = Timer.periodic(every, (_) => unawaited(refresh()));
+  }
+
+  /// How often the safety-net refresh runs now (tests).
+  @visibleForTesting
+  Duration? get pollEvery => _pollEvery;
 
   void _set(FloorState s) {
     if (_disposed) return;
@@ -276,7 +302,7 @@ class FloorController extends Notifier<FloorState> {
     } catch (e) {
       if (gen == _gen && !_disposed) {
         // Plain words for anything that shows it; the technical text goes
-        // to the local log once per new problem (this retries every 20 s).
+        // to the local log once per new problem (this retries every 20 s while the link is down).
         final f = FriendlyError.from(e);
         if (state.error != f.short) ref.read(localLogProvider).warn('floor', 'refresh failed: ${f.details}');
         _set(state.copyWith(error: f.short));
