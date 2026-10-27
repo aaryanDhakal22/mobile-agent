@@ -311,7 +311,7 @@ void main() {
       expect(displayFor(Severity.serious), ProblemDisplay.banner);
     });
 
-    test('paid-not-ready: paid pickups and shown POS dine-in while accepted, never once ready', () {
+    test('paid-not-ready: paid pickups while accepted, never once ready, never a POS counter check', () {
       final card = _so(_online('p-1'));
       expect(card.paidNotReady, isFalse, reason: 'online card pickup: prepaid, the customer may not be here yet');
       final ready = _so(_online('p-2', state: 'ready'));
@@ -326,7 +326,9 @@ void main() {
       expect(_so(cash).paidNotReady, isTrue, reason: 'settled at the POS');
       final counter = _online('c-1', status: {'ext_source': 'softtouch', 'display_number': 7});
       ((counter['order'] as Map)['fulfillment'] as Map)['type'] = 'dine_in';
-      expect(_so(counter).paidNotReady, isTrue);
+      expect(_so(counter).paidNotReady, isFalse, reason: '1.8.3: a counter ticket is plain (COUNTER), no lava');
+      expect(_so(counter).isCounter, isTrue);
+      expect(_so(cash).isCounter, isFalse);
       final delivery = _so(jsonDecode(posDeliveryJson) as Map<String, dynamic>);
       expect(delivery.paidNotReady, isFalse, reason: 'deliveries do not wave');
     });

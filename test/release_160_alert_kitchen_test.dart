@@ -20,6 +20,7 @@ import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/alert/new_order_alert.dart';
 import 'package:mobile_agent/features/arrived/time_picker.dart';
+import 'package:mobile_agent/features/common/island.dart';
 import 'package:mobile_agent/features/kitchen/kitchen_pane.dart';
 import 'package:mobile_agent/features/maps/delivery_map.dart';
 import 'package:mobile_agent/features/maps/map_layers.dart';
@@ -168,13 +169,13 @@ void main() {
       }
       expect(_acceptLabel(tester), 'ACCEPT · 30 MIN');
 
-      // The error stays inline (no dialog / snackbar above the navigator).
+      // The error stays inline (no dialog / island pill above the navigator).
       await tester.tap(find.byKey(const ValueKey('accept-confirm')));
       await tester.pump();
       await tester.pump();
       expect(callsOf(f, 'accept').single.extra['prep'], 30);
       expect(find.textContaining('Printer problem'), findsOneWidget);
-      expect(find.byType(SnackBar), findsNothing);
+      expect(find.byType(IslandPill), findsNothing);
       expect(find.byType(Dialog), findsNothing);
       expect(tester.takeException(), isNull);
       await _done(tester);

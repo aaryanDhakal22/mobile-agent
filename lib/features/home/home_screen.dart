@@ -27,7 +27,6 @@ import '../drivers/drivers_pane.dart';
 import '../history/history_pane.dart';
 import '../integration/integration_alerts.dart';
 import '../kitchen/kitchen_pane.dart';
-import '../maps/map_layers.dart';
 import '../maps/runs_map_pane.dart';
 import '../printers/printers_pane.dart';
 import '../settings/store_settings_screen.dart';
@@ -221,13 +220,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     final unassigned = ref.watch(floorProvider.select((s) => s.unassignedDeliveries.length));
     // A downloaded update not installed yet: a dot on the q, a badge on Updates.
     final updateWaiting = ref.watch(
-      updaterProvider.select((u) => u.available && u.phase != UpdatePhase.downloading && u.phase != UpdatePhase.installing),
+      updaterProvider.select(
+        (u) => u.available && u.phase != UpdatePhase.downloading && u.phase != UpdatePhase.installing,
+      ),
     );
     final motion = Motion.of(context, ref);
     final mode = _mode;
     final list = kRailDestinations[mode]!;
     final mapShown = _shown == HomeDestination.map;
-    _mapKept = _mapKept || mapShown || ref.watch(mapSourceProvider.select((m) => m != null));
+    // 1.9.0: built on the first Map visit (not at start — the vector tiles
+    // cost the startup), then kept.
+    _mapKept = _mapKept || mapShown;
 
     return Scaffold(
       // Don't shrink the body for the keyboard — the rail's evenly spread
@@ -241,36 +244,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
         child: DiagPoller(
           child: Row(
             children: [
-              QuiccNavRail(
-                modeKey: mode,
-                motion: motion,
-                selectedIndex: list.indexOf(_shown),
-                onDestinationSelected: (i) => _go(list[i]),
-                header: Column(
-                  children: [
-                    QButton(
-                      mode: mode,
-                      motion: motion,
-                      onTap: _onQTap,
-                      onLongPress: _onQLongPress,
-                      dot: updateWaiting,
-                    ),
-                    QuiccSpace.gapMd,
-                    const _ConnectionDot(),
+              // The rail's animations repaint only the rail (1.9.0).
+              RepaintBoundary(
+                child: QuiccNavRail(
+                  modeKey: mode,
+                  motion: motion,
+                  selectedIndex: list.indexOf(_shown),
+                  onDestinationSelected: (i) => _go(list[i]),
+                  header: Column(
+                    children: [
+                      QButton(
+                        mode: mode,
+                        motion: motion,
+                        onTap: _onQTap,
+                        onLongPress: _onQLongPress,
+                        dot: updateWaiting,
+                      ),
+                      QuiccSpace.gapMd,
+                      const _ConnectionDot(),
+                    ],
+                  ),
+                  destinations: [
+                    for (final d in list)
+                      _dest(
+                        d,
+                        badge: switch (d) {
+                          HomeDestination.kitchen => kitchen,
+                          HomeDestination.deliveries => unassigned,
+                          HomeDestination.updates => updateWaiting ? 1 : 0,
+                          _ => 0,
+                        },
+                      ),
                   ],
                 ),
-                destinations: [
-                  for (final d in list)
-                    _dest(
-                      d,
-                      badge: switch (d) {
-                        HomeDestination.kitchen => kitchen,
-                        HomeDestination.deliveries => unassigned,
-                        HomeDestination.updates => updateWaiting ? 1 : 0,
-                        _ => 0,
-                      },
-                    ),
-                ],
               ),
               const VerticalDivider(width: 1),
               Expanded(
@@ -284,7 +290,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                         children: [
                           // Under the panes: the kept Map (its pane in the
                           // switcher is only the driver button over it).
-                          if (_mapKept) Positioned.fill(child: _KeptMap(shown: mapShown, motion: motion)),
+                          if (_mapKept)
+                            Positioned.fill(
+                              child: _KeptMap(shown: mapShown, motion: motion),
+                            ),
                           Positioned.fill(
                             child: AnimatedSwitcher(
                               duration: motion.full ? motion.scale(const Duration(milliseconds: 260)) : motion.fade,
@@ -310,11 +319,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                                       )
                                     : child,
                               ),
-                              child: KeyedSubtree(key: ValueKey<HomeDestination>(_shown), child: _pane(_shown)),
+                              child: KeyedSubtree(
+                                key: ValueKey<HomeDestination>(_shown),
+                                child: RepaintBoundary(child: _pane(_shown)),
+                              ),
                             ),
                           ),
-                          // Hub info / warnings, top-right over every pane.
-                          const Positioned(top: QuiccSpace.md, right: QuiccSpace.lg, child: IntegrationToastHost()),
                         ],
                       ),
                     ),
@@ -358,7 +368,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
   }
 }
 
-/// The kitchen-mode Map, kept built for the whole session (1.7.1): drawing
+/// The kitchen-mode Map, kept built for the whole session once first shown
+/// (1.7.1; 1.9.0: built on the first visit, not at start): drawing
 /// the vector tiles again on every visit made the tab slow to show on the
 /// store tablet. Hidden it is offstage — laid out but not painted or hit —
 /// with its tickers off, and it rebuilds only when the runs change
@@ -379,7 +390,7 @@ class _KeptMap extends StatelessWidget {
         opacity: shown ? 1 : 0,
         duration: motion.full ? motion.scale(const Duration(milliseconds: 260)) : motion.fade,
         curve: Curves.easeOutCubic,
-        child: RunsMapPane(active: shown),
+        child: RepaintBoundary(child: RunsMapPane(active: shown)),
       ),
     ),
   );

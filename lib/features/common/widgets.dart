@@ -9,6 +9,7 @@ import '../../core/local_log.dart';
 import '../../core/models.dart';
 import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
+import 'island.dart';
 
 /// Pane title row: big title on the left, optional subtitle + trailing.
 class PaneHeader extends StatelessWidget {
@@ -148,12 +149,13 @@ class StatePill extends StatelessWidget {
   }
 }
 
-/// Pickup / delivery / dine-in tag.
+/// Pickup / delivery / dine-in tag; [counter] = a POS counter check (COUNTER).
 class FulfillmentTag extends StatelessWidget {
   final FulfillmentType type;
   final Color? color;
   final double size;
-  const FulfillmentTag(this.type, {super.key, this.color, this.size = 13});
+  final bool counter;
+  const FulfillmentTag(this.type, {super.key, this.color, this.size = 13, this.counter = false});
 
   @override
   Widget build(BuildContext context) {
@@ -162,10 +164,10 @@ class FulfillmentTag extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(fulfillmentIcon(type), size: size + 5, color: c),
+        Icon(counter ? Icons.point_of_sale_outlined : fulfillmentIcon(type), size: size + 5, color: c),
         const SizedBox(width: 6),
         Text(
-          type.label,
+          counter ? 'COUNTER' : type.label,
           style: TextStyle(color: c, fontSize: size, fontWeight: FontWeight.w700, letterSpacing: 1.2),
         ),
       ],
@@ -332,10 +334,11 @@ void logErrorDetails(BuildContext context, String area, FriendlyError f) {
   } catch (_) {}
 }
 
-/// An error snackbar in plain words: [lead] (what didn't happen, e.g. "Not
-/// printed") or the error's title, then what to do. DETAILS shows the
-/// technical text; FIX IT opens the matching guide (or runs [onFix]). The
-/// details go to the local log under [area].
+/// An error in plain words, as a red pill in the notification island
+/// (top-right): [lead] (what didn't happen, e.g. "Not printed") or the
+/// error's title, then what to do. DETAILS shows the technical text; FIX IT
+/// opens the matching guide (or runs [onFix]). The details go to the local
+/// log under [area]. [rightInset] is kept for old callers and does nothing.
 void toastError(
   BuildContext context,
   Object e, {
@@ -346,42 +349,31 @@ void toastError(
 }) {
   final f = e is FriendlyError ? e : FriendlyError.from(e);
   logErrorDetails(context, area, f);
-  final m = ScaffoldMessenger.maybeOf(context);
-  if (m == null) return;
+  final island = Island.maybeOf(context);
+  if (island == null) return;
+  // The caller's screen may be gone by the time a button is pressed.
+  BuildContext? ctx() => context.mounted ? context : island.fallbackContext?.call();
   final guide = f.guide;
-  final fix = onFix ?? (guide == null ? null : () => openGuideHook(context, guide));
-  m.hideCurrentSnackBar();
-  m.showSnackBar(
-    SnackBar(
-      behavior: SnackBarBehavior.floating,
-      margin: rightInset > 0 ? EdgeInsets.fromLTRB(24, 0, rightInset, 24) : null,
-      backgroundColor: QuiccColors.statusVoided,
-      duration: const Duration(seconds: 6),
-      content: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(lead ?? f.title, style: const TextStyle(fontWeight: FontWeight.w700)),
-                if ((lead == null ? f.whatToDo : f.short).isNotEmpty) Text(lead == null ? f.whatToDo : f.short),
-              ],
-            ),
-          ),
-          if (f.details.isNotEmpty)
-            TextButton(
-              style: TextButton.styleFrom(foregroundColor: Colors.white),
-              onPressed: () {
-                m.hideCurrentSnackBar();
-                showErrorDetails(context, f);
-              },
-              child: const Text('DETAILS'),
-            ),
-        ],
-      ),
-      action: fix == null ? null : SnackBarAction(label: 'FIX IT', textColor: Colors.white, onPressed: fix),
-    ),
+  final fix =
+      onFix ??
+      (guide == null
+          ? null
+          : () {
+              final c = ctx();
+              if (c != null) openGuideHook(c, guide);
+            });
+  island.show(
+    lead ?? f.title,
+    body: lead == null ? f.whatToDo : f.short,
+    kind: IslandKind.error,
+    actions: [
+      if (f.details.isNotEmpty)
+        IslandAction('DETAILS', () {
+          final c = ctx();
+          if (c != null) showErrorDetails(c, f);
+        }),
+      if (fix != null) IslandAction('FIX IT', fix),
+    ],
   );
 }
 

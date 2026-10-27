@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/clock.dart';
+import '../../core/floor_state.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/motion.dart';
@@ -11,11 +13,14 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
+import '../common/squish.dart';
 import '../common/widgets.dart';
 import '../deliveries/lava_glow.dart';
+import '../maps/geo_format.dart';
 import '../order_detail/order_detail_screen.dart';
 import '../arrived/time_picker.dart';
 import 'resend_kitchen.dart';
+import 'ticket_motion.dart';
 
 /// The narrowest ticket column and the gap between tickets. 1.6.0: fewer,
 /// larger tickets — 3 columns on the 1280×800 tablet, about 6 on screen.
@@ -45,6 +50,12 @@ List<List<T>> dealIntoColumns<T>(List<T> items, int columns) {
   return out;
 }
 
+/// A ticket's heading (1.9.0): a delivery (online or POS) shows its street
+/// ("4108 Old Court"), so the cook and the driver see where it goes; a
+/// pickup — or a delivery without a house number — the customer's name.
+String ticketHeading(StoredOrder so) =>
+    (so.isDelivery ? ticketStreet(so.order.fulfillment.address) : null) ?? so.order.customerName;
+
 /// Accepted orders as compact tickets, most urgent first, in masonry columns
 /// (a ticket is as tall as its items — nothing is cut off). Future orders
 /// already scheduled wait greyed in the "Later" strip at the end.
@@ -53,20 +64,24 @@ class KitchenPane extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    var kitchen = ref.watch(floorProvider.select((s) => s.kitchenByUrgency));
-    final later = ref.watch(floorProvider.select((s) => s.later));
+    // 1.9.0: compared order by order (identical instances), so a refresh
+    // or an event that changed nothing on the board doesn't rebuild it.
+    var kitchen = ref.watch(floorProvider.select((s) => SameOrders(s.kitchenByUrgency))).orders;
+    final later = ref.watch(floorProvider.select((s) => SameOrders(s.later))).orders;
     final greenTill = ref.watch(floorProvider.select((s) => s.floor?.greenTillMinutes ?? kDefaultGreenTillMinutes));
     final wave = ref.watch(floorProvider.select((s) => s.settings.features.paidWave));
     // 1.7.1: customers waiting on a paid ticket go first (most urgent order
     // kept within each part).
     if (wave) kitchen = [...kitchen.where((o) => o.paidNotReady), ...kitchen.where((o) => !o.paidNotReady)];
+    // 1.9.0: what's on the board when the floor first loads never pops in.
+    final seen = ref.read(kitchenSeenProvider);
+    if (!seen.seeded && ref.watch(floorProvider.select((s) => s.loaded))) seen.seed(kitchen.map((o) => o.id));
     return RefreshIndicator(
       onRefresh: () => ref.read(floorProvider.notifier).refresh(),
       child: LayoutBuilder(
         builder: (context, box) {
           const pad = QuiccSpace.pane;
           final cols = ((box.maxWidth - 2 * pad + kTicketGap) / (kTicketWidth + kTicketGap)).floor().clamp(1, 12);
-          final columns = dealIntoColumns(kitchen, cols);
           return SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(pad, pad, pad, 120), // room for the driver button
@@ -95,30 +110,19 @@ class KitchenPane extends ConsumerWidget {
                     ),
                   )
                 else
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (var c = 0; c < columns.length; c++) ...[
-                        if (c > 0) const SizedBox(width: kTicketGap),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (final so in columns[c])
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: kTicketGap),
-                                  child: KitchenCard(
-                                    key: ValueKey(so.id),
-                                    order: so,
-                                    greenTill: greenTill,
-                                    paidWave: wave,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
+                  // 1.9.0: new tickets pop in, a READY one shrinks away and
+                  // the others glide to their new places.
+                  AnimatedKitchenGrid(
+                    orders: kitchen,
+                    columns: cols,
+                    gap: kTicketGap,
+                    deal: dealIntoColumns,
+                    itemBuilder: (context, so, ghost) => KitchenCard(
+                      key: ValueKey(ghost ? 'ghost-${so.id}' : so.id),
+                      order: so,
+                      greenTill: greenTill,
+                      paidWave: wave,
+                    ),
                   ),
                 if (later.isNotEmpty) LaterStrip(orders: later),
               ],
@@ -242,7 +246,7 @@ class _LaterTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    [so.displayNumber, so.order.customerName].join(' · '),
+                    [so.displayNumber, ticketHeading(so)].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
@@ -348,6 +352,33 @@ const double kTicketItemSize = 18;
 /// READY / Reprint / Resend height on a ticket.
 const double kTicketButtonHeight = 52;
 
+/// What of a ticket changes with the clock, besides its timer text: the
+/// lateness colour (in 5 s steps, as the old per-ticket timer redrew it —
+/// constant while green or fully red), the customer-waiting minutes and
+/// heat, and the CHANGED tag. The card draws the exact colour of the moment
+/// it rebuilds.
+typedef _CardTime = ({Color toneStep, int waitedMinutes, bool hot, bool changed});
+
+/// Clamped: a tablet clock a little behind the Pi's would count below zero.
+Duration _sinceArrived(DateTime now, DateTime? arrived) {
+  final raw = arrived == null ? Duration.zero : now.difference(arrived);
+  return raw.isNegative ? Duration.zero : raw;
+}
+
+_CardTime _cardTimeFor(DateTime now, StoredOrder so, DateTime? arrived, bool wave, int greenTill) {
+  final since = _sinceArrived(now, arrived);
+  final toneStep = lateColor(Duration(seconds: since.inSeconds - since.inSeconds % 5), greenTill);
+  final waitStart = so.waitingSince;
+  final waitedRaw = waitStart == null ? Duration.zero : now.difference(waitStart);
+  final waited = waitedRaw.isNegative ? Duration.zero : waitedRaw;
+  return (
+    toneStep: toneStep,
+    waitedMinutes: wave ? waited.inMinutes : 0,
+    hot: wave && waited >= kWaitingEscalate,
+    changed: so.changedTag(now),
+  );
+}
+
 /// One ticket on the Kitchen board: a coloured header bar (green → red by
 /// time since arrival) with the number, then a white body. A paid ticket
 /// that isn't ready yet shows "customer waiting" — the red lava bar and
@@ -431,6 +462,9 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
     },
   );
 
+  _CardTime _cardTime(DateTime now, StoredOrder so, DateTime? arrived, bool wave) =>
+      _cardTimeFor(now, so, arrived, wave, widget.greenTill);
+
   /// A 56×52 outlined icon button with a tooltip / screen-reader label.
   Widget _iconButton({required String label, required IconData icon, required bool busy, VoidCallback? onPressed}) {
     return Tooltip(
@@ -457,17 +491,15 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
     final wave = widget.paidWave && so.paidNotReady;
     final motion = Motion.of(context, ref);
     final radius = BorderRadius.circular(QuiccRadius.md);
-    return Ticker(
-      interval: const Duration(seconds: 5),
-      builder: (context, now) {
-        // Clamped: a tablet clock a little behind the Pi's would count below zero.
-        final raw = arrived == null ? Duration.zero : now.difference(arrived);
-        final since = raw.isNegative ? Duration.zero : raw;
-        final tone = lateColor(since, widget.greenTill);
-        final waitStart = so.waitingSince;
-        final waitedRaw = waitStart == null ? Duration.zero : now.difference(waitStart);
-        final waited = waitedRaw.isNegative ? Duration.zero : waitedRaw;
-        final hot = wave && waited >= kWaitingEscalate;
+    // 1.9.0: the shared clock rebuilds the card only when its colour, the
+    // customer-waiting minutes / heat or the CHANGED tag move on; the timer
+    // line follows the clock by itself.
+    return ClockBuilder<_CardTime>(
+      select: (now) => _cardTime(now, so, arrived, wave),
+      builder: (context, t, now) {
+        final tone = lateColor(_sinceArrived(now, arrived), widget.greenTill);
+        final waited = Duration(minutes: t.waitedMinutes);
+        final hot = t.hot;
         _syncWave(wave && motion.full, motion.scale(hot ? kWaitingLavaHot : kWaitingLava));
         // 1.8.0: changed at the POS (pending, or OK'd < 10 min ago).
         final changed = so.changedTag(now);
@@ -479,10 +511,11 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _TimerLine(order: so, since: since, tone: tone, now: now),
+              _TimerLine(order: so, arrived: arrived, tone: tone),
               QuiccSpace.gapSm,
               Text(
-                o.customerName,
+                ticketHeading(so),
+                key: const ValueKey('ticket-heading'),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
@@ -523,21 +556,24 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
                   ),
                   QuiccSpace.gapSm,
                   Expanded(
-                    child: SizedBox(
-                      height: kTicketButtonHeight,
-                      child: FilledButton.icon(
-                        // The theme's big-button padding would clip the
-                        // label inside a ticket-height button.
-                        style: FilledButton.styleFrom(
-                          backgroundColor: QuiccColors.statusPaid,
-                          foregroundColor: QuiccColors.brand900,
-                          padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md),
-                          minimumSize: const Size(0, kTicketButtonHeight),
-                          textStyle: QuiccType.text(QuiccType.heading, weight: FontWeight.w700, height: 1),
+                    child: Squish(
+                      enabled: !_busy,
+                      child: SizedBox(
+                        height: kTicketButtonHeight,
+                        child: FilledButton.icon(
+                          // The theme's big-button padding would clip the
+                          // label inside a ticket-height button.
+                          style: FilledButton.styleFrom(
+                            backgroundColor: QuiccColors.statusPaid,
+                            foregroundColor: QuiccColors.brand900,
+                            padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md),
+                            minimumSize: const Size(0, kTicketButtonHeight),
+                            textStyle: QuiccType.text(QuiccType.heading, weight: FontWeight.w700, height: 1),
+                          ),
+                          onPressed: _busy ? null : _ready,
+                          icon: const Icon(Icons.check_circle_outline, size: 24),
+                          label: Text(_busy ? '…' : 'READY'),
                         ),
-                        onPressed: _busy ? null : _ready,
-                        icon: const Icon(Icons.check_circle_outline, size: 24),
-                        label: Text(_busy ? '…' : 'READY'),
                       ),
                     ),
                   ),
@@ -690,7 +726,7 @@ class _CardBar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (so.status.paid) ...[const PaidBadge(), QuiccSpace.gapSm],
-                FulfillmentTag(so.order.fulfillment.type, size: QuiccType.label, color: ink),
+                FulfillmentTag(so.order.fulfillment.type, size: QuiccType.label, color: ink, counter: so.isCounter),
               ],
             ),
           ),
@@ -761,22 +797,20 @@ class _CardBar extends StatelessWidget {
 /// like the ticket), then the promised ready time.
 class _TimerLine extends StatelessWidget {
   final StoredOrder order;
-  final Duration since;
+  final DateTime? arrived;
   final Color tone;
-  final DateTime now;
-  const _TimerLine({required this.order, required this.since, required this.tone, required this.now});
+  const _TimerLine({required this.order, required this.arrived, required this.tone});
 
   @override
   Widget build(BuildContext context) {
     final eta = order.status.estimatedReadyAt;
-    final left = eta?.difference(now);
-    final late = left != null && left.isNegative;
+    final secondary = context.palette.textSecondary;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text(
-          duration(since),
-          key: const ValueKey('ticket-timer'),
+        ClockText(
+          (now) => duration(_sinceArrived(now, arrived)),
+          textKey: const ValueKey('ticket-timer'),
           style: QuiccType.number(
             QuiccType.title,
             weight: FontWeight.w700,
@@ -785,18 +819,28 @@ class _TimerLine extends StatelessWidget {
             height: 1.1,
           ),
         ),
-        if (left != null) ...[
+        if (eta != null) ...[
           QuiccSpace.gapMd,
           Expanded(
-            child: Text(
-              late ? 'LATE ${minutes(left)}' : '${minutes(left)} left · ${clock(eta)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: QuiccType.text(
-                late ? QuiccType.heading : QuiccType.body,
-                weight: late ? FontWeight.w700 : FontWeight.w500,
-                color: late ? QuiccColors.statusVoided : context.palette.textSecondary,
-              ),
+            child: ClockBuilder<(bool, String)>(
+              select: (now) {
+                final left = eta.difference(now);
+                final late = left.isNegative;
+                return (late, late ? 'LATE ${minutes(left)}' : '${minutes(left)} left · ${clock(eta)}');
+              },
+              builder: (context, v, _) {
+                final (late, text) = v;
+                return Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: QuiccType.text(
+                    late ? QuiccType.heading : QuiccType.body,
+                    weight: late ? FontWeight.w700 : FontWeight.w500,
+                    color: late ? QuiccColors.statusVoided : secondary,
+                  ),
+                );
+              },
             ),
           ),
         ],

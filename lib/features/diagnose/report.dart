@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 
 import '../../core/api_client.dart';
 import '../../core/device_platform.dart';
+import '../../core/frame_stats.dart';
 import '../../core/local_log.dart';
 import '../../core/providers.dart';
 import '../../core/storage.dart';
@@ -64,6 +65,9 @@ class ReportContext {
   final Map<String, Object?>? lastDiag;
   final List<String> log;
 
+  /// How smooth the screen has been (1.9.0, [FrameStats.summary]).
+  final Map<String, Object?>? frames;
+
   const ReportContext({
     this.tabletName = '',
     this.deviceId = '',
@@ -76,6 +80,7 @@ class ReportContext {
     this.store = '',
     this.lastDiag,
     this.log = const [],
+    this.frames,
   });
 }
 
@@ -118,6 +123,7 @@ DiagReport composeReport({
       'android_sdk': ctx.sdk,
       'model': ctx.model,
       'checks': ctx.deviceChecks ?? const <String, Object?>{},
+      'frames': ?ctx.frames,
     },
     'pi': {'address': ctx.piAddress, 'version': ctx.piVersion, 'store': ctx.store, 'last_diag': ctx.lastDiag},
     'log': log,
@@ -352,6 +358,7 @@ Future<ReportContext> gatherReportContext(Ref ref) async {
     store: last?.storeName ?? '',
     lastDiag: last?.toJson(),
     log: ref.read(localLogProvider).lines,
+    frames: ref.read(frameStatsProvider).summary(),
   );
 }
 

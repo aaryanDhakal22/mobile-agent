@@ -7,6 +7,7 @@ import '../../core/friendly_error.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
+import '../common/island.dart';
 import '../common/widgets.dart';
 import 'delivery_map.dart';
 
@@ -170,14 +171,9 @@ class _CandidateListState extends ConsumerState<CandidateList> {
       await ref.read(floorProvider.notifier).chooseGeo(widget.orderId, index);
       if (!mounted) return;
       final nav = Navigator.of(context);
-      final messenger = ScaffoldMessenger.maybeOf(context);
+      final island = Island.maybeOf(context);
       nav.pop();
-      messenger?.showSnackBar(
-        const SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('Address chosen — the route shows in a moment'),
-        ),
-      );
+      island?.show('Address chosen — the route shows in a moment', kind: IslandKind.success);
     } catch (e) {
       if (!mounted) return;
       setState(

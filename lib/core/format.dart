@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../features/common/island.dart';
 import '../theme/quicc_colors.dart';
 import 'models.dart';
 
@@ -83,18 +84,10 @@ String itemTitle(LineItem i) {
   return '$q$size${i.name}';
 }
 
-/// Small helper for showing a snackbar from anywhere with a context.
-/// [rightInset] keeps it clear of the bottom-right driver button.
+/// A short notice from anywhere with a context: a pill in the notification
+/// island, top-right (1.9.0 — it used to be a full-width bar at the bottom,
+/// over SEND OUT and the driver button). [error] makes it red.
+/// [rightInset] is kept for old callers and does nothing now.
 void toast(BuildContext context, String message, {bool error = false, double rightInset = 0}) {
-  final m = ScaffoldMessenger.maybeOf(context);
-  if (m == null) return;
-  m.hideCurrentSnackBar();
-  m.showSnackBar(
-    SnackBar(
-      behavior: SnackBarBehavior.floating,
-      margin: rightInset > 0 ? EdgeInsets.fromLTRB(24, 0, rightInset, 24) : null,
-      backgroundColor: error ? QuiccColors.statusVoided : null,
-      content: Text(message),
-    ),
-  );
+  Island.show(context, message, kind: error ? IslandKind.error : IslandKind.info);
 }

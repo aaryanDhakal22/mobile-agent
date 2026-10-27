@@ -10,6 +10,7 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
+import '../common/island.dart';
 import '../common/widgets.dart';
 import 'check_address_sheet.dart';
 
@@ -141,11 +142,9 @@ class _SearchAddressSheetState extends ConsumerState<SearchAddressSheet> {
       case GeoState.check when g.candidates.isNotEmpty:
         setState(() => _phase = _Phase.results);
       case GeoState.located:
-        final messenger = ScaffoldMessenger.maybeOf(context);
+        final island = Island.maybeOf(context);
         Navigator.of(context).pop();
-        messenger?.showSnackBar(
-          const SnackBar(behavior: SnackBarBehavior.floating, content: Text(SearchAddressText.found)),
-        );
+        island?.show(SearchAddressText.found, kind: IslandKind.success);
       default:
         setState(() => _phase = _Phase.noMatch);
     }

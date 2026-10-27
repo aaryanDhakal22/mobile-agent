@@ -153,12 +153,19 @@ class FloorState {
     required List<Driver> drivers,
     required DateTime at,
   }) {
+    // 1.9.0: an order whose JSON didn't change keeps its old instance, so
+    // the screens (selects, cards) see it as unchanged.
+    StoredOrder keep(StoredOrder o) {
+      final old = orders[o.id];
+      return old != null && old.sig != null && old.sig == o.sig ? old : o;
+    }
+
     final next = <String, StoredOrder>{};
     for (final o in current) {
-      if (o.id.isNotEmpty) next[o.id] = o;
+      if (o.id.isNotEmpty) next[o.id] = keep(o);
     }
     for (final o in arrived) {
-      if (o.id.isNotEmpty) next[o.id] = o;
+      if (o.id.isNotEmpty) next[o.id] = keep(o);
     }
     final waits = Map<String, int>.of(waitingSeconds)..removeWhere((id, _) => next[id]?.state != OrderState.arrived);
     return copyWith(
@@ -450,4 +457,24 @@ FloorUpdate applySseEvent(FloorState s, SseEvent ev) {
     default:
       return FloorUpdate(s);
   }
+}
+
+/// A list of orders compared instance by instance (1.9.0): with
+/// [FloorState.withSnapshot] keeping unchanged orders, a `select` on it only
+/// fires when an order on the list really changed, came or went.
+class SameOrders {
+  final List<StoredOrder> orders;
+  const SameOrders(this.orders);
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! SameOrders || other.orders.length != orders.length) return false;
+    for (var i = 0; i < orders.length; i++) {
+      if (!identical(orders[i], other.orders[i])) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAll(orders.map(identityHashCode));
 }

@@ -19,6 +19,7 @@ import 'package:mobile_agent/core/ring_platform.dart';
 import 'package:mobile_agent/core/soft_chime.dart';
 import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/arrived/accept_controls.dart';
+import 'package:mobile_agent/features/common/island.dart';
 import 'package:mobile_agent/features/deliveries/delivery_widgets.dart';
 import 'package:mobile_agent/features/drivers/drivers_pane.dart';
 import 'package:mobile_agent/features/integration/integration_alerts.dart';
@@ -603,7 +604,7 @@ void main() {
     await _done(tester);
   });
 
-  testWidgets('hub problems: info / warn as a top-right toast, serious as a banner that stays', (tester) async {
+  testWidgets('hub problems: info / warn as a pill in the island, serious as a banner that stays', (tester) async {
     final c = await _pump(
       tester,
       _Agent(),
@@ -617,19 +618,21 @@ void main() {
           ],
         },
       ),
-      const Scaffold(
-        body: Column(
-          children: [
-            IntegrationBanner(),
-            Expanded(
-              child: Stack(children: [Positioned(top: 12, right: 16, child: IntegrationToastHost())]),
+      const IslandHost(
+        child: IntegrationIslandFeed(
+          child: Scaffold(
+            body: Column(
+              children: [
+                IntegrationBanner(),
+                Expanded(child: SizedBox.expand()),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
     final banner = find.byKey(const ValueKey('integration-banner'));
-    final toasts = find.byKey(const ValueKey('integration-toasts'));
+    final toasts = find.byKey(const ValueKey('island'));
     expect(find.descendant(of: banner, matching: find.text('Quicc batch not open in SoftTouch')), findsOneWidget);
     expect(find.descendant(of: banner, matching: find.text('Unmapped item: Calzone')), findsNothing);
     expect(find.descendant(of: toasts, matching: find.text('Unmapped item: Calzone')), findsOneWidget);
@@ -640,9 +643,17 @@ void main() {
     );
     await _settle(tester);
     expect(find.descendant(of: toasts, matching: find.text('POS says #12 — not clocked in')), findsOneWidget);
+    expect(
+      [for (final p in tester.widgetList<IslandPill>(find.byType(IslandPill))) p.kind],
+      [IslandKind.warn, IslandKind.warn],
+      reason: 'warn → amber pills, newest on top',
+    );
 
     // Toasts fade by themselves; the serious banner stays until cleared.
     await tester.pump(kIntegrationToastFor + const Duration(seconds: 1));
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 200)); // they shrink away
+    }
     expect(toasts, findsNothing);
     expect(banner, findsOneWidget);
 

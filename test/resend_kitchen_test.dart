@@ -14,6 +14,7 @@ import 'package:mobile_agent/core/friendly_error.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
+import 'package:mobile_agent/features/common/island.dart';
 import 'package:mobile_agent/features/kitchen/kitchen_pane.dart';
 import 'package:mobile_agent/features/kitchen/resend_kitchen.dart';
 import 'package:mobile_agent/features/order_detail/order_detail_screen.dart';
@@ -189,7 +190,7 @@ void main() {
       await _settle(tester);
       expect(find.text('Send to the kitchen again?'), findsNothing);
       expect(agent.requests, isEmpty);
-      expect(find.byType(SnackBar), findsNothing);
+      expect(find.byType(IslandPill), findsNothing);
       await _done(tester);
     });
 

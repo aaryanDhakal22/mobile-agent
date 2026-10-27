@@ -2,7 +2,7 @@
 // CANCEL ORDER → History, cancelled), the came-back section with its
 // hold-to-release, the "hold the far one" check before SEND OUT, AUTO's
 // "held for" tag, the out drivers' addresses in stop order, and the Map
-// pane kept built (with its refresh button).
+// pane kept built (with its refresh button; 1.9.0: from its first visit).
 import 'dart:async';
 import 'dart:convert';
 
@@ -690,26 +690,26 @@ void main() {
       await tester.pump(const Duration(milliseconds: 600));
     }
 
-    testWidgets('built at start (offstage, tickers off); the tab shows the same map, which stays when you leave', (tester) async {
+    testWidgets('built on the first visit (1.9.0: not at start); kept offstage with tickers off after', (tester) async {
       final (c, f) = await pumpHome(tester);
-      // On Kitchen: the map is already there, hidden and quiet.
-      expect(kept, findsOneWidget);
-      expect(find.byType(RunsMapPane), findsNothing, reason: 'offstage');
-      expect(tester.widget<RunsMapPane>(kept).active, isFalse);
-      expect(TickerMode.valuesOf(tester.element(find.byType(FlutterMap, skipOffstage: false))).enabled, isFalse);
-      expect(callsOf(f, 'trip'), isNotEmpty, reason: "Sam's route is fetched before anyone looks");
-      final state = tester.state(kept);
+      // On Kitchen at start: no map yet (the tiles cost the startup).
+      expect(kept, findsNothing);
+      expect(callsOf(f, 'trip'), isEmpty);
 
       await go(tester, c, HomeDestination.map);
       expect(find.byType(RunsMapPane), findsOneWidget);
-      expect(tester.state(kept), same(state), reason: 'not built again');
+      final state = tester.state(kept);
       expect(tester.widget<RunsMapPane>(kept).active, isTrue);
       expect(TickerMode.valuesOf(tester.element(find.byType(FlutterMap))).enabled, isTrue);
+      expect(callsOf(f, 'trip'), isNotEmpty, reason: "Sam's road route");
       expect(find.byIcon(Icons.local_shipping_outlined), findsOneWidget, reason: 'the driver button still floats over it');
 
       await go(tester, c, HomeDestination.deliveries);
-      expect(find.byType(RunsMapPane), findsNothing);
+      expect(find.byType(RunsMapPane), findsNothing, reason: 'offstage');
+      expect(kept, findsOneWidget, reason: 'kept built');
       expect(tester.state(kept), same(state));
+      expect(tester.widget<RunsMapPane>(kept).active, isFalse);
+      expect(TickerMode.valuesOf(tester.element(find.byType(FlutterMap, skipOffstage: false))).enabled, isFalse);
       expect(find.text('Unassigned · 3'), findsOneWidget);
 
       await go(tester, c, HomeDestination.map);
@@ -974,6 +974,29 @@ void main() {
       expect((outline.border! as Border).top.width, 4);
       await tester.pump();
       expect(tester.binding.hasScheduledFrame, isFalse);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('1.8.3: a POS counter check is a plain COUNTER ticket — no lava, no waiting line', (tester) async {
+      final m = jsonDecode(arrivedPickupJson) as Map<String, dynamic>;
+      final now = timeNow().toUtc();
+      (m['order'] as Map)['id'] = 'ctr';
+      ((m['order'] as Map)['fulfillment'] as Map)['type'] = 'dine_in';
+      (m['status'] as Map)
+        ..['state'] = 'accepted'
+        ..['paid'] = true
+        ..['ext_source'] = 'softtouch'
+        ..['display_number'] = 298
+        ..['accepted_at'] = now.subtract(const Duration(minutes: 3)).toIso8601String()
+        ..['estimated_ready_at'] = now.add(const Duration(minutes: 10)).toIso8601String();
+      await board(tester, [pickup('paid', 1102), StoredOrder.fromJson(m)]);
+      expect(inCard('ctr', find.text('COUNTER')), findsOneWidget);
+      expect(inCard('ctr', find.text('DINE-IN')), findsNothing);
+      expect(inCard('ctr', find.byKey(const ValueKey('customer-waiting'))), findsNothing);
+      expect(inCard('ctr', find.byKey(const ValueKey('waiting-lava'))), findsNothing);
+      expect(inCard('ctr', find.byKey(const ValueKey('paid-wave'))), findsNothing);
+      // A pickup paid at the store still glows.
+      expect(inCard('paid', find.byKey(const ValueKey('customer-waiting'))), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 

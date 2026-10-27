@@ -65,7 +65,9 @@ class _Prompt extends ConsumerWidget {
       ),
       _ => (
         'Quibase $name is ready',
-        'Install now? It takes about a minute, and Quibase comes back paired and listening for orders by itself.',
+        u.reopen
+            ? 'Install now? It takes about a minute, and Quibase comes back paired and listening for orders by itself.'
+            : 'Install now? It takes about a minute. Then open Quibase from the home screen — it stays paired.',
         'INSTALL NOW',
       ),
     };
@@ -94,6 +96,26 @@ class _Prompt extends ConsumerWidget {
                     Text(
                       kPlayProtectHint,
                       style: QuiccType.text(QuiccType.label, color: palette.textMuted, height: 1.4),
+                    ),
+                  ],
+                  // 1.8.4: without "display over other apps" Android leaves the
+                  // tablet on its home screen after the update.
+                  if (!u.reopen && u.phase != UpdatePhase.needPermission) ...[
+                    QuiccSpace.gapSm,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            "Allow it once and Quibase reopens by itself after every update.",
+                            style: QuiccType.text(QuiccType.label, color: palette.textMuted, height: 1.4),
+                          ),
+                        ),
+                        TextButton(
+                          key: const ValueKey('update-allow-reopen'),
+                          onPressed: ctl.turnOnReopen,
+                          child: const Text('ALLOW REOPEN'),
+                        ),
+                      ],
                     ),
                   ],
                   if (u.phase == UpdatePhase.failed && (u.error?.details.isNotEmpty ?? false)) ...[

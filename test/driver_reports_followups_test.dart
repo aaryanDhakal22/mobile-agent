@@ -16,6 +16,7 @@ import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/receipt_models.dart';
 import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/batch/batch_pane.dart';
+import 'package:mobile_agent/features/common/island.dart';
 import 'package:mobile_agent/features/integration/integration_alerts.dart';
 import 'package:mobile_agent/features/settings/receipt_settings_card.dart';
 import 'package:mobile_agent/theme/quicc_colors.dart';
@@ -181,9 +182,7 @@ void main() {
           container: c,
           child: MaterialApp(
             theme: darkTheme(),
-            home: const Scaffold(
-              body: Stack(children: [Positioned(top: 16, right: 16, child: IntegrationToastHost())]),
-            ),
+            home: const IslandHost(child: IntegrationIslandFeed(child: Scaffold())),
           ),
         ),
       );
@@ -207,10 +206,14 @@ void main() {
       await tester.pump();
       const failed = "Juma's report didn't print — check the receipt printer (printer offline)";
       expect(find.text(failed), findsOneWidget);
-      final card = tester.widget<Material>(find.ancestor(of: find.text(failed), matching: find.byType(Material)).first);
-      expect((card.shape! as RoundedRectangleBorder).side.color, QuiccColors.statusVoided);
+      final pill = tester.widget<IslandPill>(find.ancestor(of: find.text(failed), matching: find.byType(IslandPill)));
+      expect(pill.kind, IslandKind.error);
+      expect(pill.colorIn(tester.element(find.text(failed))), QuiccColors.statusVoided);
 
       await tester.pump(kIntegrationToastFor + const Duration(seconds: 1));
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 200)); // it shrinks away
+      }
       expect(find.text("Printed Juma's report"), findsNothing, reason: 'fades by itself');
       await tester.pumpWidget(const SizedBox());
     });

@@ -22,8 +22,6 @@ class DevLogEntry {
 /// kitchen numbers only — never names or addresses), failed refreshes and
 /// what the app itself did (mode switches, dev unlock). The newest
 /// [capacity] lines are kept; a restart starts empty.
-///
-/// TODO(1.7.0): add the Pi's own log (`GET /api/dev/events?since=`) beside it.
 class DevLog extends Notifier<List<DevLogEntry>> {
   static const capacity = 400;
 

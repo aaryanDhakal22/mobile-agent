@@ -14,6 +14,7 @@ import 'package:mobile_agent/core/api_client.dart';
 import 'package:mobile_agent/core/floor_state.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/providers.dart';
+import 'package:mobile_agent/features/common/island.dart';
 import 'package:mobile_agent/features/drivers/drivers_pane.dart';
 import 'package:mobile_agent/theme/quicc_colors.dart';
 
@@ -148,7 +149,11 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 500));
 }
 
-Color? _snackColor(WidgetTester tester) => tester.widget<SnackBar>(find.byType(SnackBar)).backgroundColor;
+/// The fill of the notification island's (only) pill.
+Color? _snackColor(WidgetTester tester) {
+  final pill = find.byType(IslandPill);
+  return tester.widget<IslandPill>(pill).colorIn(tester.element(pill));
+}
 
 void main() {
   group('api: one driver\'s report', () {

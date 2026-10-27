@@ -8,10 +8,12 @@ import '../settings/pos_settings_cards.dart';
 import '../update/updates_screen.dart';
 import 'dev_texts.dart';
 import 'dev_widgets.dart';
+import 'performance_card.dart';
 import 'pi_cards.dart';
 
 /// Developer mode → Config: the feature switches (the POS ones live on POS
-/// hub), this tablet's pairing, Quibase updates and About & diagnostics.
+/// hub), this tablet's pairing, Quibase updates, performance (1.9.0) and
+/// About & diagnostics.
 class DevConfigScreen extends StatelessWidget {
   const DevConfigScreen({super.key});
 
@@ -23,6 +25,7 @@ class DevConfigScreen extends StatelessWidget {
       const FeaturesSettingsCard(keys: kPosFeatureKeys, exclude: true),
       const TabletCard(),
       const UpdateStatusCard(),
+      const PerformanceCard(),
       Padding(
         padding: const EdgeInsets.only(bottom: QuiccSpace.sm),
         child: Text(

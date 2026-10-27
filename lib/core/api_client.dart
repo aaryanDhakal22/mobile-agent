@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -22,6 +23,46 @@ const String kDeviceKeyHeader = 'X-Agent-Device-Key';
 /// included (those pass [QuibaseVersion.current]).
 Map<String, String> quibaseVersionHeaders(String? version) =>
     version == null || version.isEmpty ? const {} : {kQuibaseVersionHeader: version};
+
+/// Response bodies bigger than this are parsed on a background isolate
+/// (1.9.0): a busy batch's order list is a few hundred KB, and decoding it
+/// plus building every order on the UI thread dropped frames.
+const int kIsolateParseBytes = 64 * 1024;
+
+/// Parse big bodies off the UI thread. Tests turn it off
+/// (test/flutter_test_config.dart): widget tests run on fake time, which a
+/// real isolate never finishes in.
+bool parseOffUiThread = true;
+
+final Converter<List<int>, Object?> _utf8Json = const Utf8Decoder().fuse(const JsonDecoder());
+
+/// A response body as JSON, decoded once from its bytes (null when empty or
+/// not JSON). Bytes that aren't UTF-8 fall back to Latin-1 — what
+/// `http.Response.body` does for a body without a charset.
+Object? decodeJsonBytes(Uint8List bytes) {
+  if (bytes.isEmpty) return null;
+  try {
+    return _utf8Json.convert(bytes);
+  } catch (_) {
+    try {
+      return jsonDecode(latin1.decode(bytes));
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+/// Decodes [bytes] and builds the result with [parse] — on a background
+/// isolate when the body is bigger than [kIsolateParseBytes]. [parse] must
+/// be a top-level or static function (it travels to the isolate).
+Future<T> parseJsonBytes<T>(Uint8List bytes, T Function(Object? json) parse) {
+  if (parseOffUiThread && bytes.length > kIsolateParseBytes) {
+    return Isolate.run(() => parse(decodeJsonBytes(bytes)), debugName: 'quibase-parse');
+  }
+  return Future.value(parse(decodeJsonBytes(bytes)));
+}
+
+List<StoredOrder> _ordersFromJson(Object? json) => jList(json, StoredOrder.fromJson);
 
 /// The agent's HTTP port when an address doesn't name one.
 const int kAgentPort = 8080;
@@ -331,8 +372,8 @@ class AgentClient {
 
   /// `batch`: 'current' | 'all' | a batch id.
   Future<List<StoredOrder>> listOrders({String batch = 'current', int offset = 0, int limit = 200}) async {
-    final body = await _get('/api/orders', {'batch': batch, 'offset': '$offset', 'limit': '$limit'});
-    return jList(body, StoredOrder.fromJson);
+    final resp = await _request('GET', '/api/orders', query: {'batch': batch, 'offset': '$offset', 'limit': '$limit'});
+    return parseJsonBytes(resp.bodyBytes, _ordersFromJson);
   }
 
   /// Every order of [batch], paging `limit=`[pageSize] by offset until a
@@ -352,7 +393,8 @@ class AgentClient {
     return all.length > cap ? all.sublist(0, cap) : all;
   }
 
-  Future<List<StoredOrder>> listArrived() async => jList(await _get('/api/orders/arrived'), StoredOrder.fromJson);
+  Future<List<StoredOrder>> listArrived() async =>
+      parseJsonBytes((await _request('GET', '/api/orders/arrived')).bodyBytes, _ordersFromJson);
 
   Future<StoredOrder> getOrder(String id) async =>
       StoredOrder.fromJson(jMap(await _get('/api/orders/${Uri.encodeComponent(id)}')));
@@ -1099,6 +1141,18 @@ class AgentClient {
     Object? body,
     Duration? timeout,
     bool mayRevoke = true,
+  }) async => decodeJsonBytes(
+    (await _request(method, path, query: query, body: body, timeout: timeout, mayRevoke: mayRevoke)).bodyBytes,
+  );
+
+  /// Sends a request and checks its status; the caller decodes the body.
+  Future<http.Response> _request(
+    String method,
+    String path, {
+    Map<String, String>? query,
+    Object? body,
+    Duration? timeout,
+    bool mayRevoke = true,
   }) async {
     final req = http.Request(method, uri(path, query));
     req.headers.addAll(body == null ? _headers : _jsonHeaders);
@@ -1118,12 +1172,7 @@ class AgentClient {
       if (e.isDeviceRevoked && mayRevoke) onDeviceRevoked?.call();
       rethrow;
     }
-    if (resp.body.trim().isEmpty) return null;
-    try {
-      return jsonDecode(resp.body);
-    } catch (_) {
-      return null;
-    }
+    return resp;
   }
 
   static void _check(http.Response resp) {
