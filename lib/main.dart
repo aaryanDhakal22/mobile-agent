@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'core/frame_stats.dart';
 import 'core/providers.dart';
 import 'core/ring_bridge.dart';
 import 'features/update/updater.dart';
@@ -32,5 +33,7 @@ Future<void> main() async {
   // Self-update runs headless too: it installs after Close batch even with
   // the screen off (features/update/updater.dart).
   container.read(updaterProvider);
+  // Frame timings for diagnostics (tablet.frames) from the first frame.
+  container.read(frameStatsProvider);
   runApp(UncontrolledProviderScope(container: container, child: const MobileAgentApp()));
 }

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'core/device_platform.dart';
+import 'core/frame_stats.dart';
 import 'core/providers.dart';
 import 'core/storage.dart';
 import 'features/alert/new_order_alert.dart';
@@ -94,6 +95,8 @@ class _MobileAgentAppState extends ConsumerState<MobileAgentApp> {
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
       title: 'Quibase',
+      // Developer Config → Performance overlay (1.9.0).
+      showPerformanceOverlay: ref.watch(perfOverlayProvider),
       navigatorKey: _navigator,
       debugShowCheckedModeBanner: false,
       theme: QuiccTheme.light(),
