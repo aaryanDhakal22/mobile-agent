@@ -1,13 +1,54 @@
-name: Analyze + test
+name: Analyze + test (+ signed APK on tags)
 
-# Counter-tablet app CI: static analysis + the unit/widget tests on every push.
-# (Release APKs are built and signed locally for now.)
+# Counter-tablet app CI.
+#
+#   * every push — `flutter analyze` and `flutter test` side by side.
+#   * a v* tag (= pubspec's x.y.z) — also a signed arm64 release APK, built
+#     beside the checks and published only when both are green: a GitHub
+#     release with quibase-<code>.apk + quibase-<code>.json (version code =
+#     Unix seconds at build time, version name, sha256), the same files the
+#     console keeps in ~/.quibase/releases. The console's Release Quibase
+#     uploads that APK to staging main; Promote sends the same bytes to prod.
+#
+# The release key comes from two secrets (QUIBASE_KEYSTORE_B64 = the .jks,
+# QUIBASE_KEY_PROPERTIES = key.properties). Gradle would silently sign with
+# the debug key without them, so the job refuses to publish unless the APK's
+# certificate is the Quibase release certificate (pinned below).
+#
+# Docs-only pushes don't run CI; a newer push to the same branch cancels the
+# older run (never for tags).
 
 on:
   push:
     branches: ["**"]
+    tags: ["v*"]
+    paths-ignore: ["**.md", "docs/**"] # not applied to tag pushes
+  # A manual run builds + checks the signed APK as an artifact (no release):
+  # proves the key secrets without cutting a version.
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+env:
+  FLUTTER_VERSION: 3.41.4 # match local; newer stable adds lints
+  # CN=Quibase, O=QuiccPOS, C=US — the release certificate tablets trust.
+  RELEASE_CERT_SHA256: 480fa279172fd714c2ae6c4436f9d663072922c0172b203e3012db68ef0e5ee0
 
 jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -15,12 +56,92 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.41.4   # match local; newer stable adds lints
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: flutter pub get
-      - run: flutter analyze
       # Goldens render clock times in local time and were made in the
       # store's timezone; the runner is UTC.
       - run: flutter test
         env:
           TZ: America/New_York
+
+  apk:
+    name: Signed release APK
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag = pubspec version
+        id: ver
+        run: |
+          v=$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' pubspec.yaml)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$v" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "pubspec says $v, tag is $GITHUB_REF_NAME"; exit 1
+          fi
+          echo "name=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Release key
+        env:
+          KEYSTORE_B64: ${{ secrets.QUIBASE_KEYSTORE_B64 }}
+          KEY_PROPERTIES: ${{ secrets.QUIBASE_KEY_PROPERTIES }}
+        run: |
+          [ -n "$KEYSTORE_B64" ] && [ -n "$KEY_PROPERTIES" ] || { echo "release key secrets are not set"; exit 1; }
+          umask 077
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/quibase-release.jks"
+          printf '%s\n' "$KEY_PROPERTIES" | sed "s|^storeFile=.*|storeFile=$RUNNER_TEMP/quibase-release.jks|" > "$RUNNER_TEMP/key.properties"
+          echo "QUIBASE_KEY_PROPERTIES=$RUNNER_TEMP/key.properties" >> "$GITHUB_ENV"
+      - name: Build (signed, arm64)
+        run: |
+          code=$(date +%s)
+          name=${{ steps.ver.outputs.name }}
+          flutter build apk --release --target-platform android-arm64 --build-number="$code" --build-name="$name"
+          mkdir -p out
+          cp build/app/outputs/flutter-apk/app-release.apk "out/quibase-$code.apk"
+          sha=$(sha256sum "out/quibase-$code.apk" | cut -d' ' -f1)
+          printf '{\n  "version_code": %s,\n  "version_name": "%s",\n  "sha256": "%s"\n}\n' "$code" "$name" "$sha" > "out/quibase-$code.json"
+      - name: Signed with the release certificate
+        run: |
+          signer=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          echo "apksigner: $signer"
+          out=$("$signer" verify --print-certs out/quibase-*.apk 2>&1) || { echo "$out"; exit 1; }
+          # "Signer #1 certificate …" (older build-tools) or "V2 Signer: certificate …"
+          # (37+): every certificate listed must be the release one.
+          got=$(printf '%s\n' "$out" | sed -nE 's/^.*[Ss]igner.*certificate SHA-256 digest: //p' | sort -u)
+          [ "$got" = "$RELEASE_CERT_SHA256" ] || { echo "$out"; echo "APK is not signed with the Quibase release key ($got)"; exit 1; }
+          echo "signed with the Quibase release certificate"
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/quibase-release.jks" "$RUNNER_TEMP/key.properties"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quibase-apk
+          path: out/
+          retention-days: 7
+
+  release:
+    name: Publish the APK
+    needs: [analyze, test, apk]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: quibase-apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Quibase ${{ github.ref_name }}
+          files: |
+            quibase-*.apk
+            quibase-*.json
