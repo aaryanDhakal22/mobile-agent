@@ -13,12 +13,14 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
+import '../common/squish.dart';
 import '../common/widgets.dart';
 import '../deliveries/lava_glow.dart';
 import '../maps/geo_format.dart';
 import '../order_detail/order_detail_screen.dart';
 import '../arrived/time_picker.dart';
 import 'resend_kitchen.dart';
+import 'ticket_motion.dart';
 
 /// The narrowest ticket column and the gap between tickets. 1.6.0: fewer,
 /// larger tickets — 3 columns on the 1280×800 tablet, about 6 on screen.
@@ -71,13 +73,15 @@ class KitchenPane extends ConsumerWidget {
     // 1.7.1: customers waiting on a paid ticket go first (most urgent order
     // kept within each part).
     if (wave) kitchen = [...kitchen.where((o) => o.paidNotReady), ...kitchen.where((o) => !o.paidNotReady)];
+    // 1.9.0: what's on the board when the floor first loads never pops in.
+    final seen = ref.read(kitchenSeenProvider);
+    if (!seen.seeded && ref.watch(floorProvider.select((s) => s.loaded))) seen.seed(kitchen.map((o) => o.id));
     return RefreshIndicator(
       onRefresh: () => ref.read(floorProvider.notifier).refresh(),
       child: LayoutBuilder(
         builder: (context, box) {
           const pad = QuiccSpace.pane;
           final cols = ((box.maxWidth - 2 * pad + kTicketGap) / (kTicketWidth + kTicketGap)).floor().clamp(1, 12);
-          final columns = dealIntoColumns(kitchen, cols);
           return SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(pad, pad, pad, 120), // room for the driver button
@@ -106,35 +110,19 @@ class KitchenPane extends ConsumerWidget {
                     ),
                   )
                 else
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (var c = 0; c < columns.length; c++) ...[
-                        if (c > 0) const SizedBox(width: kTicketGap),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (final so in columns[c])
-                                Padding(
-                                  key: ValueKey('slot-${so.id}'),
-                                  padding: const EdgeInsets.only(bottom: kTicketGap),
-                                  // Each ticket repaints alone (its timer, the
-                                  // customer-waiting halo) — 1.9.0.
-                                  child: RepaintBoundary(
-                                    child: KitchenCard(
-                                      key: ValueKey(so.id),
-                                      order: so,
-                                      greenTill: greenTill,
-                                      paidWave: wave,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
+                  // 1.9.0: new tickets pop in, a READY one shrinks away and
+                  // the others glide to their new places.
+                  AnimatedKitchenGrid(
+                    orders: kitchen,
+                    columns: cols,
+                    gap: kTicketGap,
+                    deal: dealIntoColumns,
+                    itemBuilder: (context, so, ghost) => KitchenCard(
+                      key: ValueKey(ghost ? 'ghost-${so.id}' : so.id),
+                      order: so,
+                      greenTill: greenTill,
+                      paidWave: wave,
+                    ),
                   ),
                 if (later.isNotEmpty) LaterStrip(orders: later),
               ],
@@ -566,21 +554,24 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
                   ),
                   QuiccSpace.gapSm,
                   Expanded(
-                    child: SizedBox(
-                      height: kTicketButtonHeight,
-                      child: FilledButton.icon(
-                        // The theme's big-button padding would clip the
-                        // label inside a ticket-height button.
-                        style: FilledButton.styleFrom(
-                          backgroundColor: QuiccColors.statusPaid,
-                          foregroundColor: QuiccColors.brand900,
-                          padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md),
-                          minimumSize: const Size(0, kTicketButtonHeight),
-                          textStyle: QuiccType.text(QuiccType.heading, weight: FontWeight.w700, height: 1),
+                    child: Squish(
+                      enabled: !_busy,
+                      child: SizedBox(
+                        height: kTicketButtonHeight,
+                        child: FilledButton.icon(
+                          // The theme's big-button padding would clip the
+                          // label inside a ticket-height button.
+                          style: FilledButton.styleFrom(
+                            backgroundColor: QuiccColors.statusPaid,
+                            foregroundColor: QuiccColors.brand900,
+                            padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md),
+                            minimumSize: const Size(0, kTicketButtonHeight),
+                            textStyle: QuiccType.text(QuiccType.heading, weight: FontWeight.w700, height: 1),
+                          ),
+                          onPressed: _busy ? null : _ready,
+                          icon: const Icon(Icons.check_circle_outline, size: 24),
+                          label: Text(_busy ? '…' : 'READY'),
                         ),
-                        onPressed: _busy ? null : _ready,
-                        icon: const Icon(Icons.check_circle_outline, size: 24),
-                        label: Text(_busy ? '…' : 'READY'),
                       ),
                     ),
                   ),

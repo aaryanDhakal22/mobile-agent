@@ -10,6 +10,7 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
+import '../common/squish.dart';
 import '../common/widgets.dart';
 import 'time_picker.dart';
 
@@ -187,23 +188,27 @@ class _AcceptControlsState extends ConsumerState<AcceptControls> {
       icon = Icons.print;
     }
 
-    final confirm = FilledButton.icon(
-      key: const ValueKey('accept-confirm'),
-      style: widget.onBrand
-          ? FilledButton.styleFrom(backgroundColor: QuiccColors.brand900, foregroundColor: QuiccColors.brand50)
-          : null,
-      onPressed: _busy ? null : onConfirm,
-      icon: _busy
-          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3))
-          : Icon(icon, size: quickDelivery ? 32 : 26),
-      label: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Text(
-          _busy ? (lead ? 'SAVING…' : 'PRINTING…') : action,
-          style: QuiccType.text(
-            quickDelivery ? QuiccType.title : QuiccType.heading,
-            weight: FontWeight.w700,
-          ).copyWith(letterSpacing: 1),
+    // 1.9.0: squishes when pressed.
+    final confirm = Squish(
+      enabled: !_busy,
+      child: FilledButton.icon(
+        key: const ValueKey('accept-confirm'),
+        style: widget.onBrand
+            ? FilledButton.styleFrom(backgroundColor: QuiccColors.brand900, foregroundColor: QuiccColors.brand50)
+            : null,
+        onPressed: _busy ? null : onConfirm,
+        icon: _busy
+            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3))
+            : Icon(icon, size: quickDelivery ? 32 : 26),
+        label: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            _busy ? (lead ? 'SAVING…' : 'PRINTING…') : action,
+            style: QuiccType.text(
+              quickDelivery ? QuiccType.title : QuiccType.heading,
+              weight: FontWeight.w700,
+            ).copyWith(letterSpacing: 1),
+          ),
         ),
       ),
     );

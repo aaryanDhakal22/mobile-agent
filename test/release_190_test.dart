@@ -20,9 +20,11 @@ import 'package:mobile_agent/core/floor_state.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
+import 'package:mobile_agent/features/common/squish.dart';
 import 'package:mobile_agent/features/dev/performance_card.dart';
 import 'package:mobile_agent/features/diagnose/report.dart';
 import 'package:mobile_agent/features/kitchen/kitchen_pane.dart';
+import 'package:mobile_agent/features/kitchen/ticket_motion.dart';
 import 'package:mobile_agent/features/update/updater.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -508,4 +510,197 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   });
+
+  group('WP6 bubbly', () {
+    /// A pickup cooking: kitchen #[k], accepted [ago] before now.
+    StoredOrder cooking(String id, int k, Duration ago) {
+      final m = jsonDecode(arrivedPickupJson) as Map<String, dynamic>;
+      final now = DateTime.now().toUtc();
+      (m['order'] as Map)['id'] = id;
+      (m['status'] as Map)
+        ..['state'] = 'accepted'
+        ..['kitchen_number'] = k
+        ..['accepted_at'] = now.subtract(ago).toIso8601String()
+        ..['estimated_ready_at'] = now.add(Duration(minutes: k - 1090)).toIso8601String();
+      return StoredOrder.fromJson(jsonDecode(jsonEncode(m)) as Map<String, dynamic>);
+    }
+
+    FloorState floorWith(List<StoredOrder> orders) {
+      final base = deliveryFloor();
+      return base.withSnapshot(floor: base.floor!, current: orders, arrived: const [], drivers: base.drivers, at: DateTime.now());
+    }
+
+    Future<(ProviderContainer, FakeDeliveryFloor)> pumpKitchen(
+      WidgetTester tester,
+      List<StoredOrder> orders, {
+      bool motion = true,
+    }) async {
+      tester.view.physicalSize = const Size(1280 - 104, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final f = FakeDeliveryFloor(floorWith(orders));
+      final c = await deliveryContainer(f, prefs: {if (!motion) 'motion_enabled': false});
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(theme: darkTheme(), home: const Scaffold(body: KitchenPane())),
+        ),
+      );
+      await tester.pump();
+      return (c, f);
+    }
+
+    Finder slot(String id) => find.byKey(ValueKey('slot-$id'));
+    double popScale(WidgetTester tester, String id) => tester
+        .widget<ScaleTransition>(find.descendant(of: slot(id), matching: find.byKey(const ValueKey('ticket-pop'))))
+        .scale
+        .value;
+    AnimatedKitchenGridState grid(WidgetTester tester) =>
+        tester.state<AnimatedKitchenGridState>(find.byType(AnimatedKitchenGrid));
+
+    /// The widgets between [f] and the board (the scroll view above it has
+    /// its own overscroll stretch).
+    List<Widget> above(WidgetTester tester, Finder f) {
+      final out = <Widget>[];
+      tester.element(f).visitAncestorElements((e) {
+        if (e.widget is AnimatedKitchenGrid) return false;
+        out.add(e.widget);
+        return true;
+      });
+      return out;
+    }
+
+    bool isTransform(Widget w) => w is Transform || w is ScaleTransition || w is RotationTransition || w is SlideTransition;
+
+    testWidgets('a new ticket pops in once (0 → 110 % → 95 % → 100 %); nothing pops on load, refresh or pane switch', (
+      tester,
+    ) async {
+      final a = cooking('a', 1101, const Duration(seconds: 10));
+      final b = cooking('b', 1102, const Duration(minutes: 5));
+      final (c, f) = await pumpKitchen(tester, [a, b]);
+      expect(popScale(tester, 'a'), 1.0, reason: 'on the board at load: no pop even though just accepted');
+      expect(popScale(tester, 'b'), 1.0);
+
+      final n = cooking('n', 1103, const Duration(seconds: 3));
+      final old = cooking('old', 1104, const Duration(minutes: 3)); // not recent: just appears
+      f.push(floorWith([a, b, n, old]));
+      await tester.pump();
+      expect(popScale(tester, 'n'), lessThan(0.1), reason: 'starts from nothing');
+      expect(popScale(tester, 'old'), 1.0);
+      await tester.pump(const Duration(milliseconds: 208)); // 40 %: the overshoot
+      expect(popScale(tester, 'n'), closeTo(1.10, 0.02));
+      await tester.pump(const Duration(milliseconds: 130)); // 65 %: the dip
+      expect(popScale(tester, 'n'), closeTo(0.95, 0.02));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(popScale(tester, 'n'), 1.0);
+
+      // A refresh (fresh instances, same orders): nothing pops again.
+      f.push(floorWith([for (final o in [a, b, n, old]) StoredOrder.fromJson(jsonDecode(jsonEncode(_json(o))) as Map<String, dynamic>)]));
+      await tester.pump();
+      expect(popScale(tester, 'n'), 1.0);
+
+      // Another pane and back: nothing pops.
+      await tester.pumpWidget(
+        UncontrolledProviderScope(container: c, child: const MaterialApp(home: Scaffold(body: Text('deliveries')))),
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(theme: darkTheme(), home: const Scaffold(body: KitchenPane())),
+        ),
+      );
+      await tester.pump();
+      for (final id in ['a', 'b', 'n', 'old']) {
+        expect(popScale(tester, id), 1.0, reason: id);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('READY: a ghost shrinks to 85 % and fades where the ticket was; the others glide', (tester) async {
+      final orders = [for (var i = 0; i < 4; i++) cooking('k$i', 1101 + i, const Duration(minutes: 5))];
+      final (_, f) = await pumpKitchen(tester, orders);
+      // Dealt across three columns: k0 k1 k2 / k3. k0 leaves → k1 moves into
+      // the first column, k3 to the third.
+      final k1Before = tester.getTopLeft(slot('k1'));
+      f.push(floorWith(orders.sublist(1)));
+      await tester.pump();
+      expect(grid(tester).ghosts, ['k0']);
+      final ghost = find.byKey(const ValueKey('kitchen-ghost-k0'));
+      expect(ghost, findsOneWidget);
+      expect(find.descendant(of: ghost, matching: find.byType(IgnorePointer)), findsWidgets, reason: "can't be tapped");
+      expect(find.byKey(const ValueKey('k0')), findsNothing, reason: 'the ghost is not the ticket');
+      final k1After = tester.getTopLeft(slot('k1'));
+      expect(k1After.dx, lessThan(k1Before.dx));
+      // Drawn where it was, gliding to its new place.
+      expect(grid(tester).flip.shiftOf('k1').dx, closeTo(k1Before.dx - k1After.dx, 1));
+
+      await tester.pump(const Duration(milliseconds: 110));
+      final s = tester.widget<ScaleTransition>(find.descendant(of: ghost, matching: find.byType(ScaleTransition)).first).scale.value;
+      expect(s, inExclusiveRange(kTicketExitScale, 1.0));
+      expect(grid(tester).flip.shiftOf('k1').dx, inExclusiveRange(0, k1Before.dx - k1After.dx));
+
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(ghost, findsNothing);
+      expect(grid(tester).ghosts, isEmpty);
+      expect(grid(tester).flip.shiftOf('k1'), Offset.zero);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Motion off: fades only — no transform on a new ticket, the ghost or a squish; nothing glides', (
+      tester,
+    ) async {
+      final orders = [for (var i = 0; i < 4; i++) cooking('k$i', 1101 + i, const Duration(minutes: 5))];
+      final (_, f) = await pumpKitchen(tester, orders, motion: false);
+      final n = cooking('n', 1110, const Duration(seconds: 2));
+      f.push(floorWith([...orders.sublist(1), n]));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('ticket-pop')), findsNothing);
+      expect(find.descendant(of: slot('n'), matching: find.byKey(const ValueKey('ticket-pop-fade'))), findsOneWidget);
+      for (final id in ['k1', 'n']) {
+        expect(above(tester, find.byKey(ValueKey(id))).where(isTransform), isEmpty, reason: id);
+      }
+      expect(find.byKey(const ValueKey('squish')), findsNothing);
+      final ghost = find.byKey(const ValueKey('kitchen-ghost-k0'));
+      expect(ghost, findsOneWidget, reason: 'it fades');
+      expect(find.descendant(of: ghost, matching: find.byType(ScaleTransition)), findsNothing);
+      expect(grid(tester).flip.shiftOf('k1'), Offset.zero);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(ghost, findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('READY squishes to 94 % while pressed and springs back', (tester) async {
+      await pumpKitchen(tester, [cooking('k0', 1101, const Duration(minutes: 5))]);
+      final squish = find.descendant(of: find.byKey(const ValueKey('k0')), matching: find.byKey(const ValueKey('squish')));
+      double scale() => tester.widget<ScaleTransition>(squish).scale.value;
+      expect(scale(), 1.0);
+      final g = await tester.startGesture(tester.getCenter(find.text('READY')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(scale(), closeTo(kSquishScale, 0.005));
+      await g.cancel();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(scale(), greaterThan(kSquishScale));
+      await tester.pump(const Duration(milliseconds: 800));
+      expect(scale(), closeTo(1.0, 0.002));
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
 }
+
+/// An order back to JSON (enough of it for the kitchen board).
+Map<String, dynamic> _json(StoredOrder o) => {
+  'order': {
+    'id': o.id,
+    'customer': {'display_name': o.order.customerName},
+    'fulfillment': {'type': 'pickup'},
+  },
+  'status': {
+    'state': 'accepted',
+    'kitchen_number': o.status.kitchenNumber,
+    'accepted_at': o.status.acceptedAt?.toIso8601String(),
+    'estimated_ready_at': o.status.estimatedReadyAt?.toIso8601String(),
+  },
+};

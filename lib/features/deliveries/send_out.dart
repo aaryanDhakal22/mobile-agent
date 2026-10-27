@@ -12,6 +12,7 @@ import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
+import '../common/squish.dart';
 import '../common/widgets.dart';
 import '../home/home_nav.dart';
 import 'delivery_widgets.dart';
@@ -237,51 +238,55 @@ class NextSendOutBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final empty = stops == 0;
-    return SizedBox(
-      height: 64,
-      child: FilledButton(
-        key: const ValueKey('send-next'),
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.lg),
-          backgroundColor: QuiccColors.brand400,
-          foregroundColor: QuiccColors.brand900,
-          disabledBackgroundColor: p.bgElevated,
-          disabledForegroundColor: p.textMuted,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(QuiccRadius.lg)),
-        ),
-        onPressed: (empty || sending) ? null : onPressed,
-        child: Row(
-          children: [
-            sending
-                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
-                : const Icon(Icons.delivery_dining, size: 28),
-            QuiccSpace.gapMd,
-            Expanded(
-              child: empty
-                  ? Text(
-                      "${driver.name} is next — drag deliveries into their box first",
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: QuiccType.text(QuiccType.body, weight: FontWeight.w500, color: p.textMuted),
-                    )
-                  : Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: 'SEND OUT · ${driver.name.toUpperCase()}',
-                            style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
-                          ),
-                          TextSpan(
-                            text: ' · $stops order${stops == 1 ? '' : 's'}',
-                            style: QuiccType.text(QuiccType.body, weight: FontWeight.w500),
-                          ),
-                        ],
+    // 1.9.0: squishes when pressed.
+    return Squish(
+      enabled: !(empty || sending),
+      child: SizedBox(
+        height: 64,
+        child: FilledButton(
+          key: const ValueKey('send-next'),
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.lg),
+            backgroundColor: QuiccColors.brand400,
+            foregroundColor: QuiccColors.brand900,
+            disabledBackgroundColor: p.bgElevated,
+            disabledForegroundColor: p.textMuted,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(QuiccRadius.lg)),
+          ),
+          onPressed: (empty || sending) ? null : onPressed,
+          child: Row(
+            children: [
+              sending
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
+                  : const Icon(Icons.delivery_dining, size: 28),
+              QuiccSpace.gapMd,
+              Expanded(
+                child: empty
+                    ? Text(
+                        "${driver.name} is next — drag deliveries into their box first",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: QuiccType.text(QuiccType.body, weight: FontWeight.w500, color: p.textMuted),
+                      )
+                    : Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: 'SEND OUT · ${driver.name.toUpperCase()}',
+                              style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
+                            ),
+                            TextSpan(
+                              text: ' · $stops order${stops == 1 ? '' : 's'}',
+                              style: QuiccType.text(QuiccType.body, weight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
