@@ -13,6 +13,7 @@ import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
 import '../deliveries/lava_glow.dart';
+import '../maps/geo_format.dart';
 import '../order_detail/order_detail_screen.dart';
 import '../arrived/time_picker.dart';
 import 'resend_kitchen.dart';
@@ -44,6 +45,12 @@ List<List<T>> dealIntoColumns<T>(List<T> items, int columns) {
   }
   return out;
 }
+
+/// A ticket's heading (1.9.0): a delivery (online or POS) shows its street
+/// ("4108 Old Court"), so the cook and the driver see where it goes; a
+/// pickup — or a delivery without a house number — the customer's name.
+String ticketHeading(StoredOrder so) =>
+    (so.isDelivery ? ticketStreet(so.order.fulfillment.address) : null) ?? so.order.customerName;
 
 /// Accepted orders as compact tickets, most urgent first, in masonry columns
 /// (a ticket is as tall as its items — nothing is cut off). Future orders
@@ -242,7 +249,7 @@ class _LaterTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    [so.displayNumber, so.order.customerName].join(' · '),
+                    [so.displayNumber, ticketHeading(so)].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
@@ -482,7 +489,8 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
               _TimerLine(order: so, since: since, tone: tone, now: now),
               QuiccSpace.gapSm,
               Text(
-                o.customerName,
+                ticketHeading(so),
+                key: const ValueKey('ticket-heading'),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),

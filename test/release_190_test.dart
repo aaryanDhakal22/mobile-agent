@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:clock/clock.dart';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,9 +17,11 @@ import 'package:mobile_agent/core/floor_state.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
+import 'package:mobile_agent/features/kitchen/kitchen_pane.dart';
 import 'package:mobile_agent/features/update/updater.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'delivery_fixtures.dart';
 import 'fixtures.dart';
 
 /// The Android side, recorded; [canInstallError] makes canInstall() throw.
@@ -221,6 +224,57 @@ void main() {
         expect(c.read(updaterProvider).target!.versionCode, 21);
         expect(updater.damagedRetryAfter, now.add(const Duration(minutes: 10)));
       });
+    });
+  });
+
+  group('WP4 ticket heading', () {
+    Future<FakeDeliveryFloor> pumpKitchen(WidgetTester tester, List<StoredOrder> orders) async {
+      tester.view.physicalSize = const Size(1280 - 104, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final base = deliveryFloor();
+      final f = FakeDeliveryFloor(
+        base.withSnapshot(floor: base.floor!, current: orders, arrived: const [], drivers: base.drivers, at: DateTime.now()),
+      );
+      final c = await deliveryContainer(f);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(theme: darkTheme(), home: const Scaffold(body: KitchenPane())),
+        ),
+      );
+      await tester.pump();
+      return f;
+    }
+
+    String heading(WidgetTester tester, String id) => tester
+        .widget<Text>(
+          find.descendant(of: find.byKey(ValueKey('ticket-open-$id')), matching: find.byKey(const ValueKey('ticket-heading'))),
+        )
+        .data!;
+
+    testWidgets('a delivery shows its street, a pickup its name, no house number falls back to the name', (tester) async {
+      final pickup = StoredOrder.fromJson(
+        (jsonDecode(arrivedPickupJson) as Map<String, dynamic>)
+          ..['status'] = {
+            ...((jsonDecode(arrivedPickupJson) as Map<String, dynamic>)['status'] as Map),
+            'state': 'accepted',
+            'kitchen_number': 1110,
+          },
+      );
+      await pumpKitchen(tester, [
+        delivery('k1', 1101, state: 'accepted', street: '4108 Old Court Rd, Apt 2'),
+        delivery('k2', 1102, state: 'accepted', street: '931 TAYLOR AVENUE'),
+        delivery('k3', 1103, state: 'accepted', street: 'Towson University'),
+        pickup,
+      ]);
+      expect(heading(tester, 'k1'), '4108 Old Court');
+      expect(heading(tester, 'k2'), '931 Taylor Ave');
+      expect(heading(tester, 'k3'), delivery('x', 1, street: 'Towson University').order.customerName);
+      expect(heading(tester, pickup.id), pickup.order.customerName);
+      expect(ticketHeading(pickup), pickup.order.customerName);
+      await tester.pumpWidget(const SizedBox());
     });
   });
 }

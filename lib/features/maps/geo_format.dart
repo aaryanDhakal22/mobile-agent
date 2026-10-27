@@ -80,9 +80,86 @@ List<Widget> geoTags(OrderGeo? g, {double fontSize = 12}) => [
 ];
 
 /// "931 Taylor Avenue" — the street part of an address (for chips).
-String streetOf(StoredOrder o) {
-  final a = o.order.fulfillment.address;
-  if (a == null || a.isEmpty) return 'No address';
+String streetOf(StoredOrder o) => streetLine(o.order.fulfillment.address) ?? 'No address';
+
+/// An address's street line: line1, else the whole address (null = none).
+String? streetLine(Address? a) {
+  if (a == null || a.isEmpty) return null;
   final l1 = a.line1.trim();
   return l1.isNotEmpty ? l1 : a.oneLine;
+}
+
+/// Unit words: from here on an address line is the apartment / suite part.
+const _unitWords = {
+  'apt', 'apartment', 'unit', 'suite', 'ste', 'bldg', 'building', 'fl', 'floor', 'rm', 'room', 'lot', //
+};
+
+/// The house number + street of an address line: what comes before the first
+/// comma, without an apartment / unit / suite part (a keyword right after the
+/// house number is the street: "7 Unit Rd"). A port of the agent's tested
+/// `order.StreetOnly` (driver report slips) — keep the two in step.
+String streetOnly(String line1) {
+  var s = line1;
+  final comma = s.indexOf(',');
+  if (comma >= 0) s = s.substring(0, comma);
+  final words = s.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+  for (var i = 2; i < words.length; i++) {
+    final w = words[i];
+    final lw = w.toLowerCase().replaceFirst(RegExp(r'[.:]+$'), '');
+    if (w.startsWith('#') || _unitWords.contains(lw)) {
+      words.removeRange(i, words.length);
+      break;
+    }
+  }
+  return words.join(' ');
+}
+
+/// Street suffixes and their short forms ("Street" → "St").
+const _suffixes = {
+  'street': 'St', 'st': 'St', 'avenue': 'Ave', 'ave': 'Ave', 'av': 'Ave', 'road': 'Rd', 'rd': 'Rd', //
+  'drive': 'Dr', 'dr': 'Dr', 'lane': 'Ln', 'ln': 'Ln', 'court': 'Ct', 'ct': 'Ct', 'place': 'Pl', 'pl': 'Pl', //
+  'boulevard': 'Blvd', 'blvd': 'Blvd', 'circle': 'Cir', 'cir': 'Cir', 'terrace': 'Ter', 'ter': 'Ter', //
+  'parkway': 'Pkwy', 'pkwy': 'Pkwy', 'highway': 'Hwy', 'hwy': 'Hwy', 'square': 'Sq', 'sq': 'Sq', //
+  'trail': 'Trl', 'trl': 'Trl', 'way': 'Way', 'pike': 'Pike', 'alley': 'Aly', 'crescent': 'Cres', //
+};
+
+/// Compass words, kept upper case ("NW") and shortened ("North" → "N").
+const _compass = {
+  'n': 'N', 'north': 'N', 's': 'S', 'south': 'S', 'e': 'E', 'east': 'E', 'w': 'W', 'west': 'W', //
+  'ne': 'NE', 'nw': 'NW', 'se': 'SE', 'sw': 'SW', //
+};
+
+/// "TAYLOR" → "Taylor", "1ST" → "1st"; mixed case ("McCormick") stays.
+String _titleCaps(String w) {
+  if (w.length < 2 || w != w.toUpperCase() || w == w.toLowerCase()) return w;
+  return w[0] + w.substring(1).toLowerCase();
+}
+
+/// A delivery's street for its Kitchen ticket heading (1.9.0): the house
+/// number + the first one or two street words, the suffix shortened, no
+/// apartment and no town — "4108 Old Court Rd, Apt 2" → "4108 Old Court",
+/// "12 Main Street" → "12 Main St", a POS's "931 TAYLOR AVE" → "931 Taylor
+/// Ave". Null without a house number (the ticket shows the name instead).
+String? ticketStreet(Address? a) {
+  final line = streetLine(a);
+  if (line == null) return null;
+  final words = streetOnly(line).split(' ').map((w) => w.replaceFirst(RegExp(r'[.,]+$'), '')).toList();
+  if (words.length < 2 || words.first.isEmpty || !RegExp(r'^[0-9]').hasMatch(words.first)) return null;
+  final out = <String>[words.first.toUpperCase()];
+  final all = words.skip(1).where((w) => w.isNotEmpty).toList();
+  final street = all.take(2).toList();
+  for (var i = 0; i < street.length; i++) {
+    final w = street[i];
+    final lw = w.toLowerCase();
+    // Only the street's real last word is its suffix: "4108 Old Court Rd"
+    // keeps "Court" when it is cut to two words.
+    if (i > 0 && i == all.length - 1 && _suffixes.containsKey(lw)) {
+      out.add(_suffixes[lw]!);
+    } else if (i == 0 && all.length > 1 && _compass.containsKey(lw) && !_suffixes.containsKey(all[1].toLowerCase())) {
+      out.add(_compass[lw]!);
+    } else {
+      out.add(_titleCaps(w));
+    }
+  }
+  return out.join(' ');
 }
