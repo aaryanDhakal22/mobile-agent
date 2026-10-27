@@ -144,6 +144,16 @@ words (hub not connected, hub needs an update, voice not installed, could not
 make the voice: <reason>, didn't answer in time). A Pi without the route (no
 `preview` in `GET /api/callout`) hides ON THIS TABLET.
 
+**Callout repeat (1.8.2, Pi 2.3.4 + hub 0.2.4).** Order callout → **Repeat**
+slider, 1–3 (`Say it 1×` / `2×` / `3×`), saved with the other callout
+settings (`PUT /api/settings/callout {repeat}`; the Pi answers 400 outside
+1–3). The hub says the words that many times 0.8 s apart — chime once at the
+start, the music down for the whole sequence and back once at the end — for
+READY, TEST CALLOUT and PREVIEW ON THE STORE SPEAKER; for ON THIS TABLET it
+sends one WAV with the words repeated (the tablet plays it once, as before).
+A Pi without `repeat` in its callout settings hides the slider and the
+tablet never sends the field.
+
 **Errors in plain words.** Anything that goes wrong is shown as a short
 sentence plus what to do ("Can't reach the Pi — check the tablet is on the
 store Wi-Fi and the Pi is on"), never the raw agent text: that sits behind a

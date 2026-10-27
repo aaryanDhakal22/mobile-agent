@@ -252,6 +252,20 @@ void main() {
       expect(v.preview, isTrue);
       expect(v.hub!.preview, isTrue);
       expect(CalloutView.fromJson(const {}).preview, isFalse);
+
+      // 1.8.2: Pi 2.3.4 says how many times the phrase is said; an older Pi
+      // has no repeat (null: the slider is hidden, the field never sent).
+      final r = CalloutSettings.fromJson({'enabled': true, 'repeat': 2});
+      expect(r.repeat, 2);
+      expect(r.toJson()['repeat'], 2);
+      expect(r.copyWith(volume: 50).repeat, 2);
+      expect(r == r.copyWith(repeat: 3), isFalse);
+      expect(CalloutSettings.fromJson({'repeat': 9}).repeat, 3);
+      expect(CalloutSettings.fromJson({'repeat': 0}).repeat, 1);
+      final old = CalloutSettings.fromJson({'enabled': true, 'volume': 80});
+      expect(old.repeat, isNull);
+      expect(old.toJson().containsKey('repeat'), isFalse);
+      expect(FloorSettings.fromJson({'callout': {'repeat': 3}}).callout.repeat, 3);
     });
   });
 
@@ -436,6 +450,10 @@ void main() {
       final put = reqs.lastWhere((r) => r.url.path == '/api/settings/callout');
       expect(put.method, 'PUT');
       expect((jsonDecode(put.body) as Map)['enabled'], false);
+      // An older Pi (no `repeat` in its settings): no Repeat slider, the
+      // field is never sent.
+      expect(find.byKey(const ValueKey('callout-repeat')), findsNothing);
+      expect((jsonDecode(put.body) as Map).containsKey('repeat'), isFalse);
 
       await tester.enterText(find.byKey(const ValueKey('callout-number')), '213');
       await tester.tap(find.byKey(const ValueKey('callout-test')));
@@ -450,6 +468,48 @@ void main() {
       final p = reqs.lastWhere((r) => r.url.path == '/api/callout/test');
       expect(jsonDecode(p.body), {'number': 213, 'voice': 'kokoro:af_heart', 'kind': 'preview'});
       expect(reqs.where((r) => r.url.path.startsWith('/api/callout/preview')), isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Repeat slider (Pi 2.3.4): Say it 1×, dragged to 3× and saved with the other settings', (tester) async {
+      final reqs = <http.Request>[];
+      final c = await container(
+        floorOf(const []),
+        handler: (req) async {
+          reqs.add(req);
+          switch (req.url.path) {
+            case '/api/callout':
+              final j = jsonDecode(jsonEncode(calloutJson)) as Map<String, dynamic>;
+              (j['settings'] as Map<String, dynamic>)['repeat'] = 1;
+              return http.Response(jsonEncode(j), 200);
+            case '/api/settings/callout':
+              return http.Response(req.body, 200);
+          }
+          return http.Response('{}', 404);
+        },
+      );
+      addTearDown(c.dispose);
+      await pumpApp(tester, c, home: const Scaffold(body: SingleChildScrollView(child: OrderCalloutCard())));
+      await tester.pumpAndSettle();
+      final row = find.byKey(const ValueKey('callout-repeat'));
+      expect(row, findsOneWidget);
+      expect(find.text('Say it 1×'), findsOneWidget);
+      final slider = find.descendant(of: row, matching: find.byType(Slider));
+      expect(tester.widget<Slider>(slider).divisions, 2);
+      expect(tester.widget<Slider>(slider).min, 1);
+      expect(tester.widget<Slider>(slider).max, 3);
+
+      await tester.drag(slider, const Offset(600, 0));
+      await tester.pumpAndSettle();
+      final put = reqs.lastWhere((r) => r.url.path == '/api/settings/callout');
+      expect(put.method, 'PUT');
+      final body = jsonDecode(put.body) as Map;
+      expect(body['repeat'], 3);
+      expect(body['volume'], 90);
+      expect(body['music_dip'], 70);
+      expect(find.text('Say it 3×'), findsOneWidget);
+      expect(find.text('Said 3× per callout'), findsOneWidget);
+      expect(c.read(floorProvider).settings.callout.repeat, 3);
       await tester.pumpWidget(const SizedBox());
     });
 

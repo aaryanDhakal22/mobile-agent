@@ -26,6 +26,8 @@ const kCalloutInfo = InfoText(
       'speaks. Voice: pick one, then hear it ON THIS TABLET (the store hub makes the words and sends them '
       'here — nothing plays in the store) or ON THE STORE SPEAKER. Both say the ticket number typed below. '
       'TEST CALLOUT says that number on the store speaker now.\n\n'
+      'Repeat: the words are said 1, 2 or 3 times, a short pause between (the chime only once, the music '
+      'down the whole time). The previews repeat too.\n\n'
       'Saved on the Pi for every tablet.',
 );
 
@@ -385,6 +387,19 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
           onChanged: busy ? null : (v) => setState(() => _draft = s.copyWith(restoreSeconds: v)),
           onChangeEnd: (v) => _save(s.copyWith(restoreSeconds: v), 'Music back over ${_secs(v)} s'),
         ),
+        // Pi 2.3.4: say the phrase 1-3 times (hidden on an older Pi).
+        if (s.repeat != null)
+          _SliderRow(
+            key: const ValueKey('callout-repeat'),
+            label: 'Repeat',
+            value: s.repeat!.toDouble(),
+            min: CalloutSettings.minRepeat.toDouble(),
+            max: CalloutSettings.maxRepeat.toDouble(),
+            divisions: CalloutSettings.maxRepeat - CalloutSettings.minRepeat,
+            text: 'Say it ${s.repeat}×',
+            onChanged: busy ? null : (v) => setState(() => _draft = s.copyWith(repeat: v.round())),
+            onChangeEnd: (v) => _save(s.copyWith(repeat: v.round()), 'Said ${v.round()}× per callout'),
+          ),
         SwitchListTile(
           key: const ValueKey('callout-chime'),
           contentPadding: EdgeInsets.zero,
