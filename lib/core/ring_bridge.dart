@@ -85,6 +85,41 @@ VoidCallback startRingBridge(ProviderContainer c) {
     }),
   );
 
+  // Terminal changes (1.8.0): the soft chime when a change shows — queued
+  // behind a ringing new order — and again every [kChangeRechime] until
+  // someone presses OK on the blue CHANGED alert.
+  Timer? changeTimer;
+  var heard = <String>{};
+  void changes() {
+    final ids = {for (final o in c.read(floorProvider).pendingChanges) o.status.posChange!.id};
+    if (ids.isEmpty) {
+      changeTimer?.cancel();
+      changeTimer = null;
+      heard = {};
+      return;
+    }
+    if (c.read(alarmProvider).ringing) return; // the new order first
+    if (ids.difference(heard).isNotEmpty) {
+      unawaited(c.read(softChimeProvider).play());
+      changeTimer?.cancel();
+      changeTimer = null;
+    }
+    heard = ids;
+    changeTimer ??= Timer.periodic(kChangeRechime, (_) {
+      if (c.read(alarmProvider).ringing || c.read(floorProvider).pendingChanges.isEmpty) return;
+      unawaited(c.read(softChimeProvider).play());
+    });
+  }
+
+  subs.add(
+    c.listen<String>(
+      floorProvider.select((s) => s.pendingChanges.map((o) => o.status.posChange!.id).join(',')),
+      (_, _) => changes(),
+      fireImmediately: true,
+    ),
+  );
+  subs.add(c.listen<bool>(alarmProvider.select((a) => a.ringing), (_, _) => changes()));
+
   // Android may refuse to start the service while the app is in the
   // background; it is started again whenever the app comes back.
   final lifecycle = AppLifecycleListener(
@@ -96,12 +131,16 @@ VoidCallback startRingBridge(ProviderContainer c) {
   );
 
   return () {
+    changeTimer?.cancel();
     for (final s in subs) {
       s.close();
     }
     lifecycle.dispose();
   };
 }
+
+/// How often the CHANGED alert chimes again until OK.
+const Duration kChangeRechime = Duration(seconds: 30);
 
 /// The full-screen notification is (re)posted when ringing starts, when a new
 /// order joins the queue and on every escalation.

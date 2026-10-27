@@ -97,6 +97,36 @@ by itself, it is retried on the next escalation / refresh. The chime asks for
 no audio focus, so another app playing sound can't pause it. The manifest
 holds `WAKE_LOCK`, which the alarm stream's `stayAwake` needs.
 
+**Terminal changes — the blue CHANGED alert (1.8.0, Pi 2.3.0).** When a
+cashier adds or voids a **kitchen** item at the POS on a check that is already
+on the tablet, the Pi sends SSE `order.changed` and keeps the change on the
+order (`status.pos_change`). A **blue** tint covers the whole app (above every
+route, like the new-order alert, but blue) with one big card — **#158
+CHANGED**, the lines (**+1 Garlic Knots** in blue, **−1 Coke** struck through
+in red, REMOVED) — and one big **OK**. The soft chime plays when it shows and
+every 30 s until someone presses OK (`POST /api/orders/{id}/change/ack`; every
+tablet stops). It waits behind a ringing new order (the new order first).
+After OK the ticket keeps a **blue outline + glow** and a **CHANGED · +1 …**
+tag until it is ready (or 10 min); ADDED lines stay blue-banded and REMOVED
+lines struck through red on Kitchen, the order details and History. Drinks
+(non-kitchen lines) update quietly. A ready order with a kitchen item added
+is back on Kitchen (a delivery leaves its pool); one already out only
+alerts ("Abdul already left with it"). A counter / takeout check with a
+kitchen item over $5 shows on Kitchen; a smaller one that grows past that
+appears as new (with the chime). History marks picked-up orders ("picked up
+(closed at the POS)" / "picked up").
+
+**Order callout (1.8.0, Pi 2.3.0 + hub 0.2.0).** Store mode → Settings →
+**Order callout**: on/off, the voice (the hub's list, with how far each is
+prepared) and **PREVIEW** on the store speaker, voice volume, how far the
+music is turned down and how fast it comes back, the chime, and **TEST
+CALLOUT** with a ticket number (`GET /api/callout`, `PUT
+/api/settings/callout`, `POST /api/callout/test`). Developer mode → POS hub →
+**Finishing orders**: online pickups finish N min after ready (default 30;
+`/api/settings/finishing`); terminal orders finish when SoftTouch closes them
+(shown, not editable). An older Pi shows both as *coming with the next Pi
+update*.
+
 **Errors in plain words.** Anything that goes wrong is shown as a short
 sentence plus what to do ("Can't reach the Pi — check the tablet is on the
 store Wi-Fi and the Pi is on"), never the raw agent text: that sits behind a

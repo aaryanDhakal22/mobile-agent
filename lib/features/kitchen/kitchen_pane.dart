@@ -469,6 +469,8 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
         final waited = waitedRaw.isNegative ? Duration.zero : waitedRaw;
         final hot = wave && waited >= kWaitingEscalate;
         _syncWave(wave && motion.full, motion.scale(hot ? kWaitingLavaHot : kWaitingLava));
+        // 1.8.0: changed at the POS (pending, or OK'd < 10 min ago).
+        final changed = so.changedTag(now);
         final _Waiting? waiting = wave
             ? (minutes: waited.inMinutes, hot: hot, lava: motion.full ? _wave : null)
             : null;
@@ -489,8 +491,9 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
                 QuiccSpace.gapSm,
                 OrderFlagLine(so.status.flag!, fontSize: QuiccType.label),
               ],
+              if (changed) ...[QuiccSpace.gapSm, ChangedTag(change: so.status.posChange!)],
               QuiccSpace.gapSm,
-              ItemLines(o.items, fontSize: kTicketItemSize),
+              ItemLines(o.items, fontSize: kTicketItemSize, removed: o.removedItems),
               if (o.notes.trim().isNotEmpty) ...[
                 QuiccSpace.gapSm,
                 Text(
@@ -543,7 +546,9 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
             ],
           ),
         );
-        final outline = !wave
+        final outline = changed
+            ? Border.all(color: QuiccColors.changeBlue, width: 4)
+            : !wave
             ? Border.all(color: tone, width: 2)
             // Motion off: the thick red outline stands in for the halo.
             : Border.all(color: hot ? kWaitingRedHot : kWaitingRed, width: motion.full ? 2 : 4);
@@ -578,10 +583,47 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
             ),
           ),
         );
+        if (changed && !(wave && motion.full)) {
+          // A still blue glow (no pulse) so the cook finds the changed ticket.
+          return DecoratedBox(
+            key: const ValueKey('changed-glow'),
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              boxShadow: [BoxShadow(color: QuiccColors.changeBlue.withValues(alpha: 0.7), blurRadius: 16, spreadRadius: 3)],
+            ),
+            child: card,
+          );
+        }
         if (!wave) return card;
         if (!motion.full) return KeyedSubtree(key: const ValueKey('paid-wave'), child: card);
         return _WaitingHalo(key: const ValueKey('paid-wave'), animation: _wave, hot: hot, radius: radius, child: card);
       },
+    );
+  }
+}
+
+/// The CHANGED tag on a ticket the POS changed (1.8.0): what changed, in
+/// blue, until it is ready (or 10 min after OK).
+class ChangedTag extends StatelessWidget {
+  final PosChange change;
+  const ChangedTag({super.key, required this.change});
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = [
+      for (final l in change.added) '+${l.quantity} ${l.name}',
+      for (final l in change.removed) '−${l.quantity} ${l.name}',
+    ];
+    return Container(
+      key: const ValueKey('changed-tag'),
+      padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.sm, vertical: 4),
+      decoration: BoxDecoration(color: QuiccColors.changeBlue, borderRadius: BorderRadius.circular(QuiccRadius.sm)),
+      child: Text(
+        ['CHANGED', ...parts].join(' · '),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: QuiccType.text(QuiccType.label, weight: FontWeight.w800, color: Colors.white),
+      ),
     );
   }
 }

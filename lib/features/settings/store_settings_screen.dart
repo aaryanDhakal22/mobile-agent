@@ -11,6 +11,7 @@ import '../home/idle_kitchen.dart';
 import '../setup/setup_entry.dart';
 import 'auto_accept_card.dart';
 import 'auto_assign_card.dart';
+import 'callout_cards.dart';
 import 'chime_picker.dart';
 import 'delivery_area_card.dart';
 import 'deliveries_settings_card.dart';
@@ -57,6 +58,12 @@ class StoreSettingsScreen extends StatelessWidget {
           title: 'Receipts',
           caption: 'How the kitchen tickets and the customer receipt look on paper.',
           children: [ReceiptSettingsCard()],
+        ),
+        SettingsGroup(
+          key: ValueKey('group-callout'),
+          title: 'Order callout',
+          caption: 'The store speaker calls ready counter orders by ticket number.',
+          children: [OrderCalloutCard()],
         ),
         SettingsGroup(
           key: ValueKey('group-look'),
