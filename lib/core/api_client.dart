@@ -980,6 +980,44 @@ class AgentClient {
   /// [kSettingsUnsupported]. A JSON 404 (unknown order) is kept — except on
   /// the settings routes ([settings]), where any 404 means "no such route"
   /// (an older Pi's web UI answers unknown `/api/*` GETs with one).
+  // --- Pi 2.3.0: finishing, terminal changes, the order callout ---------------
+
+  /// `GET /api/settings/finishing` (an older Pi → [kSettingsUnsupported]).
+  Future<FinishingSettings> getFinishing() => _v210Route(
+    () async => FinishingSettings.fromJson(jMap(await _get('/api/settings/finishing'))),
+    settings: true,
+  );
+
+  /// `PUT /api/settings/finishing` — 400 outside 0–240.
+  Future<FinishingSettings> putFinishing(FinishingSettings f) => _v210Route(
+    () async => FinishingSettings.fromJson(jMap(await _send('PUT', '/api/settings/finishing', body: f.toJson()))),
+    settings: true,
+  );
+
+  /// `GET /api/callout` — the settings, the hub's voices and state.
+  Future<CalloutView> getCallout() =>
+      _v210Route(() async => CalloutView.fromJson(jMap(await _get('/api/callout'))), settings: true);
+
+  /// `PUT /api/settings/callout` (missing keys keep their value).
+  Future<CalloutSettings> putCallout(CalloutSettings c) => _v210Route(
+    () async => CalloutSettings.fromJson(jMap(await _send('PUT', '/api/settings/callout', body: c.toJson()))),
+    settings: true,
+  );
+
+  /// `POST /api/callout/test` — the hub says "Order ready for ticket number
+  /// [number]" on the store speaker now ([kind] test | preview; [voice] ''
+  /// = the chosen one). Answers whether the hub is connected.
+  Future<bool> calloutTest(int number, {String voice = '', String kind = 'test'}) => _v210Route(() async {
+    final body = await _send('POST', '/api/callout/test', body: {'number': number, 'voice': voice, 'kind': kind});
+    return jBool(jMap(body)['hub_connected']);
+  }, settings: true);
+
+  /// `POST /api/orders/{id}/change/ack` — OK on the CHANGED alert. 409
+  /// `no_change` when it was OK'd elsewhere (or a newer change came in).
+  Future<StoredOrder> ackChange(String id, String changeId) async => StoredOrder.fromJson(
+    jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/change/ack', body: {'change_id': changeId})),
+  );
+
   static Future<T> _v210Route<T>(Future<T> Function() call, {bool settings = false}) async {
     try {
       return await call();

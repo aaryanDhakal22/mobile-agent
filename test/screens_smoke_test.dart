@@ -447,10 +447,12 @@ void main() {
       await pumpSettings(tester, body: const StoreSettingsScreen());
       expect(tester.takeException(), isNull);
       // The list is lazy: check each thing once it is scrolled to.
-      for (final t in ['ORDER CHIME', 'PREVIEW', 'RECEIPTS', 'LIGHT OR DARK', 'System', 'MOTION']) {
+      for (final t in ['RECEIPTS', 'TEST CALLOUT', 'ORDER CHIME', 'LIGHT OR DARK', 'System', 'MOTION']) {
         await tester.scrollUntilVisible(find.text(t), 200, scrollable: find.byType(Scrollable).first);
         expect(find.text(t), findsOneWidget, reason: t);
       }
+      // PREVIEW: the callout voice's and the chime's.
+      expect(find.text('PREVIEW'), findsWidgets);
       await tester.pumpWidget(const SizedBox());
     });
 

@@ -22,6 +22,15 @@ class QuiccColors {
   static const statusPaid = Color(0xFF4ADE80);
   static const statusFiring = Color(0xFFFBBF24);
   static const statusVoided = Color(0xFFF87171);
+
+  // Terminal changes (1.8.0): the blue CHANGED alert and the ticket's glow —
+  // apart from the ring's lavender / amber and the red "customer waiting".
+  static const changeBlue = Color(0xFF2563EB);
+  static const changeBlueDeep = Color(0xFF1E3A8A);
+  static const changeBlueSoft = Color(0xFFDBEAFE);
+
+  /// A removed (voided) line: struck through in this red.
+  static const removedRed = Color(0xFFDC2626);
 }
 
 class QuiccRadius {

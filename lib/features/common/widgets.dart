@@ -179,21 +179,70 @@ class ItemLines extends StatelessWidget {
   final int? maxItems;
   final double fontSize;
   final Color? color;
-  const ItemLines(this.items, {super.key, this.maxItems, this.fontSize = 15, this.color});
+
+  /// POS lines voided at the terminal (1.8.0): struck through in red with
+  /// REMOVED, after the items.
+  final List<LineItem> removed;
+
+  /// Mark ADDED lines (rung at the terminal later) with a blue band.
+  final bool marks;
+  const ItemLines(
+    this.items, {
+    super.key,
+    this.maxItems,
+    this.fontSize = 15,
+    this.color,
+    this.removed = const [],
+    this.marks = true,
+  });
 
   @override
   Widget build(BuildContext context) {
     final muted = context.palette.textMuted;
     final shown = maxItems == null ? items : items.take(maxItems!).toList();
     final rest = items.length - shown.length;
+    Widget line(LineItem i) {
+      final title = Text(
+        itemTitle(i),
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: FontWeight.w600,
+          color: marks && i.added ? QuiccColors.changeBlueDeep : color,
+        ),
+      );
+      if (!marks || !i.added) return title;
+      return Container(
+        key: ValueKey('added-${i.id}'),
+        margin: const EdgeInsets.symmetric(vertical: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          color: QuiccColors.changeBlueSoft,
+          border: const Border(left: BorderSide(color: QuiccColors.changeBlue, width: 4)),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          children: [
+            Expanded(child: title),
+            const SizedBox(width: 6),
+            Text(
+              'ADDED',
+              style: TextStyle(
+                fontSize: fontSize - 5,
+                fontWeight: FontWeight.w800,
+                color: QuiccColors.changeBlue,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final i in shown) ...[
-          Text(
-            itemTitle(i),
-            style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600, color: color),
-          ),
+          line(i),
           for (final c in i.children)
             Padding(
               padding: const EdgeInsets.only(left: 16),
@@ -220,7 +269,50 @@ class ItemLines extends StatelessWidget {
             '+ $rest more item${rest == 1 ? '' : 's'}',
             style: TextStyle(fontSize: fontSize - 2, color: color ?? muted),
           ),
+        for (final r in removed) RemovedLine(r, fontSize: fontSize),
       ],
+    );
+  }
+}
+
+/// A line voided at the terminal: struck through, red, REMOVED.
+class RemovedLine extends StatelessWidget {
+  final LineItem item;
+  final double fontSize;
+  const RemovedLine(this.item, {super.key, this.fontSize = 15});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: ValueKey('removed-${item.id}'),
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        children: [
+          Flexible(
+            child: Text(
+              itemTitle(item),
+              style: TextStyle(
+                fontSize: fontSize,
+                fontWeight: FontWeight.w600,
+                color: QuiccColors.removedRed,
+                decoration: TextDecoration.lineThrough,
+                decorationColor: QuiccColors.removedRed,
+                decorationThickness: 2,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'REMOVED',
+            style: TextStyle(
+              fontSize: fontSize - 5,
+              fontWeight: FontWeight.w800,
+              color: QuiccColors.removedRed,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

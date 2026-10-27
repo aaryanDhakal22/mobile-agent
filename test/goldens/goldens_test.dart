@@ -121,10 +121,54 @@ StoredOrder _cameBack(String id, int k, String street, {int backMin = 6}) {
   return StoredOrder.fromJson(m);
 }
 
+/// A POS takeout cooking, #158, the cashier added Garlic Knots and voided a
+/// Coke at the terminal (1.8.0): the blue CHANGED alert ([acked] = OK'd).
+StoredOrder _changedPos({bool acked = false}) {
+  final now = clock.now().toUtc();
+  return StoredOrder.fromJson({
+    'order': {
+      'id': 'pos-158',
+      'source': 'pos',
+      'customer': {'display_name': 'Dana Ruiz'},
+      'fulfillment': {'type': 'pickup'},
+      'items': [
+        {'id': 'l1', 'name': 'Cheese Steak', 'quantity': 1, 'pos_ref': '1', 'kitchen': true},
+        {'id': 'l3', 'name': 'Garlic Knots', 'quantity': 1, 'pos_ref': '3', 'kitchen': true, 'added': true},
+      ],
+      'removed_items': [
+        {'id': 'l2', 'name': 'Coke', 'quantity': 1, 'pos_ref': '2'},
+      ],
+      'placed_at': now.subtract(const Duration(minutes: 6)).toIso8601String(),
+    },
+    'status': {
+      'state': 'accepted',
+      'batch_id': 7,
+      'ext_source': 'softtouch',
+      'ext_ref': '1277158',
+      'display_number': 158,
+      'sent_at': now.subtract(const Duration(minutes: 6)).toIso8601String(),
+      'accepted_at': now.subtract(const Duration(minutes: 6)).toIso8601String(),
+      'estimated_ready_at': now.add(const Duration(minutes: 9)).toIso8601String(),
+      'pos_change': {
+        'id': 'c1',
+        'at': now.subtract(const Duration(seconds: 20)).toIso8601String(),
+        'kind': 'cooking',
+        'added': [
+          {'name': 'Garlic Knots', 'quantity': 1, 'kitchen': true},
+        ],
+        'removed': [
+          {'name': 'Coke', 'quantity': 1},
+        ],
+        if (acked) 'acked_at': now.subtract(const Duration(seconds: 10)).toIso8601String(),
+      },
+    },
+  });
+}
+
 /// The delivery floor plus a few pickups cooking, and [arrived] ringing.
 /// Ana (NEXT) has #1103 in her box; d2 and d5 sit in Joe's, so one delivery
 /// waits and NEXT can send her out.
-FloorState _floor({List<StoredOrder> arrived = const [], bool quiet = false, bool cameBack = false}) {
+FloorState _floor({List<StoredOrder> arrived = const [], bool quiet = false, bool cameBack = false, StoredOrder? extra}) {
   final base = deliveryFloor();
   if (quiet) {
     return base.withSnapshot(floor: base.floor!, current: const [], arrived: const [], drivers: base.drivers, at: clock.now());
@@ -141,6 +185,7 @@ FloorState _floor({List<StoredOrder> arrived = const [], bool quiet = false, boo
     _cooking('p2', 1108, 'Tom Becker', ago: 14, readyIn: 3),
     _cooking('p3', 1109, 'Priya Shah', ago: 27, readyIn: -6),
     if (cameBack) ...[_cameBack('cb1', 1100, '18 Linden Terrace', backMin: 9), _cameBack('cb2', 1104, '5 Elm Ct')],
+    ?extra,
   ];
   return base.withSnapshot(floor: base.floor!, current: current, arrived: arrived, drivers: base.drivers, at: clock.now());
 }
@@ -152,12 +197,13 @@ Future<ProviderContainer> _pump(
   bool ringing = false,
   bool quiet = false,
   bool cameBack = false,
+  StoredOrder? extra,
   UpdateState? update,
 }) async {
   tester.view.physicalSize = const Size(1280, 800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final fake = FakeDeliveryFloor(_floor(arrived: arrived, quiet: quiet, cameBack: cameBack));
+  final fake = FakeDeliveryFloor(_floor(arrived: arrived, quiet: quiet, cameBack: cameBack, extra: extra));
   final c = await deliveryContainer(
     fake,
     prefs: const {
@@ -261,6 +307,18 @@ void main() {
     golden('alert, delivery with map', (tester) async {
       await _pump(tester, dark: dark, arrived: [_arrivedDelivery('a-d1')], ringing: true);
       await _golden(tester, 'alert_delivery_$theme');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    golden('CHANGED alert', (tester) async {
+      await _pump(tester, dark: dark, extra: _changedPos(), ringing: true);
+      await _golden(tester, 'change_alert_$theme');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    golden('kitchen with a CHANGED ticket', (tester) async {
+      await _pump(tester, dark: dark, extra: _changedPos(acked: true));
+      await _golden(tester, 'kitchen_changed_$theme');
       await tester.pumpWidget(const SizedBox());
     });
 

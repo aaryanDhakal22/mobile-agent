@@ -2,10 +2,13 @@
 // canonical order snapshot inside it (contract/main.md §10.1). All parsing is
 // defensive — see json.dart.
 
+import 'callout_models.dart';
 import 'delivery_models.dart';
 import 'json.dart';
 import 'polyline.dart';
 import 'time.dart';
+
+export 'callout_models.dart';
 
 // ---------------------------------------------------------------------------
 // Order state
@@ -156,6 +159,23 @@ class StoredOrder {
 
   /// When the customer wants it (future orders): the vendor's promised time.
   DateTime? get dueAt => order.fulfillment.promisedAt;
+
+  /// A terminal change nobody OK'd yet (Pi 2.3.0): the blue CHANGED alert
+  /// rings for it.
+  bool get changePending => status.posChange?.pending ?? false;
+
+  /// The ticket shows CHANGED (blue glow, tag): a pending change, or one OK'd
+  /// less than [kChangedTagFor] ago while it still cooks.
+  bool changedTag(DateTime now) {
+    final c = status.posChange;
+    if (c == null || state != OrderState.accepted) return false;
+    final acked = c.ackedAt;
+    return acked == null || now.difference(acked) < kChangedTagFor;
+  }
+
+  /// Done with (picked up): finished by the POS closing it or by the store's
+  /// finish time (Pi 2.3.0).
+  bool get isPickedUp => status.finishedAt != null;
 }
 
 /// How bad an integration problem / order flag is.
@@ -276,6 +296,17 @@ class OrderStatus {
   /// The latest NOT DELIVERED on it (retry or cancel), if any.
   final NotDelivered? notDelivered;
 
+  /// Pi 2.3.0: finished (picked up) — `pos` = the POS closed the check,
+  /// `auto` = an online pickup sat ready for the store's finish time.
+  final DateTime? finishedAt;
+  final String finishedBy;
+
+  /// The POS closed (settled) the check.
+  final bool posClosed;
+
+  /// The last terminal change to this check (rings until OK).
+  final PosChange? posChange;
+
   const OrderStatus({
     required this.state,
     this.arrivalDate,
@@ -314,6 +345,10 @@ class OrderStatus {
     this.autoAccepted = false,
     this.cameBack = false,
     this.notDelivered,
+    this.finishedAt,
+    this.finishedBy = '',
+    this.posClosed = false,
+    this.posChange,
   });
 
   factory OrderStatus.fromJson(Map<String, dynamic> json) => OrderStatus(
@@ -354,6 +389,10 @@ class OrderStatus {
     autoAccepted: jBool(json['auto_accepted']),
     cameBack: jBool(json['came_back']),
     notDelivered: NotDelivered.fromJson(json['not_delivered']),
+    finishedAt: jDate(json['finished_at']),
+    finishedBy: jStr(json['finished_by']),
+    posClosed: jBool(json['pos_closed']),
+    posChange: PosChange.fromJson(json['pos_change']),
   );
 
   /// The same status in [driverId]'s pool (null = unassigned) — the
@@ -397,6 +436,10 @@ class OrderStatus {
     autoAccepted: autoAccepted,
     cameBack: cameBack,
     notDelivered: notDelivered,
+    finishedAt: finishedAt,
+    finishedBy: finishedBy,
+    posClosed: posClosed,
+    posChange: posChange,
   );
 }
 
@@ -610,6 +653,10 @@ class OrderSnapshot {
   // Floor fields main mirrors back (absent on a fresh order).
   final int? kitchenOrderNumber;
 
+  /// POS orders (Pi 2.3.0): lines voided at the terminal after the check was
+  /// on the tablet — struck through, red, REMOVED.
+  final List<LineItem> removedItems;
+
   const OrderSnapshot({
     required this.id,
     this.source = '',
@@ -625,6 +672,7 @@ class OrderSnapshot {
     this.receivedAt,
     this.sourceMetadata = const {},
     this.kitchenOrderNumber,
+    this.removedItems = const [],
   });
 
   factory OrderSnapshot.fromJson(Map<String, dynamic> json) => OrderSnapshot(
@@ -642,6 +690,7 @@ class OrderSnapshot {
     receivedAt: jDate(json['received_at']),
     sourceMetadata: jMap(json['source_metadata']),
     kitchenOrderNumber: jIntOrNull(json['kitchen_order_number']),
+    removedItems: jList(json['removed_items'], LineItem.fromJson),
   );
 
   String get customerName => customer.displayName.trim().isEmpty ? 'Guest' : customer.displayName.trim();
@@ -797,6 +846,13 @@ class LineItem {
   final String routing;
   final String printerId;
 
+  /// POS orders (Pi 2.3.0): the POS line id, whether it goes to a kitchen
+  /// station, and ADDED — rung at the terminal after the check was on the
+  /// tablet.
+  final String posRef;
+  final bool kitchen;
+  final bool added;
+
   const LineItem({
     this.id = '',
     this.position = 0,
@@ -810,6 +866,9 @@ class LineItem {
     this.children = const [],
     this.routing = '',
     this.printerId = '',
+    this.posRef = '',
+    this.kitchen = false,
+    this.added = false,
   });
 
   factory LineItem.fromJson(Map<String, dynamic> json) => LineItem(
@@ -825,6 +884,9 @@ class LineItem {
     children: jList(json['children'], LineItem.fromJson),
     routing: jStr(json['routing']),
     printerId: jStr(json['printer_id']),
+    posRef: jStr(json['pos_ref']),
+    kitchen: jBool(json['kitchen']),
+    added: jBool(json['added']),
   );
 
   /// The size worth showing: the vendor sends "Serving" for single-size items
@@ -1243,22 +1305,38 @@ class FloorSettings {
   final TicketToggles tickets;
   final DefaultTimes times;
 
+  /// Pi 2.3.0 (defaults on an older Pi).
+  final FinishingSettings finishing;
+  final CalloutSettings callout;
+
   const FloorSettings({
     this.features = const FeatureToggles(),
     this.tickets = const TicketToggles(),
     this.times = const DefaultTimes(),
+    this.finishing = const FinishingSettings(),
+    this.callout = const CalloutSettings(),
   });
 
   factory FloorSettings.fromJson(Map<String, dynamic> j) => FloorSettings(
     features: FeatureToggles.fromJson(jMap(j['features'])),
     tickets: TicketToggles.fromJson(jMap(j['tickets'])),
     times: DefaultTimes.fromJson(jMap(j['times'])),
+    finishing: FinishingSettings.fromJson(jMap(j['finishing'])),
+    callout: CalloutSettings.fromJson(jMap(j['callout'])),
   );
 
-  FloorSettings copyWith({FeatureToggles? features, TicketToggles? tickets, DefaultTimes? times}) => FloorSettings(
+  FloorSettings copyWith({
+    FeatureToggles? features,
+    TicketToggles? tickets,
+    DefaultTimes? times,
+    FinishingSettings? finishing,
+    CalloutSettings? callout,
+  }) => FloorSettings(
     features: features ?? this.features,
     tickets: tickets ?? this.tickets,
     times: times ?? this.times,
+    finishing: finishing ?? this.finishing,
+    callout: callout ?? this.callout,
   );
 }
 
@@ -1292,6 +1370,9 @@ class IntegrationStatus {
   final List<IntegrationProblem> problems;
   final DateTime? lastSeenAt;
 
+  /// The hub's order callout report (Pi 2.3.0 + hub 0.2.0), else null.
+  final CalloutHubReport? callout;
+
   const IntegrationStatus({
     this.connected = false,
     this.ok = false,
@@ -1299,6 +1380,7 @@ class IntegrationStatus {
     this.insertLive = false,
     this.problems = const [],
     this.lastSeenAt,
+    this.callout,
   });
 
   static IntegrationStatus? fromJson(Object? raw) {
@@ -1311,6 +1393,7 @@ class IntegrationStatus {
       insertLive: jBool(j['insert_live']),
       problems: jList(j['problems'], IntegrationProblem.fromJson).where((p) => p.text.isNotEmpty).toList(),
       lastSeenAt: jDate(j['last_seen_at']),
+      callout: CalloutHubReport.fromJson(j['callout']),
     );
   }
 

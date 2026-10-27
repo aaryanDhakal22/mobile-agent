@@ -362,6 +362,32 @@ class FloorController extends Notifier<FloorState> {
     return saved;
   }
 
+  Future<FinishingSettings> saveFinishing(FinishingSettings next) async {
+    final saved = await _requireClient(ref).putFinishing(next);
+    _setSettings((s) => s.copyWith(finishing: saved));
+    return saved;
+  }
+
+  Future<CalloutSettings> saveCallout(CalloutSettings next) async {
+    final saved = await _requireClient(ref).putCallout(next);
+    _setSettings((s) => s.copyWith(callout: saved));
+    return saved;
+  }
+
+  /// OK on the blue CHANGED alert: marked acked on the Pi (every tablet
+  /// stops ringing). Already OK'd elsewhere (409) → refetch.
+  Future<void> ackChange(String id, String changeId) async {
+    try {
+      _upsert([await _requireClient(ref).ackChange(id, changeId)]);
+    } on AgentException catch (e) {
+      if (e.isConflict || e.isNotFound) {
+        unawaited(refresh());
+        return;
+      }
+      rethrow;
+    }
+  }
+
   Future<void> ready(String id) async {
     try {
       _upsert([await _requireClient(ref).ready(id)]);

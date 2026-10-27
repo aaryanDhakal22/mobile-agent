@@ -57,6 +57,8 @@ class OrderDetailScreen extends ConsumerWidget {
                 const Eyebrow('Items'),
                 const SizedBox(height: 10),
                 for (final item in o.items) _ItemBlock(item),
+                for (final r in o.removedItems)
+                  Padding(padding: const EdgeInsets.only(bottom: 10), child: RemovedLine(r, fontSize: 18)),
                 if (o.notes.trim().isNotEmpty) ...[
                   const SizedBox(height: 12),
                   const Eyebrow('Order notes'),
@@ -78,7 +80,10 @@ class OrderDetailScreen extends ConsumerWidget {
             child: ListView(
               padding: const EdgeInsets.all(28),
               children: [
-                if (so.status.flag != null) ...[OrderFlagLine(so.status.flag!, fontSize: 16), const SizedBox(height: 14)],
+                if (so.status.flag != null) ...[
+                  OrderFlagLine(so.status.flag!, fontSize: 16),
+                  const SizedBox(height: 14),
+                ],
                 if (so.status.posDriverNote != null) ...[
                   Row(
                     key: const ValueKey('pos-driver-note'),
@@ -222,7 +227,28 @@ class _ItemBlock extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(item.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            item.name,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: item.added ? QuiccColors.changeBlue : null,
+                            ),
+                          ),
+                        ),
+                        if (item.added) ...[
+                          const SizedBox(width: 8),
+                          const Text(
+                            'ADDED',
+                            key: ValueKey('detail-added'),
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: QuiccColors.changeBlue),
+                          ),
+                        ],
+                      ],
+                    ),
                     if (item.displaySize.isNotEmpty)
                       Text(item.displaySize, style: TextStyle(color: context.palette.textSecondary, fontSize: 15)),
                   ],
