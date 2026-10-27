@@ -204,7 +204,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
 
   Future<void> _onQLongPress() async {
     if (_mode == RailMode.dev) return;
-    if (ref.read(devGateProvider) || await showDevLoginSheet(context)) {
+    if (ref.read(devGateProvider) || await showDevPinSheet(context)) {
       if (mounted) _go(_last[RailMode.dev]!);
     }
   }

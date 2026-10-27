@@ -215,7 +215,6 @@ Future<ProviderContainer> _pump(
     },
     extra: [
       agentClientProvider.overrideWith((ref) => null),
-      managerLoginProvider.overrideWithValue(({required address, required username, required password}) async {}),
       if (update != null) updaterProvider.overrideWith(() => _FixedUpdater(update)),
     ],
   );

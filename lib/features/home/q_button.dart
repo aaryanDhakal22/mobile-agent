@@ -8,7 +8,7 @@ import 'rail_modes.dart';
 
 /// The `q` at the top of the rail (1.6.0). Tap: kitchen ↔ store (from
 /// developer mode: back to kitchen). Long press, in any mode: developer mode,
-/// behind the manager login. It turns over once per mode change, and wears
+/// behind the developer PIN. It turns over once per mode change, and wears
 /// the mode's colours: lavender (kitchen), pale (store), dark (developer).
 class QButton extends StatefulWidget {
   final RailMode mode;
