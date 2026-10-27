@@ -67,20 +67,36 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
     final r = await driverDialog(context, title: 'Add driver', confirm: 'ADD');
     if (r == null || r.name.isEmpty || !mounted) return;
     final ok = await _run(
-      () => _floor.createDriver(r.name, posNumber: r.posNumber.isEmpty ? null : r.posNumber),
+      () => _floor.createDriver(
+        r.name,
+        posNumber: r.posNumber.isEmpty ? null : r.posNumber,
+        pushoverDevice: r.pushoverDevice.isEmpty ? null : r.pushoverDevice,
+      ),
       'Could not add ${r.name}',
     );
     if (ok && mounted) toast(context, '${r.name} added — clock them in when they start');
   }
 
-  /// Name and Driver # (their SoftTouch Employee Number); only what changed is sent.
+  /// Name, Driver # (their SoftTouch Employee Number) and phone (Pushover
+  /// device, with SEND TEST); only what changed is sent.
   Future<void> _edit(Driver d) async {
-    final r = await driverDialog(context, title: 'Edit driver', name: d.name, posNumber: d.posNumber ?? '');
+    final r = await driverDialog(
+      context,
+      title: 'Edit driver',
+      name: d.name,
+      posNumber: d.posNumber ?? '',
+      pushoverDevice: d.pushoverDevice,
+      onSendTest: () => _floor.testRoute(d.id),
+    );
     if (r == null || r.name.isEmpty || !mounted) return;
     final name = r.name == d.name ? null : r.name;
     final number = r.posNumber == (d.posNumber ?? '') ? null : r.posNumber;
-    if (name == null && number == null) return;
-    await _run(() => _floor.updateDriver(d.id, name: name, posNumber: number), 'Could not save ${d.name}');
+    final device = r.pushoverDevice == d.pushoverDevice ? null : r.pushoverDevice;
+    if (name == null && number == null && device == null) return;
+    await _run(
+      () => _floor.updateDriver(d.id, name: name, posNumber: number, pushoverDevice: device),
+      'Could not save ${d.name}',
+    );
   }
 
   Future<void> _remove(Driver d) async {

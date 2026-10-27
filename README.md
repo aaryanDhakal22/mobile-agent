@@ -271,6 +271,25 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 1.9.1 — driver routes on their phones (with agent 2.3.7)
+
+* **Phone (Pushover device).** The driver dialog (Drivers → add / edit, and
+  the setup wizard's edit) has a field under Driver # for the name of the
+  driver's phone in the Pushover app, e.g. *abdul*. Optional. Same rule as
+  the Pi: empty, or 1–25 letters, numbers, `-` and `_` — anything else shows
+  the reason under the field and is not sent. `pushover_device` on the
+  driver (`POST` / `PATCH /api/drivers`; `""` clears it).
+* **SEND TEST** (edit only, while the saved phone is in the field) asks the
+  Pi for a sample route to that phone (`POST /api/drivers/{id}/route/test`)
+  and shows the answer in the island: *Test route sent to Abdul*, *Abdul's
+  phone isn't set up in Pushover (check the device name)*, *Add Abdul's
+  phone first*, *Pushover isn't set up on the Pi*, *Couldn't reach Pushover —
+  try again*, or *Update the Pi to send routes* (an older Pi). Never unpairs.
+* **Route didn't go.** After SEND OUT the Pi pushes the driver's route
+  (stops in AUTO's order) to his phone; when that fails (SSE `driver.route`
+  `ok:false`) a red pill says *Couldn't send Abdul's route*. SEND OUT itself
+  has gone through; nothing shows when the route went.
+
 ## 1.9.0 — the base release (folds 1.8.3 and 1.8.4)
 
 1.8.3 and 1.8.4 were never released on their own; they ship in 1.9.0.

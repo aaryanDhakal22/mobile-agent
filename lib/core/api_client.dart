@@ -122,6 +122,51 @@ class KitchenResend {
   );
 }
 
+/// What Send test (`POST /api/drivers/{id}/route/test`) got.
+enum RouteTest {
+  /// 200: the sample route is on its way to the phone.
+  sent,
+
+  /// 409 `no_device`: the driver has no phone saved.
+  noDevice,
+
+  /// 502 `device_not_found`: Pushover doesn't know that device name.
+  deviceNotFound,
+
+  /// 502 `pushover_rejected` / `pushover_unreachable`.
+  pushoverFailed,
+
+  /// 503 `not_configured`: the Pi has no Pushover keys.
+  notConfigured,
+
+  /// A Pi older than 2.3.7 (a plain 404, or the mux's 405).
+  unsupported;
+
+  bool get ok => this == sent;
+
+  /// Plain words for the island ([name] = the driver's).
+  String message(String name) => switch (this) {
+    sent => 'Test route sent to $name',
+    noDevice => "Add $name's phone first",
+    deviceNotFound => "$name's phone isn't set up in Pushover (check the device name)",
+    pushoverFailed => "Couldn't reach Pushover — try again",
+    notConfigured => "Pushover isn't set up on the Pi",
+    unsupported => 'Update the Pi to send routes',
+  };
+}
+
+/// The [RouteTest] for a refused Send test, or null when it isn't one of the
+/// Pi's answers (the caller shows the error as it is).
+RouteTest? routeTestFor(AgentException e) => switch (e.statusCode) {
+  409 when e.code == 'no_device' => RouteTest.noDevice,
+  502 when e.code == 'device_not_found' => RouteTest.deviceNotFound,
+  502 => RouteTest.pushoverFailed,
+  503 => RouteTest.notConfigured,
+  404 when e.code == null => RouteTest.unsupported,
+  405 => RouteTest.unsupported,
+  _ => null,
+};
+
 /// [AgentException.code] for `POST /api/drivers/{id}/report/print` on a Pi
 /// older than 2.2.3: "This Pi needs an update to print one driver's report".
 const String kDriverReportUnsupported = 'driver_report_unsupported';
@@ -831,13 +876,19 @@ class AgentClient {
 
   Future<List<Driver>> listDrivers() async => jList(await _get('/api/drivers'), Driver.fromJson);
 
-  /// [posNumber]: their SoftTouch Employee Number (2.1.0), sent only when given.
-  Future<Driver> createDriver(String name, {String? posNumber}) async => Driver.fromJson(
+  /// [posNumber]: their SoftTouch Employee Number (2.1.0), [pushoverDevice]:
+  /// their phone in Pushover (Pi 2.3.7; 400 `bad_device` when it isn't a
+  /// valid name) — each sent only when given.
+  Future<Driver> createDriver(String name, {String? posNumber, String? pushoverDevice}) async => Driver.fromJson(
     jMap(
       await _send(
         'POST',
         '/api/drivers',
-        body: {'name': name.trim(), if (posNumber != null && posNumber.trim().isNotEmpty) 'pos_number': posNumber.trim()},
+        body: {
+          'name': name.trim(),
+          if (posNumber != null && posNumber.trim().isNotEmpty) 'pos_number': posNumber.trim(),
+          if (pushoverDevice != null && pushoverDevice.trim().isNotEmpty) 'pushover_device': pushoverDevice.trim(),
+        },
       ),
     ),
   );
@@ -846,14 +897,35 @@ class AgentClient {
     await _send('PATCH', '/api/drivers/${Uri.encodeComponent(id)}', body: {'name': name.trim()});
   }
 
-  /// `PATCH /api/drivers/{id}` with only what changed: [name] and / or
-  /// [posNumber] ('' clears it).
-  Future<void> updateDriver(String id, {String? name, String? posNumber}) async {
+  /// `PATCH /api/drivers/{id}` with only what changed: [name], [posNumber]
+  /// and / or [pushoverDevice] ('' clears either of the last two).
+  Future<void> updateDriver(String id, {String? name, String? posNumber, String? pushoverDevice}) async {
     await _send(
       'PATCH',
       '/api/drivers/${Uri.encodeComponent(id)}',
-      body: {'name': ?name?.trim(), 'pos_number': ?posNumber?.trim()},
+      body: {'name': ?name?.trim(), 'pos_number': ?posNumber?.trim(), 'pushover_device': ?pushoverDevice?.trim()},
     );
+  }
+
+  /// `POST /api/drivers/{id}/route/test` (Pi 2.3.7) — Send test: a sample
+  /// route (store → store) to the driver's phone in Pushover, answered once
+  /// Pushover has. The Pi's refusals come back as a [RouteTest] (each has
+  /// plain words, [RouteTest.message]); anything else (the Pi unreachable,
+  /// the driver removed) throws. Never unpairs the tablet.
+  Future<RouteTest> testRoute(String driverId) async {
+    try {
+      await _send(
+        'POST',
+        '/api/drivers/${Uri.encodeComponent(driverId)}/route/test',
+        timeout: const Duration(seconds: 20),
+        mayRevoke: false,
+      );
+      return RouteTest.sent;
+    } on AgentException catch (e) {
+      final r = routeTestFor(e);
+      if (r == null) rethrow;
+      return r;
+    }
   }
 
   Future<void> removeDriver(String id) async {

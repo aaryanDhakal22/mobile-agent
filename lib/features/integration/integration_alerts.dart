@@ -70,7 +70,8 @@ IslandKind islandKindFor(Severity s) => switch (s) {
 /// Feeds the notification island (1.9.0; it was its own top-right toast
 /// host): new `info` / `warn` problems from the hub (once per problem — one
 /// that clears and comes back shows again) and every SSE `integration.toast`
-/// (the hub's messages, "Printed Juma's report"). Each stays
+/// (the hub's messages, "Printed Juma's report"; a failed `driver.route`,
+/// "Couldn't send Abdul's route", comes the same way). Each stays
 /// [kIntegrationToastFor]. Mount it under an [IslandHost], once paired.
 class IntegrationIslandFeed extends ConsumerStatefulWidget {
   final Widget child;
