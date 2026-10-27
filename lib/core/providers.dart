@@ -253,6 +253,12 @@ class FloorController extends Notifier<FloorState> {
       final p = DriverReportPrinted.fromJson(ev.json);
       if (p != null) _set(state.copyWith(toast: p.toToast(), toasts: state.toasts + 1));
     }
+    // Pi 2.3.7: a SEND OUT's route didn't reach the driver's phone — a red
+    // pill, once (nothing when it went).
+    if (ev.event == 'driver.route') {
+      final t = DriverRouteSent.fromJson(ev.json)?.toToast();
+      if (t != null) _set(state.copyWith(toast: t, toasts: state.toasts + 1));
+    }
   }
 
   /// An SSE frame, as the stream delivers it (tests).
@@ -649,16 +655,20 @@ class FloorController extends Notifier<FloorState> {
     }
   }
 
-  Future<void> createDriver(String name, {String? posNumber}) async {
-    await _requireClient(ref).createDriver(name, posNumber: posNumber);
+  Future<void> createDriver(String name, {String? posNumber, String? pushoverDevice}) async {
+    await _requireClient(ref).createDriver(name, posNumber: posNumber, pushoverDevice: pushoverDevice);
     await _reloadDrivers();
   }
 
-  /// Name and / or Driver # (SoftTouch Employee Number; '' clears it).
-  Future<void> updateDriver(String id, {String? name, String? posNumber}) async {
-    await _requireClient(ref).updateDriver(id, name: name, posNumber: posNumber);
+  /// Name, Driver # (SoftTouch Employee Number) and / or the phone's
+  /// Pushover device name; '' clears either of the last two.
+  Future<void> updateDriver(String id, {String? name, String? posNumber, String? pushoverDevice}) async {
+    await _requireClient(ref).updateDriver(id, name: name, posNumber: posNumber, pushoverDevice: pushoverDevice);
     await _reloadDrivers();
   }
+
+  /// Send test: a sample route to the driver's phone (Pi 2.3.7).
+  Future<RouteTest> testRoute(String driverId) => _requireClient(ref).testRoute(driverId);
 
   Future<void> renameDriver(String id, String name) async {
     await _requireClient(ref).renameDriver(id, name);

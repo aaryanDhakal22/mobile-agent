@@ -966,6 +966,10 @@ class Driver {
   /// Empty from an older Pi — the screens keep the run's own order then.
   final List<String> runOrderIds;
 
+  /// Their phone's device name in Pushover (Pi 2.3.7) — SEND OUT pushes their
+  /// route there. '' when not set (or from an older Pi).
+  final String pushoverDevice;
+
   const Driver({
     required this.id,
     required this.name,
@@ -976,6 +980,7 @@ class Driver {
     this.deliveries = 0,
     this.posNumber,
     this.runOrderIds = const [],
+    this.pushoverDevice = '',
   });
 
   /// Clocked in and in the queue — can be sent out.
@@ -1000,7 +1005,71 @@ class Driver {
         for (final x in json[kDriverRunOrderField] as List)
           if (jStr(x).isNotEmpty) jStr(x),
     ],
+    pushoverDevice: jStr(json['pushover_device']).trim(),
   );
+
+  /// The Pi's driver JSON — [Driver.fromJson] reads it back the same; the
+  /// optional fields are left out when empty, as the Pi leaves them out.
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'position': position,
+    'status': status.wire,
+    if (clockedInAt != null) 'clocked_in_at': clockedInAt!.toUtc().toIso8601String(),
+    if (lastReturnedAt != null) 'last_returned_at': lastReturnedAt!.toUtc().toIso8601String(),
+    'deliveries': deliveries,
+    if (posNumber != null && posNumber!.isNotEmpty) 'pos_number': posNumber,
+    if (runOrderIds.isNotEmpty) kDriverRunOrderField: runOrderIds,
+    if (pushoverDevice.isNotEmpty) 'pushover_device': pushoverDevice,
+  };
+}
+
+/// The longest Pushover device name (Pushover's own rule, as the Pi checks).
+const int kPushoverDeviceMaxLength = 25;
+
+final RegExp _pushoverDevice = RegExp(r'^[A-Za-z0-9_-]+$');
+
+/// Why [device] (trimmed) can't be a Pushover device name, or null when it
+/// can: empty (no phone) or 1–[kPushoverDeviceMaxLength] of letters, digits,
+/// `-` and `_` — the Pi answers 400 `bad_device` to anything else.
+String? pushoverDeviceError(String device) {
+  final d = device.trim();
+  if (d.isEmpty) return null;
+  if (d.length > kPushoverDeviceMaxLength) return '$kPushoverDeviceMaxLength characters at most';
+  if (!_pushoverDevice.hasMatch(d)) return 'Letters, numbers, - and _ only (no spaces)';
+  return null;
+}
+
+/// SSE `driver.route` (Pi 2.3.7): after a SEND OUT for a driver with a phone,
+/// whether his route reached Pushover — `{driver_id, driver_name, ok, code?,
+/// stops}`.
+class DriverRouteSent {
+  final String driverId;
+  final String driverName;
+  final bool ok;
+  final String? code;
+  final int stops;
+  const DriverRouteSent({this.driverId = '', this.driverName = '', required this.ok, this.code, this.stops = 0});
+
+  static DriverRouteSent? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final j = jMap(raw);
+    return DriverRouteSent(
+      driverId: jStr(j['driver_id']),
+      driverName: jStr(j['driver_name']).trim(),
+      ok: jBool(j['ok']),
+      code: jStrOrNull(j['code']),
+      stops: jInt(j['stops']),
+    );
+  }
+
+  /// The red island pill when it didn't go ("Couldn't send Abdul's route");
+  /// null when it did — a route that went needs no notice.
+  IntegrationToast? toToast() {
+    if (ok) return null;
+    final who = driverName.isEmpty ? "the driver's" : "$driverName's";
+    return IntegrationToast(code: 'driver.route', text: "Couldn't send $who route", severity: Severity.serious);
+  }
 }
 
 /// The driver field with an out driver's run in stop order (Pi 2.2.1).

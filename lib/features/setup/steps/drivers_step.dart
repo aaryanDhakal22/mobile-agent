@@ -72,12 +72,22 @@ class _DriversPanelState extends ConsumerState<DriversPanel> {
   }
 
   Future<void> _edit(Driver d) async {
-    final r = await driverDialog(context, title: 'Edit driver', name: d.name, posNumber: d.posNumber ?? '');
+    final r = await driverDialog(
+      context,
+      title: 'Edit driver',
+      name: d.name,
+      posNumber: d.posNumber ?? '',
+      pushoverDevice: d.pushoverDevice,
+      onSendTest: () => ref.read(floorProvider.notifier).testRoute(d.id),
+    );
     if (r == null || r.name.isEmpty || !mounted) return;
     final name = r.name == d.name ? null : r.name;
     final number = r.posNumber == (d.posNumber ?? '') ? null : r.posNumber;
-    if (name == null && number == null) return;
-    await _do(() => ref.read(floorProvider.notifier).updateDriver(d.id, name: name, posNumber: number));
+    final device = r.pushoverDevice == d.pushoverDevice ? null : r.pushoverDevice;
+    if (name == null && number == null && device == null) return;
+    await _do(
+      () => ref.read(floorProvider.notifier).updateDriver(d.id, name: name, posNumber: number, pushoverDevice: device),
+    );
   }
 
   @override
