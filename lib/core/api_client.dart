@@ -141,6 +141,14 @@ const String kCameBack = 'came_back';
 /// routes (≤ 2.2.0): "This Pi needs an update".
 const String kNotDeliveredUnsupported = 'not_delivered_unsupported';
 
+/// [AgentException.code] for SEARCH ADDRESS (1.7.2) on a Pi or main without
+/// the search (404 / 405 / 501): "This Pi needs an update".
+const String kGeoSearchUnsupported = 'geo_search_unsupported';
+
+/// [AgentException.code] when the address search text isn't usable (400
+/// `bad_query`).
+const String kBadQuery = 'bad_query';
+
 /// Send Out was refused: these orders aren't marked ready (409 `not_ready`).
 /// Ask "send anyway?" and retry with `markReady`.
 class NotReadyException extends AgentException {
@@ -373,6 +381,35 @@ class AgentClient {
   Future<void> chooseGeo(String id, int index) => _v210Route(() async {
     await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/geo/choose', body: {'index': index});
   });
+
+  /// `POST /api/orders/{id}/geo/search {query}` (1.7.2) — staff typed the
+  /// address again for one main couldn't find; main searches near the store
+  /// and answers later as an order update (geo `check` with candidates, or
+  /// `not_found` again). 202 = searching. 400 → [kBadQuery], 503
+  /// [kMainOffline]; no route on the Pi (404 / 405) or main (501) →
+  /// [kGeoSearchUnsupported]. A JSON 404 `not_found` (unknown order) is
+  /// kept. Never unpairs the tablet.
+  Future<void> searchGeo(String id, String query) async {
+    try {
+      await _send(
+        'POST',
+        '/api/orders/${Uri.encodeComponent(id)}/geo/search',
+        body: {'query': query.trim()},
+        mayRevoke: false,
+      );
+    } on AgentException catch (e) {
+      final code = e.code ?? (jStr(e.body['error']).isEmpty ? null : jStr(e.body['error']));
+      final mapped = switch (e.statusCode) {
+        405 || 501 => kGeoSearchUnsupported,
+        404 when code != 'not_found' => kGeoSearchUnsupported,
+        400 => kBadQuery,
+        503 => kMainOffline,
+        _ => null,
+      };
+      if (mapped == null || mapped == e.code) rethrow;
+      throw AgentException(e.message, statusCode: e.statusCode, code: mapped, body: e.body, cause: e.cause);
+    }
+  }
 
   Future<StoredOrder> ready(String id) async =>
       StoredOrder.fromJson(jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/ready')));

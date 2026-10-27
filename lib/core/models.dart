@@ -534,6 +534,10 @@ class OrderGeo {
   /// The address staff confirmed (set after a choose).
   final Address? confirmedAddress;
 
+  /// Main located a different address than the one typed (a search or a
+  /// choose fixed it; 1.7.2). Absent = false.
+  final bool corrected;
+
   const OrderGeo({
     required this.state,
     this.lat,
@@ -546,6 +550,7 @@ class OrderGeo {
     this.updatedAt,
     this.candidates = const [],
     this.confirmedAddress,
+    this.corrected = false,
   });
 
   factory OrderGeo.fromJson(Map<String, dynamic> json) => OrderGeo(
@@ -560,6 +565,7 @@ class OrderGeo {
     updatedAt: jDate(json['updated_at']),
     candidates: jList(json['candidates'], GeoCandidate.fromJson).take(3).toList(growable: false),
     confirmedAddress: json['confirmed_address'] is Map ? Address.fromJson(jMap(json['confirmed_address'])) : null,
+    corrected: jBool(json['corrected']),
   );
 
   /// Located with a usable point.

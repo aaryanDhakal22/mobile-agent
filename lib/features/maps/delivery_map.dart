@@ -14,17 +14,24 @@ import '../../theme/quicc_type.dart';
 import '../common/widgets.dart';
 import 'geo_format.dart';
 import 'map_layers.dart';
+import 'search_address_sheet.dart';
 
 /// The delivery's map on the order detail: the store, the customer's door
 /// and the driving route between them ("2.3 mi · 7 min"), with amber
 /// "approximate location" / red "outside delivery area" tags, pan + zoom and
 /// a recenter button. While main is still looking: "Locating…". Address not
-/// found: tap the map to drop a pin (main remembers it for the address).
-/// Without a map file on the Pi: a plain card with the distance.
+/// found (1.7.2): "Not found on the map" in plain words with **SEARCH
+/// ADDRESS** (type it again, main searches near the store) and **PLACE PIN**
+/// (tap the map where the door is → SAVE PIN; main remembers it for the
+/// address). Without a map file on the Pi: a plain card with the distance.
 class DeliveryMap extends ConsumerStatefulWidget {
   final StoredOrder order;
   final double height;
-  const DeliveryMap({super.key, required this.order, this.height = 280});
+
+  /// The full-screen pin map (CHECK ADDRESS → drop a pin): a not-found
+  /// address goes straight to placing the pin, no SEARCH / PLACE PIN.
+  final bool pinOnly;
+  const DeliveryMap({super.key, required this.order, this.height = 280, this.pinOnly = false});
 
   @override
   ConsumerState<DeliveryMap> createState() => _DeliveryMapState();
@@ -84,6 +91,17 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
     }
   }
 
+  void _startPin() => setState(() {
+    _pinMode = true;
+    _pin = null;
+  });
+
+  Future<void> _search(bool canPin) async {
+    final outcome = await showSearchAddressSheet(context, widget.order, canPin: canPin);
+    if (!mounted) return;
+    if (outcome == SearchAddressOutcome.placePin && canPin) _startPin();
+  }
+
   @override
   Widget build(BuildContext context) {
     final g = widget.order.geo;
@@ -95,7 +113,12 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
       if (g != null && g.isApprox) const GeoTag('approximate location', color: QuiccColors.statusFiring),
       if (g != null && g.state == GeoState.located && g.outsideArea)
         const GeoTag('outside delivery area', color: QuiccColors.statusVoided),
+      if (g != null && g.corrected) const GeoTag.corrected(),
     ];
+    final center = store?.point ?? _bboxCenter(bbox);
+    // SEARCH ADDRESS / PLACE PIN for an address main couldn't place.
+    final lost = !widget.pinOnly && !_pinSent && g != null && g.needsPin;
+    final canPin = source != null && center != null;
 
     final header = Row(
       children: [
@@ -139,7 +162,6 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
             : (label == null ? 'The Pi gets the map from Quicc.' : 'Store → door: $label.'),
       );
     } else {
-      final center = store?.point ?? _bboxCenter(bbox);
       if (g.needsPin && center == null) {
         body = _MapCard(
           height: widget.height,
@@ -157,6 +179,16 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
       children: [
         header,
         if (tags.isNotEmpty) ...[const SizedBox(height: 6), Wrap(spacing: 6, runSpacing: 4, children: tags)],
+        if (lost) ...[
+          QuiccSpace.gapSm,
+          _LostActions(
+            title: _lostTitle(g),
+            pinning: _pinMode,
+            canPin: canPin,
+            onSearch: () => _search(canPin),
+            onPin: _startPin,
+          ),
+        ],
         const SizedBox(height: 8),
         body,
       ],
@@ -173,7 +205,7 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
   Widget _map(BuildContext context, OrderGeo g, GeoPoint? store, GeoPoint? center, MapSource source) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final notFound = g.needsPin;
-    final placing = notFound || _pinMode;
+    final placing = _pinMode || (notFound && widget.pinOnly);
     final dest = g.point;
     final route = g.route;
     final fitPts = <GeoPoint>[?store, ?dest];
@@ -195,7 +227,13 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
                 initialCameraFit: fit,
                 backgroundColor: mapBackground(dark),
                 interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
-                onTap: placing ? (_, p) => setState(() => _pin = p) : null,
+                // Not found: a tap on the map starts the pin there too.
+                onTap: placing || notFound
+                    ? (_, p) => setState(() {
+                        _pinMode = true;
+                        _pin = p;
+                      })
+                    : null,
               ),
               children: [
                 ref.watch(mapBaseLayerProvider)(context, source, dark),
@@ -216,9 +254,11 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
                 right: 8,
                 top: 8,
                 child: _Banner(
+                  key: const ValueKey('pin-banner'),
+                  icon: _pin != null ? Icons.push_pin : Icons.touch_app_outlined,
                   text: _pin != null
                       ? 'Is the pin on the door? Tap again to move it.'
-                      : (notFound ? '${_lostTitle(g)} — tap to place pin' : 'Tap the map where the door is'),
+                      : 'Tap the map where the door is',
                 ),
               ),
             Positioned(
@@ -238,6 +278,7 @@ class _DeliveryMapState extends ConsumerState<DeliveryMap> {
                   ],
                   if (_pinMode)
                     _RoundButton(
+                      key: const ValueKey('cancel-pin'),
                       icon: Icons.close,
                       tooltip: 'Cancel',
                       onTap: () => setState(() {
@@ -310,21 +351,102 @@ class _MapCard extends StatelessWidget {
   );
 }
 
+/// The instruction over the map while placing a pin (not a button).
 class _Banner extends StatelessWidget {
+  final IconData icon;
   final String text;
-  const _Banner({required this.text});
+  const _Banner({super.key, required this.icon, required this.text});
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md, vertical: QuiccSpace.sm),
     decoration: BoxDecoration(
       color: QuiccColors.brand900.withValues(alpha: 0.88),
       borderRadius: BorderRadius.circular(QuiccRadius.sm),
     ),
-    child: Text(
-      text,
-      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+    child: Row(
+      children: [
+        Icon(icon, size: 20, color: Colors.white),
+        QuiccSpace.gapSm,
+        Expanded(
+          child: Text(
+            text,
+            style: QuiccType.text(QuiccType.body, weight: FontWeight.w600, color: Colors.white),
+          ),
+        ),
+      ],
     ),
+  );
+}
+
+/// "Not found on the map" in plain words, then SEARCH ADDRESS and PLACE PIN
+/// (1.7.2; the order detail only). While a pin is being placed the buttons
+/// step aside — the map says what to do and ✕ cancels. Without a map to pin
+/// on ([canPin] false) only SEARCH ADDRESS is offered.
+class _LostActions extends StatelessWidget {
+  final String title;
+  final bool pinning;
+  final bool canPin;
+  final VoidCallback onSearch;
+  final VoidCallback onPin;
+  const _LostActions({
+    required this.title,
+    required this.pinning,
+    required this.canPin,
+    required this.onSearch,
+    required this.onPin,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Row(
+        children: [
+          Icon(Icons.location_off_outlined, size: 20, color: context.palette.textMuted),
+          QuiccSpace.gapSm,
+          Expanded(
+            child: Text(
+              title,
+              key: const ValueKey('lost-title'),
+              style: QuiccType.text(QuiccType.body, weight: FontWeight.w600, color: context.palette.textSecondary),
+            ),
+          ),
+        ],
+      ),
+      if (!pinning) ...[
+        QuiccSpace.gapSm,
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 56,
+                child: FilledButton.icon(
+                  key: const ValueKey('search-address'),
+                  onPressed: onSearch,
+                  icon: const Icon(Icons.search),
+                  label: const Text('SEARCH ADDRESS'),
+                ),
+              ),
+            ),
+            if (canPin) ...[
+              QuiccSpace.gapSm,
+              Expanded(
+                child: SizedBox(
+                  height: 56,
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('place-pin'),
+                    onPressed: onPin,
+                    icon: const Icon(Icons.push_pin_outlined),
+                    label: const Text('PLACE PIN'),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    ],
   );
 }
 
@@ -404,6 +526,7 @@ class StaticDeliveryMap extends ConsumerWidget {
         ?label,
         if (g?.isApprox == true) 'approximate location',
         if (g?.state == GeoState.located && g?.outsideArea == true) 'outside delivery area',
+        if (g?.corrected == true) 'address corrected',
       ].join(', '),
       excludeSemantics: true,
       child: child,

@@ -48,6 +48,12 @@ class GeoTag extends StatelessWidget {
   /// Red: farther than the store's delivery radius.
   const GeoTag.outside({super.key, this.fontSize = 12}) : text = 'outside area', color = QuiccColors.statusVoided;
 
+  /// Amber, quiet: main placed a corrected address, not the one typed
+  /// (1.7.2, geo `corrected`).
+  const GeoTag.corrected({super.key, this.fontSize = 12})
+    : text = 'address corrected',
+      color = QuiccColors.statusFiring;
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -70,6 +76,7 @@ class GeoTag extends StatelessWidget {
 List<Widget> geoTags(OrderGeo? g, {double fontSize = 12}) => [
   if (g != null && g.isApprox) GeoTag.approx(fontSize: fontSize),
   if (g != null && g.state == GeoState.located && g.outsideArea) GeoTag.outside(fontSize: fontSize),
+  if (g != null && g.corrected) GeoTag.corrected(fontSize: fontSize),
 ];
 
 /// "931 Taylor Avenue" — the street part of an address (for chips).
