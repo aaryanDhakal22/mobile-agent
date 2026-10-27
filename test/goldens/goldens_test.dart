@@ -53,8 +53,9 @@ Future<void> _loadFonts() async {
 
 /// A pickup the kitchen is cooking: kitchen #[k], accepted [ago] min ago,
 /// ready in [readyIn] min.
-StoredOrder _cooking(String id, int k, String name, {int ago = 8, int readyIn = 12}) {
+StoredOrder _cooking(String id, int k, String name, {int ago = 8, int readyIn = 12, bool paidAtStore = false}) {
   final m = jsonDecode(arrivedPickupJson) as Map<String, dynamic>;
+  if (paidAtStore) (m['status'] as Map)['paid'] = true; // customer waiting: red lava bar
   final now = clock.now().toUtc();
   (m['order'] as Map)
     ..['id'] = id
@@ -182,7 +183,7 @@ FloorState _floor({List<StoredOrder> arrived = const [], bool quiet = false, boo
       else
         o,
     _cooking('p1', 1107, 'Maria Lopez', ago: 4, readyIn: 16),
-    _cooking('p2', 1108, 'Tom Becker', ago: 14, readyIn: 3),
+    _cooking('p2', 1108, 'Tom Becker', ago: 14, readyIn: 3, paidAtStore: true),
     _cooking('p3', 1109, 'Priya Shah', ago: 27, readyIn: -6),
     if (cameBack) ...[_cameBack('cb1', 1100, '18 Linden Terrace', backMin: 9), _cameBack('cb2', 1104, '5 Elm Ct')],
     ?extra,

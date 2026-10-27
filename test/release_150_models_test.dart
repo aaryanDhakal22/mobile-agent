@@ -313,7 +313,7 @@ void main() {
 
     test('paid-not-ready: paid pickups and shown POS dine-in while accepted, never once ready', () {
       final card = _so(_online('p-1'));
-      expect(card.paidNotReady, isTrue, reason: 'online card pickup: nothing due');
+      expect(card.paidNotReady, isFalse, reason: 'online card pickup: prepaid, the customer may not be here yet');
       final ready = _so(_online('p-2', state: 'ready'));
       expect(ready.paidNotReady, isFalse);
       final cash = jsonDecode(arrivedPickupJson) as Map<String, dynamic>;

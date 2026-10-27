@@ -365,7 +365,10 @@ void main() {
     });
 
     testWidgets('the paid wave: on a paid pickup while cooking, not at ready, not when switched off', (tester) async {
-      final paid = StoredOrder.fromJson(_online('w-1'));
+      final card = _online('w-0'); // prepaid online card pickup: no wave (1.8.0)
+      final settled = _online('w-1');
+      (settled['status'] as Map)['paid'] = true; // paid at the store: the customer is waiting
+      final paid = StoredOrder.fromJson(settled);
       final cash = _online('w-2');
       (cash['order']['payments'] as List)
         ..clear()
@@ -373,7 +376,7 @@ void main() {
       await _pump(
         tester,
         _Agent(),
-        _floorState([paid, StoredOrder.fromJson(cash)]),
+        _floorState([StoredOrder.fromJson(card), paid, StoredOrder.fromJson(cash)]),
         const Scaffold(body: KitchenPane()),
       );
       expect(
@@ -384,6 +387,11 @@ void main() {
         find.descendant(of: find.byKey(const ValueKey('w-2')), matching: find.byKey(const ValueKey('paid-wave'))),
         findsNothing,
         reason: 'cash still due',
+      );
+      expect(
+        find.descendant(of: find.byKey(const ValueKey('w-0')), matching: find.byKey(const ValueKey('paid-wave'))),
+        findsNothing,
+        reason: 'prepaid online card pickup: the customer may not be here yet',
       );
       // It animates (a slow sweep), so the frame keeps changing.
       expect(tester.binding.hasScheduledFrame, isTrue);

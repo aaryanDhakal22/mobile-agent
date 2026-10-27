@@ -135,12 +135,14 @@ class StoredOrder {
   bool get isPaid => status.paid || cashDueCents == 0;
 
   /// Earns the paid-not-ready wave on the Kitchen board (while cooking): a
-  /// paid pickup (`paid`, or an online order with no cash due) or a shown
+  /// pickup settled at the store (`paid`; not a prepaid online one) or a shown
   /// POS counter (dine-in) order, which is paid up front.
   bool get paidNotReady {
     if (state != OrderState.accepted || status.boardHidden) return false;
     final type = order.fulfillment.type;
-    if (type == FulfillmentType.pickup) return status.paid || (!isPos && order.cashDueCents == 0);
+    // Only a customer who paid at the store is waiting: a prepaid online
+    // pickup (nothing due) may still be on the way, so it doesn't glow.
+    if (type == FulfillmentType.pickup) return status.paid;
     return isPos && type == FulfillmentType.dineIn;
   }
 
