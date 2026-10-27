@@ -208,15 +208,28 @@ class DefaultTimesSettingsCard extends ConsumerStatefulWidget {
 
 class _DefaultTimesSettingsCardState extends ConsumerState<DefaultTimesSettingsCard> {
   DefaultTimes? _edit;
+  // The Pi's times when editing started: SAVE changes only the fields edited
+  // since, so a card left open can't put back a value changed elsewhere.
+  DefaultTimes? _base;
   bool _saving = false;
   bool _needsUpdate = false;
 
   Future<void> _save(DefaultTimes t) async {
     setState(() => _saving = true);
     try {
-      final saved = await ref.read(floorProvider.notifier).saveTimes(t);
+      final now = ref.read(floorProvider).settings.times;
+      final base = _base ?? now;
+      final next = DefaultTimes(
+        defaultPickupMinutes: t.defaultPickupMinutes != base.defaultPickupMinutes ? t.defaultPickupMinutes : now.defaultPickupMinutes,
+        defaultDeliveryMinutes:
+            t.defaultDeliveryMinutes != base.defaultDeliveryMinutes ? t.defaultDeliveryMinutes : now.defaultDeliveryMinutes,
+      );
+      final saved = await ref.read(floorProvider.notifier).saveTimes(next);
       if (!mounted) return;
-      setState(() => _edit = null);
+      setState(() {
+        _edit = null;
+        _base = null;
+      });
       toast(context, 'Saved — pickup ${saved.defaultPickupMinutes} min, delivery ${saved.defaultDeliveryMinutes} min');
     } catch (e) {
       if (!mounted) return;
@@ -249,7 +262,13 @@ class _DefaultTimesSettingsCardState extends ConsumerState<DefaultTimesSettingsC
             style: QuiccType.text(QuiccType.body, color: context.palette.textSecondary),
           )
         else ...[
-          DefaultTimesFields(value: t, onChanged: (v) => setState(() => _edit = v)),
+          DefaultTimesFields(
+            value: t,
+            onChanged: (v) => setState(() {
+              _base ??= saved;
+              _edit = v;
+            }),
+          ),
           QuiccSpace.gapMd,
           Row(
             children: [
@@ -265,7 +284,15 @@ class _DefaultTimesSettingsCardState extends ConsumerState<DefaultTimesSettingsC
               ),
               QuiccSpace.gapMd,
               if (dirty)
-                TextButton(onPressed: _saving ? null : () => setState(() => _edit = null), child: const Text('UNDO')),
+                TextButton(
+                  onPressed: _saving
+                      ? null
+                      : () => setState(() {
+                          _edit = null;
+                          _base = null;
+                        }),
+                  child: const Text('UNDO'),
+                ),
             ],
           ),
         ],

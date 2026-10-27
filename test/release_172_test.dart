@@ -17,6 +17,8 @@ import 'package:mobile_agent/features/maps/geo_format.dart';
 import 'package:mobile_agent/features/maps/map_layers.dart';
 import 'package:mobile_agent/features/maps/search_address_sheet.dart';
 import 'package:mobile_agent/features/order_detail/order_detail_screen.dart';
+import 'package:mobile_agent/core/providers.dart';
+import 'package:mobile_agent/features/settings/pos_settings_cards.dart';
 
 import 'delivery_fixtures.dart';
 
@@ -401,6 +403,41 @@ void main() {
       final e = await fails();
       expect(e.statusCode, 401);
       expect(revoked, isEmpty);
+    });
+  });
+
+  group('Default times card', () {
+    testWidgets('SAVE changes only the edited field: a value changed on the Pi meanwhile is kept', (tester) async {
+      final f = FakeDeliveryFloor(deliveryFloor());
+      final pi = AgentClient(baseUrl: 'http://pi:8080', deviceKey: 'k', client: MockClient((_) async => http.Response('{}', 200)));
+      final c = await deliveryContainer(f, extra: [agentClientProvider.overrideWithValue(pi)]);
+      addTearDown(c.dispose);
+      c.read(floorProvider); // build the controller before setting its state
+      void piTimes(int p, int d) => f.state = f.state.copyWith(
+        floor: f.state.floor!.copyWith(
+          settings: f.state.settings.copyWith(times: DefaultTimes(defaultPickupMinutes: p, defaultDeliveryMinutes: d)),
+        ),
+      );
+      piTimes(15, 40);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(theme: darkTheme(), home: const Scaffold(body: SingleChildScrollView(child: DefaultTimesSettingsCard()))),
+        ),
+      );
+      await tester.pump();
+      // Someone nudges pickup on the open card…
+      await tester.tap(find.descendant(of: find.byKey(const ValueKey('default-pickup')), matching: find.byIcon(Icons.add)));
+      await tester.pump();
+      // …delivery is changed to 15 elsewhere meanwhile, then SAVE.
+      piTimes(15, 15);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('times-save')));
+      await tester.pump();
+      final sent = callsOf(f, 'times').single.extra;
+      expect(sent['default_pickup_minutes'], 20);
+      expect(sent['default_delivery_minutes'], 15, reason: 'the stale 40 on the card must not be written back');
+      await tester.pumpWidget(const SizedBox());
     });
   });
 }
