@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
@@ -1011,6 +1012,41 @@ class AgentClient {
     final body = await _send('POST', '/api/callout/test', body: {'number': number, 'voice': voice, 'kind': kind});
     return jBool(jMap(body)['hub_connected']);
   }, settings: true);
+
+  /// `POST /api/callout/preview {number, voice}` (Pi 2.3.2) — asks the store
+  /// hub to make "Order ready for ticket number [number]" in [voice] ('' =
+  /// the chosen one) for THIS tablet to play; nothing plays in the store.
+  /// Answers the preview id to fetch with [calloutPreviewAudio]. 503 `{code}`
+  /// = `hub_not_connected` | `hub_update_needed` | `not_installed`.
+  Future<String> calloutPreview(int number, {String voice = ''}) => _v210Route(() async {
+    final body = await _send('POST', '/api/callout/preview', body: {'number': number, 'voice': voice});
+    final id = jStr(jMap(body)['id']);
+    if (id.isEmpty) throw const AgentException('The Pi did not answer with a preview id');
+    return id;
+  }, settings: true);
+
+  /// `GET /api/callout/preview/{id}?wait=` — the WAV bytes once the hub sent
+  /// them, null while it is still preparing (202; ask again). The Pi holds
+  /// the request up to [wait] while pending. 503 `render_failed` /
+  /// `not_installed` (the hub's reason), 504 `timeout`, 404 `not_found`.
+  Future<Uint8List?> calloutPreviewAudio(String id, {Duration wait = const Duration(seconds: 8)}) async {
+    final secs = wait.inSeconds.clamp(0, 10);
+    final req = http.Request('GET', uri('/api/callout/preview/${Uri.encodeComponent(id)}', {'wait': '$secs'}))
+      ..headers.addAll({..._headers, 'Accept': 'audio/wav, application/json'});
+    final http.Response resp;
+    final limit = Duration(seconds: secs) + timeout;
+    try {
+      final streamed = await _client.send(req).timeout(limit);
+      resp = await http.Response.fromStream(streamed).timeout(limit);
+    } catch (e) {
+      throw AgentException(_networkMessage(e), cause: e);
+    }
+    if (resp.statusCode == 200) return resp.bodyBytes;
+    if (resp.statusCode == 202) return null;
+    final e = exceptionFromResponse(resp.statusCode, resp.body);
+    if (e.isDeviceRevoked) onDeviceRevoked?.call();
+    throw e;
+  }
 
   /// `POST /api/orders/{id}/change/ack` — OK on the CHANGED alert. 409
   /// `no_change` when it was OK'd elsewhere (or a newer change came in).

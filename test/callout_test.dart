@@ -2,6 +2,7 @@
 // the CHANGED ticket), finishing orders, the order callout settings.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mobile_agent/core/alert_player.dart';
 import 'package:mobile_agent/core/api_client.dart';
+import 'package:mobile_agent/core/callout_preview_player.dart';
 import 'package:mobile_agent/core/floor_state.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/motion.dart';
@@ -100,6 +102,12 @@ class FakeChime implements SoftChime {
   Future<void> play() async => plays++;
 }
 
+class FakePreviewPlayer implements CalloutPreviewPlayer {
+  final played = <List<int>>[];
+  @override
+  Future<void> play(Uint8List wav) async => played.add(wav.toList());
+}
+
 class FakeRing extends RingPlatform {
   @override
   Future<bool> startService(String text) async => true;
@@ -137,6 +145,7 @@ Future<ProviderContainer> container(
   Future<http.Response> Function(http.Request req)? handler,
   Map<String, Object> prefs = _paired,
   SoftChime? chime,
+  CalloutPreviewPlayer? previewPlayer,
 }) async {
   AlertPlayer.resetForTest(QuietSink());
   SharedPreferences.setMockInitialValues(prefs);
@@ -147,6 +156,7 @@ Future<ProviderContainer> container(
       floorProvider.overrideWith(() => FakeFloor(floor)),
       ringPlatformProvider.overrideWithValue(FakeRing()),
       softChimeProvider.overrideWithValue(chime ?? FakeChime()),
+      calloutPreviewPlayerProvider.overrideWithValue(previewPlayer ?? FakePreviewPlayer()),
       agentClientProvider.overrideWith(
         (ref) => AgentClient(
           baseUrl: 'http://192.168.1.219:8080',
@@ -230,6 +240,18 @@ void main() {
       expect(st.callout!.voices.single.label, 'Heart');
       expect(st.callout!.rendering, isTrue);
       expect(st.callout!.last!.number, 102);
+      expect(st.callout!.preview, isFalse);
+
+      // 1.8.1: Pi 2.3.2 / hub 0.2.2 say they can make a preview for a tablet.
+      final v = CalloutView.fromJson({
+        'settings': {'enabled': true},
+        'hub_connected': true,
+        'preview': true,
+        'hub': {'installed': true, 'preview': true},
+      });
+      expect(v.preview, isTrue);
+      expect(v.hub!.preview, isTrue);
+      expect(CalloutView.fromJson(const {}).preview, isFalse);
     });
   });
 
@@ -386,7 +408,7 @@ void main() {
       },
     };
 
-    testWidgets('order callout card: switch, TEST CALLOUT, PREVIEW on the store speaker', (tester) async {
+    testWidgets('order callout card: switch, TEST CALLOUT, ON THE STORE SPEAKER', (tester) async {
       final reqs = <http.Request>[];
       final c = await container(
         floorOf(const []),
@@ -421,10 +443,154 @@ void main() {
       final t = reqs.lastWhere((r) => r.url.path == '/api/callout/test');
       expect(jsonDecode(t.body), {'number': 213, 'voice': '', 'kind': 'test'});
 
-      await tester.tap(find.byKey(const ValueKey('callout-preview')));
+      // An older Pi (no `preview` in GET /api/callout): no ON THIS TABLET.
+      expect(find.byKey(const ValueKey('callout-preview-tablet')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('callout-preview-store')));
       await tester.pumpAndSettle();
       final p = reqs.lastWhere((r) => r.url.path == '/api/callout/test');
       expect(jsonDecode(p.body), {'number': 213, 'voice': 'kokoro:af_heart', 'kind': 'preview'});
+      expect(reqs.where((r) => r.url.path.startsWith('/api/callout/preview')), isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    final wav = Uint8List.fromList([...utf8.encode('RIFF'), 0, 0, 0, 0, ...utf8.encode('WAVE'), 1, 2, 3]);
+
+    /// The card on a Pi 2.3.2 with [preview] answering POST/GET preview.
+    Future<(ProviderContainer, List<http.Request>, FakePreviewPlayer)> previewCard(
+      WidgetTester tester, {
+      required Future<http.Response> Function(http.Request req, int asks) preview,
+    }) async {
+      final reqs = <http.Request>[];
+      final player = FakePreviewPlayer();
+      var asks = 0;
+      final c = await container(
+        floorOf(const []),
+        previewPlayer: player,
+        handler: (req) async {
+          reqs.add(req);
+          if (req.url.path == '/api/callout') return http.Response(jsonEncode({...calloutJson, 'preview': true}), 200);
+          if (req.url.path == '/api/callout/test') return http.Response(jsonEncode({'id': 't1', 'hub_connected': true}), 202);
+          if (req.url.path.startsWith('/api/callout/preview/')) asks++;
+          return preview(req, asks);
+        },
+      );
+      addTearDown(c.dispose);
+      await pumpApp(tester, c, home: const Scaffold(body: SingleChildScrollView(child: OrderCalloutCard())));
+      await tester.pumpAndSettle();
+      return (c, reqs, player);
+    }
+
+    testWidgets('ON THIS TABLET: asks the Pi, shows Preparing… while pending, plays the WAV here', (tester) async {
+      final release = Completer<void>();
+      final (_, reqs, player) = await previewCard(
+        tester,
+        preview: (req, asks) async {
+          if (req.method == 'POST') return http.Response(jsonEncode({'id': 'p1', 'status': 'pending'}), 202);
+          if (asks == 1) return http.Response(jsonEncode({'id': 'p1', 'status': 'pending'}), 202);
+          await release.future;
+          return http.Response.bytes(wav, 200, headers: {'content-type': 'audio/wav'});
+        },
+      );
+      expect(find.byKey(const ValueKey('callout-preview-store')), findsOneWidget);
+      await tester.enterText(find.byKey(const ValueKey('callout-number')), '122');
+      await tester.tap(find.byKey(const ValueKey('callout-preview-tablet')));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('callout-preview-spinner')), findsOneWidget);
+      expect(find.text('Preparing…'), findsOneWidget);
+      // Both buttons wait while it is preparing.
+      expect(
+        tester.widget<OutlinedButton>(find.byKey(const ValueKey('callout-preview-store'))).onPressed,
+        isNull,
+      );
+      release.complete();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('callout-preview-spinner')), findsNothing);
+      expect(player.played.single, wav.toList());
+      final post = reqs.firstWhere((r) => r.url.path == '/api/callout/preview');
+      expect(post.method, 'POST');
+      expect(jsonDecode(post.body), {'number': 122, 'voice': 'kokoro:af_heart'});
+      final gets = reqs.where((r) => r.url.path == '/api/callout/preview/p1').toList();
+      expect(gets, hasLength(2));
+      expect(gets.first.url.queryParameters['wait'], '8');
+      expect(reqs.where((r) => r.url.path == '/api/callout/test'), isEmpty, reason: 'nothing plays in the store');
+      expect(find.text('Playing #122 on this tablet…'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    for (final (name, status, body, words) in [
+      (
+        'hub not connected',
+        503,
+        {'error': 'the store hub is not connected', 'code': 'hub_not_connected'},
+        "The store hub is not connected, so it can't make the voice.",
+      ),
+      (
+        'hub too old',
+        503,
+        {'error': 'the store hub needs an update', 'code': 'hub_update_needed'},
+        'The store hub needs an update to play a preview on this tablet.',
+      ),
+      (
+        'not installed',
+        503,
+        {'error': 'not installed', 'code': 'not_installed'},
+        'The voice is not installed on the store computer yet.',
+      ),
+    ]) {
+      testWidgets('ON THIS TABLET refused at once: $name', (tester) async {
+        final (_, reqs, player) = await previewCard(
+          tester,
+          preview: (req, _) async => http.Response(jsonEncode(body), status),
+        );
+        await tester.tap(find.byKey(const ValueKey('callout-preview-tablet')));
+        await tester.pumpAndSettle();
+        expect(find.text(words), findsOneWidget);
+        expect(find.byKey(const ValueKey('callout-preview-spinner')), findsNothing);
+        expect(player.played, isEmpty);
+        expect(reqs.where((r) => r.url.path.startsWith('/api/callout/preview/')), isEmpty);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    for (final (name, status, body, words) in [
+      (
+        'render failed',
+        503,
+        {'error': 'kokoro crashed', 'code': 'render_failed'},
+        'The store computer could not make the voice: kokoro crashed',
+      ),
+      ('timeout', 504, {'error': 'no audio from the store hub', 'code': 'timeout'}, "The store hub didn't answer in time — try again."),
+    ]) {
+      testWidgets('ON THIS TABLET fails while preparing: $name', (tester) async {
+        final (_, _, player) = await previewCard(
+          tester,
+          preview: (req, asks) async {
+            if (req.method == 'POST') return http.Response(jsonEncode({'id': 'p1', 'status': 'pending'}), 202);
+            return http.Response(jsonEncode(body), status);
+          },
+        );
+        await tester.tap(find.byKey(const ValueKey('callout-preview-tablet')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('callout-preview-error')), findsOneWidget);
+        expect(find.text(words), findsOneWidget);
+        expect(player.played, isEmpty);
+        // The buttons are back for another try.
+        expect(tester.widget<OutlinedButton>(find.byKey(const ValueKey('callout-preview-tablet'))).onPressed, isNotNull);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    testWidgets('ON THIS TABLET gives up when the hub never answers', (tester) async {
+      final (_, reqs, player) = await previewCard(
+        tester,
+        preview: (req, _) async => http.Response(jsonEncode({'id': 'p1', 'status': 'pending'}), 202),
+      );
+      await tester.tap(find.byKey(const ValueKey('callout-preview-tablet')));
+      await tester.pumpAndSettle();
+      expect(reqs.where((r) => r.url.path == '/api/callout/preview/p1'), hasLength(kPreviewAsks));
+      expect(find.text("The store hub didn't answer in time — try again."), findsOneWidget);
+      expect(player.played, isEmpty);
       await tester.pumpWidget(const SizedBox());
     });
 

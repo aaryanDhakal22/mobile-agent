@@ -18,7 +18,7 @@ in one of three modes:
 |---|---|---|
 | **Kitchen** (start) | Kitchen · Deliveries · Map · Drivers · History | tap the `q` from store mode |
 | **Store** | Batch · Printers · Updates · Help · Settings | tap the `q` from kitchen mode |
-| **Developer** | Connections · POS hub · Logs · Tests · Config | **hold** the `q` (any mode) → the store **manager login** |
+| **Developer** | Connections · POS hub · Logs · Tests · Config | **hold** the `q` (any mode) → the **developer PIN** (1.8.1) |
 
 (Five per mode since 1.6.1: Map, Updates and POS hub.)
 
@@ -28,8 +28,10 @@ new ones pop in one by one, top to bottom (0 → 120 % → 90 % → 110 % → 10
 The `q` turns over and takes the mode's colours (lavender kitchen, pale store,
 dark developer). The selected screen is marked by a **blob** that stretches
 from the old icon to the new one. The rail remembers the last screen of each
-mode. Developer mode is checked with the Pi (`POST /api/login`, signed out
-again at once), kept in memory only, and **locks again** when you leave it
+mode. Developer mode opens with a **4-digit PIN pad** (1.8.1; `kDevPin` in
+`lib/features/dev/dev_gate.dart` — not a secret, just a deterrent; a wrong PIN
+shakes and clears, no lockout; it used to take the store manager login), is
+kept in memory only, and **locks again** when you leave it
 (tap the `q` → kitchen), after **15 min without a touch**, on a restart or
 when the Pi changes. **Motion** (Store settings → Sound & look) turns the
 effects into quick fades, and an **animation speed** slider (0.5× – 2×) sets
@@ -126,6 +128,21 @@ CALLOUT** with a ticket number (`GET /api/callout`, `PUT
 `/api/settings/finishing`); terminal orders finish when SoftTouch closes them
 (shown, not editable). An older Pi shows both as *coming with the next Pi
 update*.
+
+**Callout preview on this tablet (1.8.1, Pi 2.3.2 + hub 0.2.2).** The voice
+row has two buttons, both saying the **Ticket #** field in the chosen voice:
+**ON THE STORE SPEAKER** (as before: `POST /api/callout/test {kind:"preview"}`
+→ the hub speaks with the music ducked) and **ON THIS TABLET** (nothing plays
+in the store). The tablet path: `POST /api/callout/preview {number, voice}` →
+the Pi writes the feed event `callout.render {id, voice, number}` → the hub
+renders it (or takes it from its WAV cache) and uploads the WAV with `PUT
+/api/integration/callout-audio/{id}` → the tablet asks `GET
+/api/callout/preview/{id}?wait=8` (202 while pending, up to 4 asks) and plays
+the bytes on the media stream (`lib/core/callout_preview_player.dart`, via a
+temp file). "Preparing…" with a spinner while it waits; failures in plain
+words (hub not connected, hub needs an update, voice not installed, could not
+make the voice: <reason>, didn't answer in time). A Pi without the route (no
+`preview` in `GET /api/callout`) hides ON THIS TABLET.
 
 **Errors in plain words.** Anything that goes wrong is shown as a short
 sentence plus what to do ("Can't reach the Pi — check the tablet is on the
