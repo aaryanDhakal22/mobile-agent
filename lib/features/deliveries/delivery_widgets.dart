@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/clock.dart';
 import '../../core/delivery_models.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
@@ -219,12 +220,7 @@ class UnassignedRow extends StatelessWidget {
                           color: context.palette.textSecondary,
                         ),
                       ),
-                    Ticker(
-                      interval: const Duration(seconds: 15),
-                      builder: (context, now) => cooking
-                          ? _ReadyIn(order: order, now: now)
-                          : _Age(order: order, now: now, targetMinutes: targetMinutes),
-                    ),
+                    cooking ? _ReadyIn(order: order) : _Age(order: order, targetMinutes: targetMinutes),
                   ],
                 ),
               ],
@@ -247,50 +243,52 @@ class HeldForTag extends StatelessWidget {
   const HeldForTag({super.key, required this.heldFor});
 
   @override
-  Widget build(BuildContext context) => Ticker(
-    interval: const Duration(seconds: 30),
-    builder: (context, now) {
-      final back = heldFor.backIn(now);
-      return GeoTag('Held for ${heldFor.name}${back == null ? '' : ' · $back'}', color: QuiccColors.statusOpen);
-    },
+  Widget build(BuildContext context) => ClockBuilder<String?>(
+    select: heldFor.backIn,
+    builder: (context, back, _) =>
+        GeoTag('Held for ${heldFor.name}${back == null ? '' : ' · $back'}', color: QuiccColors.statusOpen),
   );
 }
 
 /// "ready in ~4 min" for a cooking delivery.
 class _ReadyIn extends StatelessWidget {
   final StoredOrder order;
-  final DateTime now;
-  const _ReadyIn({required this.order, required this.now});
+  const _ReadyIn({required this.order});
 
   @override
   Widget build(BuildContext context) {
     final eta = order.status.estimatedReadyAt;
-    final left = eta?.difference(now);
-    final text = left == null
-        ? 'cooking'
-        : (left.inSeconds <= 30 ? 'ready any minute' : 'ready in ~${(left.inSeconds / 60).ceil()} min');
-    return Text(text, style: QuiccType.text(QuiccType.label, weight: FontWeight.w600, color: QuiccColors.statusOpen));
+    return ClockText((now) {
+      final left = eta?.difference(now);
+      return left == null
+          ? 'cooking'
+          : (left.inSeconds <= 30 ? 'ready any minute' : 'ready in ~${(left.inSeconds / 60).ceil()} min');
+    }, style: QuiccType.text(QuiccType.label, weight: FontWeight.w600, color: QuiccColors.statusOpen));
   }
 }
 
 /// Minutes since the customer placed it, against the delivery target.
 class _Age extends StatelessWidget {
   final StoredOrder order;
-  final DateTime now;
   final int targetMinutes;
-  const _Age({required this.order, required this.now, required this.targetMinutes});
+  const _Age({required this.order, required this.targetMinutes});
 
   @override
   Widget build(BuildContext context) {
     final placed = order.placedTime;
     if (placed == null) return const SizedBox.shrink();
-    final m = now.difference(placed).inMinutes.clamp(0, 1 << 30);
-    final color = m >= targetMinutes
-        ? QuiccColors.statusVoided
-        : (m >= targetMinutes - 10 ? QuiccColors.statusFiring : context.palette.textMuted);
-    return Text(
-      '${m < 0 ? 0 : m} min',
-      style: QuiccType.number(QuiccType.label, weight: FontWeight.w700, color: color),
+    final muted = context.palette.textMuted;
+    return ClockBuilder<int>(
+      select: (now) => now.difference(placed).inMinutes.clamp(0, 1 << 30),
+      builder: (context, m, _) {
+        final color = m >= targetMinutes
+            ? QuiccColors.statusVoided
+            : (m >= targetMinutes - 10 ? QuiccColors.statusFiring : muted);
+        return Text(
+          '${m < 0 ? 0 : m} min',
+          style: QuiccType.number(QuiccType.label, weight: FontWeight.w700, color: color),
+        );
+      },
     );
   }
 }
@@ -529,23 +527,19 @@ class OutRunCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  Ticker(
-                    builder: (context, now) {
-                      final t = outAt;
-                      if (t == null) return const SizedBox.shrink();
-                      final d = now.isBefore(t) ? Duration.zero : now.difference(t);
-                      return Text(
-                        'out ${duration(d)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: QuiccType.number(
-                          QuiccType.body,
-                          weight: FontWeight.w700,
-                          color: d.inMinutes >= 45 ? QuiccColors.statusVoided : context.palette.textSecondary,
-                        ),
-                      );
-                    },
-                  ),
+                  if (outAt case final t?)
+                    ClockText(
+                      (now) => 'out ${duration(now.isBefore(t) ? Duration.zero : now.difference(t))}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      styleAt: (now) => QuiccType.number(
+                        QuiccType.body,
+                        weight: FontWeight.w700,
+                        color: !now.isBefore(t) && now.difference(t).inMinutes >= 45
+                            ? QuiccColors.statusVoided
+                            : context.palette.textSecondary,
+                      ),
+                    ),
                   QuiccSpace.gapSm,
                   if (orders.isEmpty)
                     Text('No orders on this run.', style: QuiccType.text(QuiccType.label, color: context.palette.textMuted))

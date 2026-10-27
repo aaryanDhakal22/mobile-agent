@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/clock.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/motion.dart';
@@ -257,16 +258,10 @@ class _CameBackRowState extends ConsumerState<CameBackRow> with SingleTickerProv
                         if (_busy)
                           const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         else
-                          Ticker(
-                            interval: const Duration(seconds: 30),
-                            builder: (context, now) {
-                              final at = so.status.notDelivered?.at;
-                              return Text(
-                                at == null ? 'came back' : 'back ${minutes(now.difference(at))}',
-                                style: QuiccType.text(QuiccType.label, weight: FontWeight.w600, color: p.textMuted),
-                              );
-                            },
-                          ),
+                          ClockText((now) {
+                            final at = so.status.notDelivered?.at;
+                            return at == null ? 'came back' : 'back ${minutes(now.difference(at))}';
+                          }, style: QuiccType.text(QuiccType.label, weight: FontWeight.w600, color: p.textMuted)),
                       ],
                     ),
                   ],

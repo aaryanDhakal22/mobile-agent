@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/clock.dart';
+import '../../core/floor_state.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/motion.dart';
@@ -60,8 +62,10 @@ class KitchenPane extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    var kitchen = ref.watch(floorProvider.select((s) => s.kitchenByUrgency));
-    final later = ref.watch(floorProvider.select((s) => s.later));
+    // 1.9.0: compared order by order (identical instances), so a refresh
+    // or an event that changed nothing on the board doesn't rebuild it.
+    var kitchen = ref.watch(floorProvider.select((s) => SameOrders(s.kitchenByUrgency))).orders;
+    final later = ref.watch(floorProvider.select((s) => SameOrders(s.later))).orders;
     final greenTill = ref.watch(floorProvider.select((s) => s.floor?.greenTillMinutes ?? kDefaultGreenTillMinutes));
     final wave = ref.watch(floorProvider.select((s) => s.settings.features.paidWave));
     // 1.7.1: customers waiting on a paid ticket go first (most urgent order
@@ -113,12 +117,17 @@ class KitchenPane extends ConsumerWidget {
                             children: [
                               for (final so in columns[c])
                                 Padding(
+                                  key: ValueKey('slot-${so.id}'),
                                   padding: const EdgeInsets.only(bottom: kTicketGap),
-                                  child: KitchenCard(
-                                    key: ValueKey(so.id),
-                                    order: so,
-                                    greenTill: greenTill,
-                                    paidWave: wave,
+                                  // Each ticket repaints alone (its timer, the
+                                  // customer-waiting halo) — 1.9.0.
+                                  child: RepaintBoundary(
+                                    child: KitchenCard(
+                                      key: ValueKey(so.id),
+                                      order: so,
+                                      greenTill: greenTill,
+                                      paidWave: wave,
+                                    ),
                                   ),
                                 ),
                             ],
@@ -355,6 +364,31 @@ const double kTicketItemSize = 18;
 /// READY / Reprint / Resend height on a ticket.
 const double kTicketButtonHeight = 52;
 
+/// What of a ticket changes with the clock, besides its timer text: the
+/// lateness colour (from the time since arrival, in 10 s steps), the
+/// customer-waiting minutes and heat, and the CHANGED tag.
+typedef _CardTime = ({Color tone, int waitedMinutes, bool hot, bool changed});
+
+/// Clamped: a tablet clock a little behind the Pi's would count below zero.
+Duration _sinceArrived(DateTime now, DateTime? arrived) {
+  final raw = arrived == null ? Duration.zero : now.difference(arrived);
+  return raw.isNegative ? Duration.zero : raw;
+}
+
+_CardTime _cardTimeFor(DateTime now, StoredOrder so, DateTime? arrived, bool wave, int greenTill) {
+  final since = _sinceArrived(now, arrived);
+  final tone = lateColor(Duration(seconds: since.inSeconds - since.inSeconds % 10), greenTill);
+  final waitStart = so.waitingSince;
+  final waitedRaw = waitStart == null ? Duration.zero : now.difference(waitStart);
+  final waited = waitedRaw.isNegative ? Duration.zero : waitedRaw;
+  return (
+    tone: tone,
+    waitedMinutes: wave ? waited.inMinutes : 0,
+    hot: wave && waited >= kWaitingEscalate,
+    changed: so.changedTag(now),
+  );
+}
+
 /// One ticket on the Kitchen board: a coloured header bar (green → red by
 /// time since arrival) with the number, then a white body. A paid ticket
 /// that isn't ready yet shows "customer waiting" — the red lava bar and
@@ -438,6 +472,9 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
     },
   );
 
+  _CardTime _cardTime(DateTime now, StoredOrder so, DateTime? arrived, bool wave) =>
+      _cardTimeFor(now, so, arrived, wave, widget.greenTill);
+
   /// A 56×52 outlined icon button with a tooltip / screen-reader label.
   Widget _iconButton({required String label, required IconData icon, required bool busy, VoidCallback? onPressed}) {
     return Tooltip(
@@ -464,17 +501,15 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
     final wave = widget.paidWave && so.paidNotReady;
     final motion = Motion.of(context, ref);
     final radius = BorderRadius.circular(QuiccRadius.md);
-    return Ticker(
-      interval: const Duration(seconds: 5),
-      builder: (context, now) {
-        // Clamped: a tablet clock a little behind the Pi's would count below zero.
-        final raw = arrived == null ? Duration.zero : now.difference(arrived);
-        final since = raw.isNegative ? Duration.zero : raw;
-        final tone = lateColor(since, widget.greenTill);
-        final waitStart = so.waitingSince;
-        final waitedRaw = waitStart == null ? Duration.zero : now.difference(waitStart);
-        final waited = waitedRaw.isNegative ? Duration.zero : waitedRaw;
-        final hot = wave && waited >= kWaitingEscalate;
+    // 1.9.0: the shared clock rebuilds the card only when its colour, the
+    // customer-waiting minutes / heat or the CHANGED tag move on; the timer
+    // line follows the clock by itself.
+    return ClockBuilder<_CardTime>(
+      select: (now) => _cardTime(now, so, arrived, wave),
+      builder: (context, t, now) {
+        final tone = t.tone;
+        final waited = Duration(minutes: t.waitedMinutes);
+        final hot = t.hot;
         _syncWave(wave && motion.full, motion.scale(hot ? kWaitingLavaHot : kWaitingLava));
         // 1.8.0: changed at the POS (pending, or OK'd < 10 min ago).
         final changed = so.changedTag(now);
@@ -486,7 +521,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _TimerLine(order: so, since: since, tone: tone, now: now),
+              _TimerLine(order: so, arrived: arrived, tone: tone),
               QuiccSpace.gapSm,
               Text(
                 ticketHeading(so),
@@ -769,22 +804,20 @@ class _CardBar extends StatelessWidget {
 /// like the ticket), then the promised ready time.
 class _TimerLine extends StatelessWidget {
   final StoredOrder order;
-  final Duration since;
+  final DateTime? arrived;
   final Color tone;
-  final DateTime now;
-  const _TimerLine({required this.order, required this.since, required this.tone, required this.now});
+  const _TimerLine({required this.order, required this.arrived, required this.tone});
 
   @override
   Widget build(BuildContext context) {
     final eta = order.status.estimatedReadyAt;
-    final left = eta?.difference(now);
-    final late = left != null && left.isNegative;
+    final secondary = context.palette.textSecondary;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text(
-          duration(since),
-          key: const ValueKey('ticket-timer'),
+        ClockText(
+          (now) => duration(_sinceArrived(now, arrived)),
+          textKey: const ValueKey('ticket-timer'),
           style: QuiccType.number(
             QuiccType.title,
             weight: FontWeight.w700,
@@ -793,18 +826,28 @@ class _TimerLine extends StatelessWidget {
             height: 1.1,
           ),
         ),
-        if (left != null) ...[
+        if (eta != null) ...[
           QuiccSpace.gapMd,
           Expanded(
-            child: Text(
-              late ? 'LATE ${minutes(left)}' : '${minutes(left)} left · ${clock(eta)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: QuiccType.text(
-                late ? QuiccType.heading : QuiccType.body,
-                weight: late ? FontWeight.w700 : FontWeight.w500,
-                color: late ? QuiccColors.statusVoided : context.palette.textSecondary,
-              ),
+            child: ClockBuilder<(bool, String)>(
+              select: (now) {
+                final left = eta.difference(now);
+                final late = left.isNegative;
+                return (late, late ? 'LATE ${minutes(left)}' : '${minutes(left)} left · ${clock(eta)}');
+              },
+              builder: (context, v, _) {
+                final (late, text) = v;
+                return Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: QuiccType.text(
+                    late ? QuiccType.heading : QuiccType.body,
+                    weight: late ? FontWeight.w700 : FontWeight.w500,
+                    color: late ? QuiccColors.statusVoided : secondary,
+                  ),
+                );
+              },
             ),
           ),
         ],
