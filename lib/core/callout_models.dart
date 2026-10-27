@@ -99,6 +99,14 @@ class CalloutSettings {
   final double restoreSeconds; // 0-10
   final bool chime;
 
+  /// Pi 2.3.4: how many times the phrase is said per callout, 1–3; null =
+  /// an older Pi without the setting (the Repeat slider is hidden and the
+  /// field is never sent).
+  final int? repeat;
+
+  static const int minRepeat = 1;
+  static const int maxRepeat = 3;
+
   const CalloutSettings({
     this.enabled = true,
     this.voice = '',
@@ -106,6 +114,7 @@ class CalloutSettings {
     this.musicDip = 70,
     this.restoreSeconds = 1.5,
     this.chime = true,
+    this.repeat,
   });
 
   factory CalloutSettings.fromJson(Map<String, dynamic> j) => CalloutSettings(
@@ -117,6 +126,7 @@ class CalloutSettings {
         .clamp(0, 10)
         .toDouble(),
     chime: jBool(j['chime'], true),
+    repeat: jIntOrNull(j['repeat'])?.clamp(minRepeat, maxRepeat),
   );
 
   Map<String, Object> toJson() => {
@@ -126,6 +136,7 @@ class CalloutSettings {
     'music_dip': musicDip,
     'restore_seconds': restoreSeconds,
     'chime': chime,
+    'repeat': ?repeat,
   };
 
   CalloutSettings copyWith({
@@ -135,6 +146,7 @@ class CalloutSettings {
     int? musicDip,
     double? restoreSeconds,
     bool? chime,
+    int? repeat,
   }) => CalloutSettings(
     enabled: enabled ?? this.enabled,
     voice: voice ?? this.voice,
@@ -142,6 +154,7 @@ class CalloutSettings {
     musicDip: musicDip ?? this.musicDip,
     restoreSeconds: restoreSeconds ?? this.restoreSeconds,
     chime: chime ?? this.chime,
+    repeat: repeat ?? this.repeat,
   );
 
   @override
@@ -152,10 +165,11 @@ class CalloutSettings {
       other.volume == volume &&
       other.musicDip == musicDip &&
       other.restoreSeconds == restoreSeconds &&
-      other.chime == chime;
+      other.chime == chime &&
+      other.repeat == repeat;
 
   @override
-  int get hashCode => Object.hash(enabled, voice, volume, musicDip, restoreSeconds, chime);
+  int get hashCode => Object.hash(enabled, voice, volume, musicDip, restoreSeconds, chime, repeat);
 }
 
 /// One voice the hub offers.
