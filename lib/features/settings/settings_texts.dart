@@ -87,8 +87,8 @@ const kComingInfo = InfoText(
 
 const kReceiptsInfo = InfoText(
   'Receipts',
-  'How the Pi prints the kitchen tickets and the customer receipt. A change is used from the '
-      'next order on, on every tablet.\n\n'
+  'How the Pi prints the kitchen tickets, the customer receipt and the driver reports. A change '
+      'is used from the next order on, on every tablet.\n\n'
       'Change what you like, tap SAVE, then PRINT SAMPLE to see it on paper. RESET TO DEFAULTS '
       'puts everything back to how it came.',
 );
@@ -105,6 +105,23 @@ const kKitchenNumberSizeInfo = InfoText(
   'How big the kitchen number (like 1104) prints at the top of each kitchen ticket. Make it bigger '
       'if the cooks can\'t read it from where they stand.\n\n'
       'Extra large is the standard.',
+);
+
+const kLineSpacingInfo = InfoText(
+  'Line spacing',
+  'Extra space between the lines of an order, on the kitchen tickets and the customer receipt. '
+      'Tap + for more room, - for less (in small printer steps).\n\n'
+      'Item→mod: between an item and its first modifier (like "Large" or "Extra cheese").\n'
+      'Mod→mod: between one modifier and the next.\n'
+      'Item→item: after an item that has no modifiers, before the next item.\n\n'
+      '0 is the standard look. PRINT SAMPLE shows how it reads.',
+);
+
+const kDriverReportSizeInfo = InfoText(
+  'Driver report text size',
+  'How big the driver reports print — at Close batch, at clock out and with PRINT REPORT. '
+      'Smaller saves paper; Large is how they printed before.\n\n'
+      'Normal is the standard.',
 );
 
 const kFooterInfo = InfoText(

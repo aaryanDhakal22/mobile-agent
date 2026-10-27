@@ -220,6 +220,13 @@ class FloorController extends Notifier<FloorState> {
       final a = AutoAssignment.fromJson(ev.json);
       if (a != null) _autoAssigned(a);
     }
+    // Pi 2.3: a clock-out's report printed (or didn't) in the background —
+    // the app-wide toast, once (kept out of the reducer so a refresh's
+    // replay doesn't show it twice).
+    if (ev.event == 'driver.report_printed') {
+      final p = DriverReportPrinted.fromJson(ev.json);
+      if (p != null) _set(state.copyWith(toast: p.toToast(), toasts: state.toasts + 1));
+    }
   }
 
   /// An SSE frame, as the stream delivers it (tests).
@@ -620,8 +627,8 @@ class FloorController extends Notifier<FloorState> {
   Future<Driver> clockIn(String id) => _clock(id, (c) => c.clockIn(id), (d) => d);
 
   /// Clock out (only while available). 409 `driver_not_available` = out on a
-  /// run (or already off). A Pi ≥ 2.2.3 prints the driver's report on the way
-  /// ([ClockOutResult.reportPrint]).
+  /// run (or already off). A Pi ≥ 2.3 prints the driver's report in the
+  /// background ([ClockOutResult.reportPrinting]; SSE `driver.report_printed`).
   Future<ClockOutResult> clockOut(String id) => _clock(id, (c) => c.clockOut(id), (r) => r.driver);
 
   Future<T> _clock<T>(String id, Future<T> Function(AgentClient) op, Driver Function(T) driverOf) async {

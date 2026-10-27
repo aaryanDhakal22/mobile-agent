@@ -1,7 +1,8 @@
 // Quibase 1.7.3 (with agent 2.2.3): PRINT REPORT on every driver row (one
 // driver's report for the open batch so far), clock-out printing the report
-// (`report_print` on the clock-out answer), and the driver report's POS
-// cross-check fields.
+// (`report_printing` on the clock-out answer; the outcome arrives as SSE
+// `driver.report_printed` — driver_reports_followups_test), and the driver
+// report's POS cross-check fields.
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -209,42 +210,21 @@ void main() {
   });
 
   group('api: clock-out', () {
-    test('without report_print (older Pi): the driver, nothing else', () async {
+    test('without report_printing (older Pi): the driver, nothing else', () async {
       final (c, calls, _) = _pi((_) => _json({..._juma, 'status': 'off'}));
       final r = await c.clockOut('d-juma');
       expect(calls, ['POST /api/drivers/d-juma/clock-out']);
       expect(r.driver.id, 'd-juma');
       expect(r.driver.isOff, isTrue);
-      expect(r.reportPrint, isNull);
+      expect(r.reportPrinting, isFalse);
     });
 
-    test('with report_print: printed (and rerouted) or not', () async {
-      final (c, _, _) = _pi(
-        (_) => _json({
-          ..._juma,
-          'status': 'off',
-          'report_print': {'printed': true, 'driver_name': 'Juma', 'printed_on': 'Front', 'rerouted_from': 'Kitchen'},
-        }),
-      );
+    test('report_printing: true — the Pi prints in the background', () async {
+      final (c, _, _) = _pi((_) => _json({..._juma, 'status': 'off', 'report_printing': true}));
       final r = await c.clockOut('d-juma');
       expect(r.driver.name, 'Juma');
       expect(r.driver.isOff, isTrue);
-      expect(r.reportPrint!.printed, isTrue);
-      expect(r.reportPrint!.printedOn, 'Front');
-      expect(r.reportPrint!.reroutedFrom, 'Kitchen');
-
-      final (c2, _, _) = _pi(
-        (_) => _json({
-          ..._juma,
-          'status': 'off',
-          'report_print': {'printed': false, 'driver_name': 'Juma', 'error': 'printer offline', 'code': 'nothing_printed'},
-        }),
-      );
-      final r2 = await c2.clockOut('d-juma');
-      expect(r2.reportPrint!.printed, isFalse);
-      expect(r2.reportPrint!.error, 'printer offline');
-      expect(r2.reportPrint!.code, 'nothing_printed');
-      expect(r2.reportPrint!.reroutedFrom, isNull);
+      expect(r.reportPrinting, isTrue);
     });
 
     test('a 409 still throws as before', () async {
@@ -302,19 +282,8 @@ void main() {
         driverReportPrintedMessage('Juma', printedOn: 'Front', reroutedFrom: 'Kitchen'),
         "Printed Juma's report on Front (Kitchen was down)",
       );
-      expect(clockedOutMessage('Juma', null), ('Juma clocked out', false));
-      expect(
-        clockedOutMessage('Juma', const ReportPrintOutcome(printed: true, driverName: 'Juma')),
-        ("Juma clocked out · Printed Juma's report", false),
-      );
-      expect(
-        clockedOutMessage('Juma', const ReportPrintOutcome(printed: false, error: 'printer offline')),
-        ("Juma clocked out — report didn't print: printer offline", true),
-      );
-      expect(
-        clockedOutMessage('Juma', const ReportPrintOutcome(printed: false)),
-        ("Juma clocked out — report didn't print", true),
-      );
+      expect(clockedOutMessage('Juma'), 'Juma clocked out');
+      expect(clockedOutMessage('Juma', reportPrinting: true), 'Juma clocked out — printing his report…');
     });
   });
 
@@ -374,14 +343,10 @@ void main() {
       }
     });
 
-    testWidgets('clock-out that printed the report says so', (tester) async {
+    testWidgets('clock-out while the Pi prints the report: says it is printing', (tester) async {
       final (client, calls, _) = _pi((req) {
         if (req.url.path.endsWith('/clock-out')) {
-          return _json({
-            ..._juma,
-            'status': 'off',
-            'report_print': {'printed': true, 'driver_name': 'Juma', 'printed_on': 'Front'},
-          });
+          return _json({..._juma, 'status': 'off', 'report_printing': true});
         }
         return _json(_roster);
       });
@@ -389,32 +354,8 @@ void main() {
       await tester.tap(find.text('CLOCK OUT').first);
       await _settle(tester);
       expect(calls, contains('POST /api/drivers/d-juma/clock-out'));
-      expect(find.text("Juma clocked out · Printed Juma's report"), findsOneWidget);
+      expect(find.text('Juma clocked out — printing his report…'), findsOneWidget);
       expect(_snackColor(tester), isNot(QuiccColors.statusVoided));
-      await tester.pumpWidget(const SizedBox());
-    });
-
-    testWidgets("clock-out whose report didn't print: an error toast with why", (tester) async {
-      final (client, _, _) = _pi((req) {
-        if (req.url.path.endsWith('/clock-out')) {
-          return _json({
-            ..._juma,
-            'status': 'off',
-            'report_print': {
-              'printed': false,
-              'driver_name': 'Juma',
-              'error': 'printer offline',
-              'code': 'nothing_printed',
-            },
-          });
-        }
-        return _json(_roster);
-      });
-      await _pumpPane(tester, client);
-      await tester.tap(find.text('CLOCK OUT').first);
-      await _settle(tester);
-      expect(find.text("Juma clocked out — report didn't print: printer offline"), findsOneWidget);
-      expect(_snackColor(tester), QuiccColors.statusVoided);
       await tester.pumpWidget(const SizedBox());
     });
 

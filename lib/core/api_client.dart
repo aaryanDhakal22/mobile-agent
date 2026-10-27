@@ -827,12 +827,11 @@ class AgentClient {
       Driver.fromJson(jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(id)}/clock-in')));
 
   /// `available` → `off` (closes the shift). 409 `driver_not_available` = off
-  /// already, or out on a run. A Pi ≥ 2.2.3 prints the driver's report first
-  /// and adds `report_print` ([ClockOutResult.reportPrint]) — hence
-  /// [printTimeout].
-  Future<ClockOutResult> clockOut(String id) async => ClockOutResult.fromJson(
-    jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(id)}/clock-out', timeout: printTimeout)),
-  );
+  /// already, or out on a run. A Pi ≥ 2.3 answers at once with
+  /// `report_printing: true` ([ClockOutResult.reportPrinting]) and prints the
+  /// driver's report in the background (SSE `driver.report_printed`).
+  Future<ClockOutResult> clockOut(String id) async =>
+      ClockOutResult.fromJson(jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(id)}/clock-out')));
 
   /// Shift records of the last [days] days, newest first.
   Future<List<Shift>> listShifts({int days = 7}) async =>

@@ -275,7 +275,8 @@ class _ReceiptSettingsCardState extends ConsumerState<ReceiptSettingsCard> {
     return SettingsCard(
       title: 'Receipts',
       info: kReceiptsInfo,
-      subtitle: 'How the kitchen tickets and the customer receipt print. Used from the next order on.',
+      subtitle:
+          'How the kitchen tickets, the customer receipt and the driver reports print. Used from the next order on.',
       children: [_body(context)],
     );
   }
@@ -315,6 +316,36 @@ class _ReceiptSettingsCardState extends ConsumerState<ReceiptSettingsCard> {
             label: (s) => s.label,
             selected: d.kitchenNumberSize,
             onChanged: (v) => _edit((p) => p.copyWith(kitchenNumberSize: v)),
+          ),
+        ),
+        _Setting(
+          label: 'Line spacing',
+          info: kLineSpacingInfo,
+          child: Wrap(
+            key: const ValueKey('receipt-spacing'),
+            spacing: 28,
+            runSpacing: 8,
+            children: [
+              _Stepper(
+                id: 'item_mod',
+                label: 'Item→mod',
+                value: d.spacing.itemMod,
+                onStep: (by) => _edit((p) => p.copyWith(spacing: p.spacing.copyWith(itemMod: p.spacing.itemMod + by))),
+              ),
+              _Stepper(
+                id: 'mod_mod',
+                label: 'Mod→mod',
+                value: d.spacing.modMod,
+                onStep: (by) => _edit((p) => p.copyWith(spacing: p.spacing.copyWith(modMod: p.spacing.modMod + by))),
+              ),
+              _Stepper(
+                id: 'item_item',
+                label: 'Item→item',
+                value: d.spacing.itemItem,
+                onStep: (by) =>
+                    _edit((p) => p.copyWith(spacing: p.spacing.copyWith(itemItem: p.spacing.itemItem + by))),
+              ),
+            ],
           ),
         ),
         QuiccSpace.gapSm,
@@ -389,6 +420,16 @@ class _ReceiptSettingsCardState extends ConsumerState<ReceiptSettingsCard> {
           info: kExtraPaperInfo,
           value: d.extraPaper,
           onChanged: (v) => _edit((p) => p.copyWith(extraPaper: v)),
+        ),
+        QuiccSpace.gapSm,
+        const _Heading('Driver reports'),
+        _Setting(
+          label: 'Text size',
+          info: kDriverReportSizeInfo,
+          child: _SizeSlider(
+            selected: d.driverReportSize,
+            onChanged: (v) => _edit((p) => p.copyWith(driverReportSize: v)),
+          ),
         ),
         QuiccSpace.gapMd,
         if (_dirty)
@@ -562,6 +603,100 @@ class _Choice<T> extends StatelessWidget {
       selected: {selected},
       onSelectionChanged: (s) => onChanged(s.first),
     ),
+  );
+}
+
+/// Small / Normal / Large on a three-stop slider, the names under it.
+class _SizeSlider extends StatelessWidget {
+  final DriverReportSize selected;
+  final ValueChanged<DriverReportSize> onChanged;
+  const _SizeSlider({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    const values = DriverReportSize.values;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Slider(
+              key: const ValueKey('receipt-driver-report-size'),
+              value: selected.index.toDouble(),
+              max: (values.length - 1).toDouble(),
+              divisions: values.length - 1,
+              label: selected.label,
+              onChanged: (v) {
+                final next = values[v.round()];
+                if (next != selected) onChanged(next);
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  for (final s in values)
+                    Text(
+                      s.label,
+                      style: QuiccType.text(
+                        QuiccType.body,
+                        weight: s == selected ? FontWeight.w700 : FontWeight.w400,
+                        color: s == selected ? null : context.palette.textMuted,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "Item→mod  −  8  +": extra dots, in [kSpacingStepDots] steps, 0 to
+/// [kSpacingMaxDots].
+class _Stepper extends StatelessWidget {
+  final String id;
+  final String label;
+  final int value;
+
+  /// Moves the value by ± [kSpacingStepDots] (applied to the latest draft,
+  /// so quick taps all count; clamped to 0–[kSpacingMaxDots]).
+  final ValueChanged<int> onStep;
+  const _Stepper({required this.id, required this.label, required this.value, required this.onStep});
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(label, style: QuiccType.text(QuiccType.body, weight: FontWeight.w600)),
+      const SizedBox(width: 4),
+      IconButton(
+        key: ValueKey('spacing-$id-minus'),
+        tooltip: 'Less space',
+        onPressed: value > 0 ? () => onStep(-kSpacingStepDots) : null,
+        icon: const Icon(Icons.remove_circle_outline),
+      ),
+      SizedBox(
+        width: 32,
+        child: Text(
+          '$value',
+          key: ValueKey('spacing-$id-value'),
+          textAlign: TextAlign.center,
+          style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
+        ),
+      ),
+      IconButton(
+        key: ValueKey('spacing-$id-plus'),
+        tooltip: 'More space',
+        onPressed: value < kSpacingMaxDots ? () => onStep(kSpacingStepDots) : null,
+        icon: const Icon(Icons.add_circle_outline),
+      ),
+    ],
   );
 }
 

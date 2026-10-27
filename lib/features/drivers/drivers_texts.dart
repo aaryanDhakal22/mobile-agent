@@ -8,7 +8,7 @@ const kClockInfo = InfoText(
       'sent out with orders.\n\n'
       'Tap CLOCK OUT when they go home. You can only clock out a driver who is here — if they are '
       'out on a run, tap I HAVE RETURNED first. Clocking out prints their driver report on the '
-      'receipt printer.\n\n'
+      'receipt printer; a message says when it has printed.\n\n'
       'PRINT REPORT prints one driver\'s report for this batch so far, any time: their deliveries, '
       'the cash they collected, their tips and what they owe the store. When the store uses the POS, '
       'the Pi checks the POS\'s deliveries for that driver too and marks anything only one side had.\n\n'

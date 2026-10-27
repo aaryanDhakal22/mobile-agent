@@ -18,14 +18,6 @@ import 'drivers_texts.dart';
 String removeDriverOutMessage(String name) =>
     "Can't remove a driver who is out on a run — tap I HAVE RETURNED for $name on Deliveries first.";
 
-/// "Printed Juma's report" — plus where, when the Pi failed over from
-/// [reroutedFrom] (" on Front (Kitchen was down)").
-String driverReportPrintedMessage(String name, {String printedOn = '', String? reroutedFrom}) {
-  final base = "Printed $name's report";
-  if (reroutedFrom == null || reroutedFrom.isEmpty) return base;
-  return printedOn.isEmpty ? '$base ($reroutedFrom was down)' : '$base on $printedOn ($reroutedFrom was down)';
-}
-
 /// What PRINT REPORT says when the Pi refused (null = the generic error).
 String? driverReportErrorMessage(String name, Object e) => switch (e) {
   AgentException(code: kDriverReportUnsupported) => "This Pi needs an update to print one driver's report.",
@@ -35,18 +27,11 @@ String? driverReportErrorMessage(String name, Object e) => switch (e) {
   _ => null,
 };
 
-/// The toast after a clock-out: (message, error). A Pi ≥ 2.2.3 printed (or
-/// tried to print) the driver's report; an older Pi says nothing about it.
-(String, bool) clockedOutMessage(String name, ReportPrintOutcome? p) {
-  if (p == null) return ('$name clocked out', false);
-  final who = p.driverName.isEmpty ? name : p.driverName;
-  if (p.printed) {
-    final printed = driverReportPrintedMessage(who, printedOn: p.printedOn, reroutedFrom: p.reroutedFrom);
-    return ('$name clocked out · $printed', false);
-  }
-  final why = p.error.isEmpty ? '' : ': ${p.error}';
-  return ("$name clocked out — report didn't print$why", true);
-}
+/// The toast after a clock-out. A Pi ≥ 2.3 prints the driver's report in the
+/// background ([reportPrinting]); how that went comes later as an app-wide
+/// toast (SSE `driver.report_printed`).
+String clockedOutMessage(String name, {bool reportPrinting = false}) =>
+    reportPrinting ? '$name clocked out — printing his report…' : '$name clocked out';
 
 /// Driver roster in queue order. Drivers clock in when they arrive (joining
 /// the back of the queue) and out when they leave; the first available
@@ -150,10 +135,7 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
     setState(() => _busy.add(d.id));
     try {
       final r = await _floor.clockOut(d.id);
-      if (mounted) {
-        final (msg, error) = clockedOutMessage(d.name, r.reportPrint);
-        toast(context, msg, error: error);
-      }
+      if (mounted) toast(context, clockedOutMessage(d.name, reportPrinting: r.reportPrinting));
     } catch (e) {
       if (!mounted) return;
       final msg = switch (e) {

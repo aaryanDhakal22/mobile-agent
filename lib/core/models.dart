@@ -1599,12 +1599,20 @@ class LinkResult {
 class DriverReportLine {
   final String orderId;
   final int? kitchenNumber;
-  final String customer; // "Erik D."
+  final String customer; // "Erik D." — never shown on the report preview
   final String address;
   final int tipCents;
   final bool cash;
   final int cashCents;
   final int totalCents;
+
+  /// (Pi 2.3) House number + street only (no apt / city); '' from an older Pi.
+  final String street;
+
+  /// (Pi 2.3) The tip on the order (cash or card) and what the slip says in
+  /// total (card = total + tip, cash = the total); null from an older Pi.
+  final int? orderTipCents;
+  final int? slipTotalCents;
 
   /// (Pi 2.2.3) The POS check behind the line, when the Pi cross-checked
   /// with the POS: its reference and check # (null = none).
@@ -1638,7 +1646,21 @@ class DriverReportLine {
     this.note = '',
     this.outAt,
     this.deliveredAt,
+    this.street = '',
+    this.orderTipCents,
+    this.slipTotalCents,
   });
+
+  /// The number printed on the slip, without "#": the kitchen # for an
+  /// online order, the POS check # for a POS one (whichever exists).
+  int? get ticketNumber => source == 'pos' ? (displayNumber ?? kitchenNumber) : (kitchenNumber ?? displayNumber);
+
+  /// The street the slip shows ([address] from an older Pi).
+  String get streetOrAddress => street.isNotEmpty ? street : address;
+
+  /// "Tip:" and "Total:" on the slip (an older Pi: [tipCents] / [totalCents]).
+  int get slipTipCents => orderTipCents ?? tipCents;
+  int get slipTotal => slipTotalCents ?? totalCents;
 
   factory DriverReportLine.fromJson(Map<String, dynamic> json) => DriverReportLine(
     orderId: jStr(json['order_id']),
@@ -1656,6 +1678,9 @@ class DriverReportLine {
     note: jStr(json['note']).trim(),
     outAt: jDate(json['out_at']),
     deliveredAt: jDate(json['delivered_at']),
+    street: jStr(json['street']).trim(),
+    orderTipCents: jIntOrNull(json['order_tip_cents']),
+    slipTotalCents: jIntOrNull(json['slip_total_cents']),
   );
 }
 
@@ -1698,6 +1723,10 @@ class DriverReport {
   final int tipAfterTaxCents;
   final int owedCents;
 
+  /// [owedCents] rounded to whole dollars (what changes hands); a Pi that
+  /// doesn't send `owed_rounded_cents` → [owedCents].
+  final int owedRoundedCents;
+
   /// (Pi 2.2.3) The driver's POS Employee Number, the POS cross-check (null
   /// = no POS hub, or an older Pi) and the Pi's remarks.
   final String? driverPosNumber;
@@ -1714,10 +1743,11 @@ class DriverReport {
     this.tipCents = 0,
     this.tipAfterTaxCents = 0,
     this.owedCents = 0,
+    int? owedRoundedCents,
     this.driverPosNumber,
     this.pos,
     this.notes = const [],
-  });
+  }) : owedRoundedCents = owedRoundedCents ?? owedCents;
 
   factory DriverReport.fromJson(Map<String, dynamic> json) => DriverReport(
     batchId: jInt(json['batch_id']),
@@ -1729,6 +1759,7 @@ class DriverReport {
     tipCents: jInt(json['tip_cents']),
     tipAfterTaxCents: jInt(json['tip_after_tax_cents']),
     owedCents: jInt(json['owed_cents']),
+    owedRoundedCents: jIntOrNull(json['owed_rounded_cents']),
     driverPosNumber: jStrOrNull(jStr(json['driver_pos_number']).trim()),
     pos: json['pos'] is Map ? DriverReportPos.fromJson(jMap(json['pos'])) : null,
     notes: [
@@ -1781,48 +1812,85 @@ class DriverReportPrint {
   );
 }
 
-/// What clock-out did with the driver's report (Pi 2.2.3 prints it): the
-/// `report_print` key on the clock-out answer.
-class ReportPrintOutcome {
-  final bool printed;
+/// "Printed Juma's report" — plus where, when the Pi failed over from
+/// [reroutedFrom] (" on Front (Kitchen was down)").
+String driverReportPrintedMessage(String name, {String printedOn = '', String? reroutedFrom}) {
+  final base = "Printed $name's report";
+  if (reroutedFrom == null || reroutedFrom.isEmpty) return base;
+  return printedOn.isEmpty ? '$base ($reroutedFrom was down)' : '$base on $printedOn ($reroutedFrom was down)';
+}
+
+/// SSE `driver.report_printed` (Pi 2.3): the report a clock-out printed in
+/// the background — printed, or why not (`code` `nothing_printed` /
+/// `report_failed`).
+class DriverReportPrinted {
+  final String driverId;
   final String driverName;
+  final String trigger;
+  final bool printed;
   final String printedOn;
   final String? reroutedFrom;
-
-  /// Why it didn't print (e.g. "printer offline") and its code.
   final String error;
   final String? code;
 
-  const ReportPrintOutcome({
-    required this.printed,
+  const DriverReportPrinted({
+    this.driverId = '',
     this.driverName = '',
+    this.trigger = '',
+    required this.printed,
     this.printedOn = '',
     this.reroutedFrom,
     this.error = '',
     this.code,
   });
 
-  factory ReportPrintOutcome.fromJson(Map<String, dynamic> json) => ReportPrintOutcome(
-    printed: jBool(json['printed']),
-    driverName: jStr(json['driver_name']),
-    printedOn: jStr(json['printed_on']),
-    reroutedFrom: jStrOrNull(jStr(json['rerouted_from']).trim()),
-    error: jStr(json['error']).trim(),
-    code: jStrOrNull(json['code']),
-  );
+  static DriverReportPrinted? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final j = jMap(raw);
+    return DriverReportPrinted(
+      driverId: jStr(j['driver_id']),
+      driverName: jStr(j['driver_name']).trim(),
+      trigger: jStr(j['trigger']),
+      printed: jBool(j['printed']),
+      printedOn: jStr(j['printed_on']),
+      reroutedFrom: jStrOrNull(jStr(j['rerouted_from']).trim()),
+      error: jStr(j['error']).trim(),
+      code: jStrOrNull(j['code']),
+    );
+  }
+
+  /// The app-wide toast: "Printed Juma's report" (info), or "Juma's report
+  /// didn't print — check the receipt printer" with the Pi's reason (red).
+  IntegrationToast toToast() {
+    final name = driverName.isEmpty ? 'The driver' : driverName;
+    if (printed) {
+      return IntegrationToast(
+        code: 'driver.report_printed',
+        text: driverReportPrintedMessage(name, printedOn: printedOn, reroutedFrom: reroutedFrom),
+        severity: Severity.info,
+      );
+    }
+    final who = driverName.isEmpty ? "The driver's" : "$driverName's";
+    final short = error.length > 60 ? '${error.substring(0, 57)}...' : error;
+    final why = short.isEmpty ? '' : ' ($short)';
+    return IntegrationToast(
+      code: 'driver.report_printed',
+      text: "$who report didn't print — check the receipt printer$why",
+      severity: Severity.serious,
+    );
+  }
 }
 
-/// `POST /api/drivers/{id}/clock-out`: the driver (as before) and — from a
-/// Pi >= 2.2.3 with printers — what happened to their report.
+/// `POST /api/drivers/{id}/clock-out`: the driver (as before) and whether a
+/// Pi >= 2.3 is printing their report in the background (`report_printing`;
+/// the outcome comes as SSE `driver.report_printed`).
 class ClockOutResult {
   final Driver driver;
-  final ReportPrintOutcome? reportPrint;
-  const ClockOutResult(this.driver, {this.reportPrint});
+  final bool reportPrinting;
+  const ClockOutResult(this.driver, {this.reportPrinting = false});
 
-  factory ClockOutResult.fromJson(Map<String, dynamic> json) => ClockOutResult(
-    Driver.fromJson(json),
-    reportPrint: json['report_print'] is Map ? ReportPrintOutcome.fromJson(jMap(json['report_print'])) : null,
-  );
+  factory ClockOutResult.fromJson(Map<String, dynamic> json) =>
+      ClockOutResult(Driver.fromJson(json), reportPrinting: jBool(json['report_printing']));
 }
 
 /// A Quibase release the agent has cached for its tablets.
