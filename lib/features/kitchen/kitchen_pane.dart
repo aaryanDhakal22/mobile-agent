@@ -690,7 +690,7 @@ class _CardBar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (so.status.paid) ...[const PaidBadge(), QuiccSpace.gapSm],
-                FulfillmentTag(so.order.fulfillment.type, size: QuiccType.label, color: ink),
+                FulfillmentTag(so.order.fulfillment.type, size: QuiccType.label, color: ink, counter: so.isCounter),
               ],
             ),
           ),

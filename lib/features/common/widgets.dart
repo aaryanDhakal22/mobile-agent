@@ -148,12 +148,13 @@ class StatePill extends StatelessWidget {
   }
 }
 
-/// Pickup / delivery / dine-in tag.
+/// Pickup / delivery / dine-in tag; [counter] = a POS counter check (COUNTER).
 class FulfillmentTag extends StatelessWidget {
   final FulfillmentType type;
   final Color? color;
   final double size;
-  const FulfillmentTag(this.type, {super.key, this.color, this.size = 13});
+  final bool counter;
+  const FulfillmentTag(this.type, {super.key, this.color, this.size = 13, this.counter = false});
 
   @override
   Widget build(BuildContext context) {
@@ -162,10 +163,10 @@ class FulfillmentTag extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(fulfillmentIcon(type), size: size + 5, color: c),
+        Icon(counter ? Icons.point_of_sale_outlined : fulfillmentIcon(type), size: size + 5, color: c),
         const SizedBox(width: 6),
         Text(
-          type.label,
+          counter ? 'COUNTER' : type.label,
           style: TextStyle(color: c, fontSize: size, fontWeight: FontWeight.w700, letterSpacing: 1.2),
         ),
       ],

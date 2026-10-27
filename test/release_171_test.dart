@@ -977,6 +977,29 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('1.8.3: a POS counter check is a plain COUNTER ticket — no lava, no waiting line', (tester) async {
+      final m = jsonDecode(arrivedPickupJson) as Map<String, dynamic>;
+      final now = timeNow().toUtc();
+      (m['order'] as Map)['id'] = 'ctr';
+      ((m['order'] as Map)['fulfillment'] as Map)['type'] = 'dine_in';
+      (m['status'] as Map)
+        ..['state'] = 'accepted'
+        ..['paid'] = true
+        ..['ext_source'] = 'softtouch'
+        ..['display_number'] = 298
+        ..['accepted_at'] = now.subtract(const Duration(minutes: 3)).toIso8601String()
+        ..['estimated_ready_at'] = now.add(const Duration(minutes: 10)).toIso8601String();
+      await board(tester, [pickup('paid', 1102), StoredOrder.fromJson(m)]);
+      expect(inCard('ctr', find.text('COUNTER')), findsOneWidget);
+      expect(inCard('ctr', find.text('DINE-IN')), findsNothing);
+      expect(inCard('ctr', find.byKey(const ValueKey('customer-waiting'))), findsNothing);
+      expect(inCard('ctr', find.byKey(const ValueKey('waiting-lava'))), findsNothing);
+      expect(inCard('ctr', find.byKey(const ValueKey('paid-wave'))), findsNothing);
+      // A pickup paid at the store still glows.
+      expect(inCard('paid', find.byKey(const ValueKey('customer-waiting'))), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('switched off: the plain ticket; offstage: no frames', (tester) async {
       await board(tester, [pickup('p', 1102)], wave: false);
       expect(find.byKey(const ValueKey('customer-waiting')), findsNothing);
