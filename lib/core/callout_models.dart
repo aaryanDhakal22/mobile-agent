@@ -215,6 +215,9 @@ class CalloutHubReport {
   final int renderingTotal;
   final CalloutSpoken? last;
 
+  /// Hub 0.2.2: it can make a preview for a tablet (`callout.render`).
+  final bool preview;
+
   const CalloutHubReport({
     this.voice = '',
     this.defaultVoice = '',
@@ -225,6 +228,7 @@ class CalloutHubReport {
     this.renderingDone = 0,
     this.renderingTotal = 0,
     this.last,
+    this.preview = false,
   });
 
   static CalloutHubReport? fromJson(Object? raw) {
@@ -241,6 +245,7 @@ class CalloutHubReport {
       renderingDone: jInt(r['done']),
       renderingTotal: jInt(r['total']),
       last: CalloutSpoken.fromJson(j['last']),
+      preview: jBool(j['preview']),
     );
   }
 
@@ -252,11 +257,21 @@ class CalloutView {
   final CalloutSettings settings;
   final bool hubConnected;
   final CalloutHubReport? hub;
-  const CalloutView({this.settings = const CalloutSettings(), this.hubConnected = false, this.hub});
+
+  /// Pi 2.3.2: `POST /api/callout/preview` exists — the card shows ON THIS
+  /// TABLET (an older Pi: only ON THE STORE SPEAKER).
+  final bool preview;
+  const CalloutView({
+    this.settings = const CalloutSettings(),
+    this.hubConnected = false,
+    this.hub,
+    this.preview = false,
+  });
 
   factory CalloutView.fromJson(Map<String, dynamic> j) => CalloutView(
     settings: CalloutSettings.fromJson(jMap(j['settings'])),
     hubConnected: jBool(j['hub_connected']),
     hub: CalloutHubReport.fromJson(j['hub']),
+    preview: jBool(j['preview']),
   );
 }

@@ -4,7 +4,7 @@ import 'home_nav.dart';
 
 /// The rail's three modes (1.6.0), five destinations each (1.6.1). The `q`
 /// switches between kitchen and store; a long press opens developer mode
-/// after the manager login.
+/// behind the developer PIN.
 enum RailMode { kitchen, store, dev }
 
 /// What a rail destination looks like.

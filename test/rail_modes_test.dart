@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:mobile_agent/core/alarm.dart';
 import 'package:mobile_agent/core/floor_state.dart';
 import 'package:mobile_agent/core/models.dart';
@@ -64,13 +62,11 @@ const _paired = <String, Object>{
 };
 
 /// Logins the fake Pi accepts.
-const _good = ('manager', 'secret');
 
 Future<ProviderContainer> _pumpHome(
   WidgetTester tester, {
   Map<String, Object> prefs = const {},
   bool motion = true,
-  List<String>? logins,
   bool ringingHidden = false,
 }) async {
   tester.view.physicalSize = const Size(1280, 800);
@@ -89,10 +85,6 @@ Future<ProviderContainer> _pumpHome(
       batchesProvider.overrideWith((ref) async => const [Batch(id: 7)]),
       driverShiftsProvider.overrideWith((ref) async => const []),
       if (ringingHidden) alarmProvider.overrideWith(_HiddenRing.new),
-      managerLoginProvider.overrideWithValue(({required address, required username, required password}) async {
-        logins?.add('$username:$password@$address');
-        if ((username, password) != _good) throw const DevLoginException('Wrong username or password.');
-      }),
     ],
   );
   addTearDown(c.dispose);
@@ -128,11 +120,15 @@ Future<void> _switchDone(WidgetTester tester) async {
 Future<void> _unlock(WidgetTester tester) async {
   await tester.longPress(_q);
   await tester.pump(const Duration(milliseconds: 400));
-  await tester.enterText(find.byKey(const ValueKey('dev-username')), _good.$1);
-  await tester.enterText(find.byKey(const ValueKey('dev-password')), _good.$2);
-  await tester.tap(find.text('UNLOCK'));
-  await tester.pump();
+  await _typePin(tester, kDevPin);
   await _switchDone(tester);
+}
+
+Future<void> _typePin(WidgetTester tester, String pin) async {
+  for (final d in pin.split('')) {
+    await tester.tap(find.byKey(ValueKey('dev-pin-digit-$d')));
+    await tester.pump();
+  }
 }
 
 void main() {
@@ -191,26 +187,37 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('long-press q asks for the manager login; a wrong one stays locked', (tester) async {
-      final logins = <String>[];
-      final c = await _pumpHome(tester, logins: logins);
+    testWidgets('long-press q asks for the developer PIN; a wrong one shakes, clears and stays locked', (tester) async {
+      final c = await _pumpHome(tester);
       await tester.longPress(_q);
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('Developer mode'), findsOneWidget);
-      expect(find.byKey(const ValueKey('dev-password')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dev-pin-pad')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dev-username')), findsNothing, reason: 'no manager login any more');
 
-      await tester.enterText(find.byKey(const ValueKey('dev-username')), 'manager');
-      await tester.enterText(find.byKey(const ValueKey('dev-password')), 'nope');
-      await tester.tap(find.text('UNLOCK'));
+      // Two digits fill two dots; backspace takes one off.
+      await _typePin(tester, '10');
+      Color? fill(int i) =>
+          (tester.widget<Container>(find.byKey(ValueKey('dev-pin-dot-$i'))).decoration! as BoxDecoration).color;
+      expect(fill(1), isNot(Colors.transparent));
+      await tester.tap(find.byKey(const ValueKey('dev-pin-back')));
       await tester.pump();
+      expect(fill(1), Colors.transparent);
+      expect(fill(0), isNot(Colors.transparent));
+      await tester.tap(find.byKey(const ValueKey('dev-pin-back')));
+      await tester.pump();
+
+      await _typePin(tester, '1234');
       await tester.pump(const Duration(milliseconds: 100));
-      expect(find.text('Wrong username or password.'), findsOneWidget);
+      expect(find.byKey(const ValueKey('dev-pin-wrong')), findsOneWidget);
       expect(c.read(devGateProvider), isFalse);
-      expect(logins.single, 'manager:nope@http://192.168.1.219:8080');
-
-      await tester.enterText(find.byKey(const ValueKey('dev-password')), 'secret');
-      await tester.tap(find.text('UNLOCK'));
-      await tester.pump();
+      for (var i = 0; i < 4; i++) {
+        expect(fill(i), Colors.transparent, reason: 'cleared after a wrong PIN');
+      }
+      expect(c.read(devLogProvider).map((e) => e.text), contains('Developer PIN wrong'));
+      await tester.pump(const Duration(milliseconds: 500)); // the shake ends
+      // No lockout: the right PIN still works at once.
+      await _typePin(tester, kDevPin);
       await _switchDone(tester);
       expect(c.read(devGateProvider), isTrue);
       expect(c.read(homeNavProvider), HomeDestination.connections);
@@ -220,6 +227,19 @@ void main() {
       expect(find.byType(ConnectionsScreen), findsOneWidget);
       expect(tester.takeException(), isNull);
       c.read(devGateProvider.notifier).lock();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the PIN pad cancels without unlocking', (tester) async {
+      final c = await _pumpHome(tester);
+      await tester.longPress(_q);
+      await tester.pump(const Duration(milliseconds: 400));
+      await _typePin(tester, '10');
+      await tester.tap(find.byKey(const ValueKey('dev-pin-cancel')));
+      await _switchDone(tester);
+      expect(find.byKey(const ValueKey('dev-pin-pad')), findsNothing);
+      expect(c.read(devGateProvider), isFalse);
+      expect(c.read(homeNavProvider), HomeDestination.kitchen);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -391,7 +411,16 @@ void main() {
       );
       await tester.pump();
       final list = find.byType(Scrollable).first;
-      for (final key in ['group-deliveries', 'coming-radius', 'coming-nearby', 'coming-auto-assign', 'group-times', 'group-tickets', 'group-receipts', 'group-look']) {
+      for (final key in [
+        'group-deliveries',
+        'coming-radius',
+        'coming-nearby',
+        'coming-auto-assign',
+        'group-times',
+        'group-tickets',
+        'group-receipts',
+        'group-look',
+      ]) {
         await tester.scrollUntilVisible(find.byKey(ValueKey(key)), 200, scrollable: list);
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
         if (key == 'coming-nearby') expect(find.text('Coming with the next Pi update'), findsAtLeastNWidgets(2));
@@ -416,30 +445,6 @@ void main() {
   });
 
   group('dev gate', () {
-    test('verifyManagerLogin: 200 unlocks (and signs the session out), 401 / 429 say why', () async {
-      final calls = <String>[];
-      final client = MockClient((req) async {
-        calls.add('${req.method} ${req.url.path} ${req.headers['cookie'] ?? ''}');
-        if (req.url.path == '/api/logout') return http.Response('', 204);
-        final body = jsonDecode(req.body) as Map<String, dynamic>;
-        if (body['password'] == 'secret') {
-          return http.Response('{"ok":true}', 200, headers: {'set-cookie': 'quicc_session=abc; Path=/; HttpOnly'});
-        }
-        if (body['password'] == 'many') return http.Response('{"code":"too_many_attempts"}', 429);
-        return http.Response('{"code":"invalid_password"}', 401);
-      });
-      await verifyManagerLogin(address: '192.168.1.219', username: 'm', password: 'secret', client: client);
-      expect(calls, ['POST /api/login ', 'POST /api/logout quicc_session=abc']);
-      await expectLater(
-        verifyManagerLogin(address: '192.168.1.219', username: 'm', password: 'x', client: client),
-        throwsA(isA<DevLoginException>().having((e) => e.message, 'message', contains('Wrong'))),
-      );
-      await expectLater(
-        verifyManagerLogin(address: '192.168.1.219', username: 'm', password: 'many', client: client),
-        throwsA(isA<DevLoginException>().having((e) => e.message, 'message', contains('wait a minute'))),
-      );
-    });
-
     test('the dev log keeps order numbers and state changes, not names', () {
       final c = ProviderContainer();
       addTearDown(c.dispose);

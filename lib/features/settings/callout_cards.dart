@@ -5,7 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/callout_preview_player.dart';
 import '../../core/format.dart';
+import '../../core/friendly_error.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
@@ -21,8 +23,9 @@ const kCalloutInfo = InfoText(
       'says "Order ready for ticket number one oh two" once. Online orders and deliveries are never called, '
       'and no names are said.\n\n'
       'The store hub speaks it on the computer that plays the music, and turns the music down while it '
-      'speaks. Voice: pick one and press PREVIEW to hear it on the store speaker. TEST CALLOUT says any '
-      'number now.\n\n'
+      'speaks. Voice: pick one, then hear it ON THIS TABLET (the store hub makes the words and sends them '
+      'here — nothing plays in the store) or ON THE STORE SPEAKER. Both say the ticket number typed below. '
+      'TEST CALLOUT says that number on the store speaker now.\n\n'
       'Saved on the Pi for every tablet.',
 );
 
@@ -37,6 +40,37 @@ const kFinishingInfo = InfoText(
 /// How often the card asks the Pi for the hub's voices while it is shown
 /// (a voice being prepared shows its progress).
 const Duration kCalloutPoll = Duration(seconds: 10);
+
+/// ON THIS TABLET: how long the Pi may hold each ask for the hub's audio,
+/// and how many asks before giving up (the Pi itself answers 504 after 20 s).
+const Duration kPreviewWait = Duration(seconds: 8);
+const int kPreviewAsks = 4;
+
+/// A preview the hub couldn't make, in plain words.
+String calloutPreviewProblem(Object e) {
+  if (e is AgentException && !e.isNetwork) {
+    switch (e.code) {
+      case 'hub_not_connected':
+        return "The store hub is not connected, so it can't make the voice.";
+      case 'hub_update_needed':
+        return 'The store hub needs an update to play a preview on this tablet.';
+      case 'not_installed':
+        return 'The voice is not installed on the store computer yet.';
+      case 'render_failed':
+        return e.message.isEmpty || e.message.startsWith('HTTP ')
+            ? 'The store computer could not make the voice.'
+            : 'The store computer could not make the voice: ${e.message}';
+      case 'timeout':
+        return "The store hub didn't answer in time — try again.";
+      case 'not_found':
+        return 'The preview expired — try again.';
+      case kSettingsUnsupported:
+        return 'This Pi needs an update to play a preview on this tablet.';
+    }
+    if (e.statusCode == 504) return "The store hub didn't answer in time — try again.";
+  }
+  return FriendlyError.from(e).short;
+}
 
 /// Store settings → Order callout (1.8.0, Pi 2.3.0 + hub 0.2.0): on/off, the
 /// voice with PREVIEW, voice volume, how far the music goes down and how fast
@@ -54,6 +88,8 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
   bool _unsupported = false;
   bool _saving = false;
   bool _speaking = false;
+  bool _preparing = false; // ON THIS TABLET: waiting for the hub's audio
+  String? _previewError;
   Timer? _poll;
   final _number = TextEditingController(text: '102');
 
@@ -97,7 +133,14 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
     try {
       final saved = await ref.read(floorProvider.notifier).saveCallout(next);
       if (!mounted) return;
-      setState(() => _view = CalloutView(settings: saved, hubConnected: _view?.hubConnected ?? false, hub: _view?.hub));
+      setState(
+        () => _view = CalloutView(
+          settings: saved,
+          hubConnected: _view?.hubConnected ?? false,
+          hub: _view?.hub,
+          preview: _view?.preview ?? false,
+        ),
+      );
       toast(context, done);
     } catch (e) {
       if (mounted) toastError(context, e, lead: 'Callout not changed', area: 'settings');
@@ -111,12 +154,57 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
     }
   }
 
-  Future<void> _speak({required String kind, String voice = ''}) async {
+  /// The Ticket # field, or null (with a toast) when it isn't 1–9999.
+  int? _ticket() {
     final n = int.tryParse(_number.text.trim());
     if (n == null || n < 1 || n > 9999) {
       toast(context, 'Type a ticket number from 1 to 9999', error: true);
-      return;
+      return null;
     }
+    return n;
+  }
+
+  /// ON THIS TABLET (Pi 2.3.2 + hub 0.2.2): the Pi asks the hub for the WAV
+  /// (feed callout.render), the hub uploads it to the Pi, we fetch and play
+  /// it here. Nothing plays in the store.
+  Future<void> _previewOnTablet(String voice) async {
+    final n = _ticket();
+    if (n == null) return;
+    final client = ref.read(agentClientProvider);
+    if (client == null) return;
+    setState(() {
+      _preparing = true;
+      _previewError = null;
+    });
+    try {
+      final id = await client.calloutPreview(n, voice: voice);
+      Uint8List? wav;
+      for (var i = 0; i < kPreviewAsks && wav == null; i++) {
+        if (!mounted) return;
+        wav = await client.calloutPreviewAudio(id, wait: kPreviewWait);
+      }
+      if (wav == null) {
+        throw const AgentException("The store hub didn't answer in time", statusCode: 504, code: 'timeout');
+      }
+      if (!mounted) return;
+      setState(() => _preparing = false);
+      try {
+        await ref.read(calloutPreviewPlayerProvider).play(wav);
+      } catch (e) {
+        if (mounted) setState(() => _previewError = 'This tablet could not play the voice.');
+        return;
+      }
+      if (mounted) toast(context, 'Playing #$n on this tablet…');
+    } catch (e) {
+      if (mounted) setState(() => _previewError = calloutPreviewProblem(e));
+    } finally {
+      if (mounted && _preparing) setState(() => _preparing = false);
+    }
+  }
+
+  Future<void> _speak({required String kind, String voice = ''}) async {
+    final n = _ticket();
+    if (n == null) return;
     setState(() => _speaking = true);
     try {
       final connected = await ref.read(agentClientProvider)!.calloutTest(n, voice: voice, kind: kind);
@@ -158,6 +246,7 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
     final voiceId = s.voice.isNotEmpty ? s.voice : (hub?.defaultVoice ?? '');
     final selected = voices.where((v) => v.id == voiceId).firstOrNull;
     final busy = _saving || _view == null;
+    final previewBusy = _speaking || _preparing;
     final label = QuiccType.text(QuiccType.body, weight: FontWeight.w600);
     final hint = QuiccType.text(QuiccType.label, color: palette.textSecondary);
     return SettingsCard(
@@ -183,46 +272,76 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
         const Divider(),
         Text('Voice', style: label),
         QuiccSpace.gapXs,
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                key: const ValueKey('callout-voice'),
-                initialValue: selected?.id,
-                isExpanded: true,
-                hint: Text(voices.isEmpty ? 'The store hub has not sent its voices yet' : 'Pick a voice'),
-                items: [
-                  for (final v in voices)
-                    DropdownMenuItem(
-                      value: v.id,
-                      child: Text(
-                        '${v.label} — ${v.about}${v.ready < v.total ? '  (getting ready ${v.ready}/${v.total})' : ''}',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-                onChanged: busy || voices.isEmpty
-                    ? null
-                    : (id) {
-                        if (id != null && id != voiceId) {
-                          final v = voices.firstWhere((x) => x.id == id);
-                          unawaited(_save(s.copyWith(voice: id), 'Voice: ${v.label}'));
-                        }
-                      },
+        DropdownButtonFormField<String>(
+          key: const ValueKey('callout-voice'),
+          initialValue: selected?.id,
+          isExpanded: true,
+          hint: Text(voices.isEmpty ? 'The store hub has not sent its voices yet' : 'Pick a voice'),
+          items: [
+            for (final v in voices)
+              DropdownMenuItem(
+                value: v.id,
+                child: Text(
+                  '${v.label} — ${v.about}${v.ready < v.total ? '  (getting ready ${v.ready}/${v.total})' : ''}',
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-            QuiccSpace.gapMd,
+          ],
+          onChanged: busy || voices.isEmpty
+              ? null
+              : (id) {
+                  if (id != null && id != voiceId) {
+                    final v = voices.firstWhere((x) => x.id == id);
+                    unawaited(_save(s.copyWith(voice: id), 'Voice: ${v.label}'));
+                  }
+                },
+        ),
+        QuiccSpace.gapSm,
+        Wrap(
+          spacing: QuiccSpace.md,
+          runSpacing: QuiccSpace.sm,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (_view?.preview ?? false)
+              SizedBox(
+                height: 56,
+                child: OutlinedButton.icon(
+                  key: const ValueKey('callout-preview-tablet'),
+                  onPressed: previewBusy || voiceId.isEmpty ? null : () => _previewOnTablet(voiceId),
+                  icon: const Icon(Icons.tablet_android),
+                  label: const Text('ON THIS TABLET'),
+                ),
+              ),
             SizedBox(
               height: 56,
               child: OutlinedButton.icon(
-                key: const ValueKey('callout-preview'),
-                onPressed: _speaking || voiceId.isEmpty ? null : () => _speak(kind: 'preview', voice: voiceId),
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('PREVIEW'),
+                key: const ValueKey('callout-preview-store'),
+                onPressed: previewBusy || voiceId.isEmpty ? null : () => _speak(kind: 'preview', voice: voiceId),
+                icon: const Icon(Icons.speaker_outlined),
+                label: const Text('ON THE STORE SPEAKER'),
               ),
             ),
+            if (_preparing)
+              Row(
+                key: const ValueKey('callout-preview-spinner'),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                  QuiccSpace.gapSm,
+                  Text('Preparing…', style: hint),
+                ],
+              ),
           ],
         ),
+        if (_previewError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: QuiccSpace.xs),
+            child: Text(
+              _previewError!,
+              key: const ValueKey('callout-preview-error'),
+              style: QuiccType.text(QuiccType.label, weight: FontWeight.w600, color: QuiccColors.statusVoided),
+            ),
+          ),
         if (hub != null && hub.rendering)
           Padding(
             padding: const EdgeInsets.only(top: QuiccSpace.xs),
@@ -292,7 +411,7 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
               height: 56,
               child: FilledButton.icon(
                 key: const ValueKey('callout-test'),
-                onPressed: _speaking ? null : () => _speak(kind: 'test'),
+                onPressed: previewBusy ? null : () => _speak(kind: 'test'),
                 icon: const Icon(Icons.campaign_outlined),
                 label: const Text('TEST CALLOUT'),
               ),
@@ -329,7 +448,10 @@ class _HubLine extends StatelessWidget {
     final v = view;
     final (text, color) = switch (v) {
       null => ('Asking the Pi…', context.palette.textMuted),
-      _ when !v.hubConnected => ('The store hub is not connected — callouts wait until it is', QuiccColors.statusFiring),
+      _ when !v.hubConnected => (
+        'The store hub is not connected — callouts wait until it is',
+        QuiccColors.statusFiring,
+      ),
       _ when v.hub == null => ('The store hub needs an update for callouts', QuiccColors.statusFiring),
       _ when !v.hub!.installed => ('The voice is not installed on the store computer yet', QuiccColors.statusFiring),
       _ when v.hub!.error.isNotEmpty => ('Voice problem: ${v.hub!.error}', QuiccColors.statusVoided),
@@ -379,7 +501,10 @@ class _SliderRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        SizedBox(width: 200, child: Text(label, style: QuiccType.text(QuiccType.body, weight: FontWeight.w600))),
+        SizedBox(
+          width: 200,
+          child: Text(label, style: QuiccType.text(QuiccType.body, weight: FontWeight.w600)),
+        ),
         Expanded(
           child: Slider(
             value: value.clamp(min, max),
@@ -392,7 +517,11 @@ class _SliderRow extends StatelessWidget {
         ),
         SizedBox(
           width: 96,
-          child: Text(text, textAlign: TextAlign.right, style: QuiccType.number(QuiccType.body, weight: FontWeight.w700)),
+          child: Text(
+            text,
+            textAlign: TextAlign.right,
+            style: QuiccType.number(QuiccType.body, weight: FontWeight.w700),
+          ),
         ),
       ],
     );
@@ -472,7 +601,9 @@ class _FinishingOrdersCardState extends ConsumerState<FinishingOrdersCard> {
               Expanded(child: Text('Online pickups finish after', style: label)),
               IconButton(
                 key: const ValueKey('finishing-minus'),
-                onPressed: m == null || m <= 0 || _saving ? null : () => setState(() => _minutes = (m - 5).clamp(0, 240)),
+                onPressed: m == null || m <= 0 || _saving
+                    ? null
+                    : () => setState(() => _minutes = (m - 5).clamp(0, 240)),
                 icon: const Icon(Icons.remove_circle_outline),
               ),
               SizedBox(
@@ -486,7 +617,9 @@ class _FinishingOrdersCardState extends ConsumerState<FinishingOrdersCard> {
               ),
               IconButton(
                 key: const ValueKey('finishing-plus'),
-                onPressed: m == null || m >= 240 || _saving ? null : () => setState(() => _minutes = (m + 5).clamp(0, 240)),
+                onPressed: m == null || m >= 240 || _saving
+                    ? null
+                    : () => setState(() => _minutes = (m + 5).clamp(0, 240)),
                 icon: const Icon(Icons.add_circle_outline),
               ),
               QuiccSpace.gapSm,
@@ -497,7 +630,10 @@ class _FinishingOrdersCardState extends ConsumerState<FinishingOrdersCard> {
               ),
             ],
           ),
-          Text('… of being marked ready (default 30; never = wait for Close batch).', style: TextStyle(color: palette.textSecondary)),
+          Text(
+            '… of being marked ready (default 30; never = wait for Close batch).',
+            style: TextStyle(color: palette.textSecondary),
+          ),
           const Divider(),
           Row(
             children: [
