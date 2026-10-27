@@ -2,10 +2,13 @@
 // canonical order snapshot inside it (contract/main.md §10.1). All parsing is
 // defensive — see json.dart.
 
+import 'callout_models.dart';
 import 'delivery_models.dart';
 import 'json.dart';
 import 'polyline.dart';
 import 'time.dart';
+
+export 'callout_models.dart';
 
 // ---------------------------------------------------------------------------
 // Order state
@@ -132,12 +135,14 @@ class StoredOrder {
   bool get isPaid => status.paid || cashDueCents == 0;
 
   /// Earns the paid-not-ready wave on the Kitchen board (while cooking): a
-  /// paid pickup (`paid`, or an online order with no cash due) or a shown
+  /// pickup settled at the store (`paid`; not a prepaid online one) or a shown
   /// POS counter (dine-in) order, which is paid up front.
   bool get paidNotReady {
     if (state != OrderState.accepted || status.boardHidden) return false;
     final type = order.fulfillment.type;
-    if (type == FulfillmentType.pickup) return status.paid || (!isPos && order.cashDueCents == 0);
+    // Only a customer who paid at the store is waiting: a prepaid online
+    // pickup (nothing due) may still be on the way, so it doesn't glow.
+    if (type == FulfillmentType.pickup) return status.paid;
     return isPos && type == FulfillmentType.dineIn;
   }
 
@@ -156,6 +161,23 @@ class StoredOrder {
 
   /// When the customer wants it (future orders): the vendor's promised time.
   DateTime? get dueAt => order.fulfillment.promisedAt;
+
+  /// A terminal change nobody OK'd yet (Pi 2.3.0): the blue CHANGED alert
+  /// rings for it.
+  bool get changePending => status.posChange?.pending ?? false;
+
+  /// The ticket shows CHANGED (blue glow, tag): a pending change, or one OK'd
+  /// less than [kChangedTagFor] ago while it still cooks.
+  bool changedTag(DateTime now) {
+    final c = status.posChange;
+    if (c == null || state != OrderState.accepted) return false;
+    final acked = c.ackedAt;
+    return acked == null || now.difference(acked) < kChangedTagFor;
+  }
+
+  /// Done with (picked up): finished by the POS closing it or by the store's
+  /// finish time (Pi 2.3.0).
+  bool get isPickedUp => status.finishedAt != null;
 }
 
 /// How bad an integration problem / order flag is.
@@ -276,6 +298,17 @@ class OrderStatus {
   /// The latest NOT DELIVERED on it (retry or cancel), if any.
   final NotDelivered? notDelivered;
 
+  /// Pi 2.3.0: finished (picked up) — `pos` = the POS closed the check,
+  /// `auto` = an online pickup sat ready for the store's finish time.
+  final DateTime? finishedAt;
+  final String finishedBy;
+
+  /// The POS closed (settled) the check.
+  final bool posClosed;
+
+  /// The last terminal change to this check (rings until OK).
+  final PosChange? posChange;
+
   const OrderStatus({
     required this.state,
     this.arrivalDate,
@@ -314,6 +347,10 @@ class OrderStatus {
     this.autoAccepted = false,
     this.cameBack = false,
     this.notDelivered,
+    this.finishedAt,
+    this.finishedBy = '',
+    this.posClosed = false,
+    this.posChange,
   });
 
   factory OrderStatus.fromJson(Map<String, dynamic> json) => OrderStatus(
@@ -354,6 +391,10 @@ class OrderStatus {
     autoAccepted: jBool(json['auto_accepted']),
     cameBack: jBool(json['came_back']),
     notDelivered: NotDelivered.fromJson(json['not_delivered']),
+    finishedAt: jDate(json['finished_at']),
+    finishedBy: jStr(json['finished_by']),
+    posClosed: jBool(json['pos_closed']),
+    posChange: PosChange.fromJson(json['pos_change']),
   );
 
   /// The same status in [driverId]'s pool (null = unassigned) — the
@@ -397,6 +438,10 @@ class OrderStatus {
     autoAccepted: autoAccepted,
     cameBack: cameBack,
     notDelivered: notDelivered,
+    finishedAt: finishedAt,
+    finishedBy: finishedBy,
+    posClosed: posClosed,
+    posChange: posChange,
   );
 }
 
@@ -610,6 +655,10 @@ class OrderSnapshot {
   // Floor fields main mirrors back (absent on a fresh order).
   final int? kitchenOrderNumber;
 
+  /// POS orders (Pi 2.3.0): lines voided at the terminal after the check was
+  /// on the tablet — struck through, red, REMOVED.
+  final List<LineItem> removedItems;
+
   const OrderSnapshot({
     required this.id,
     this.source = '',
@@ -625,6 +674,7 @@ class OrderSnapshot {
     this.receivedAt,
     this.sourceMetadata = const {},
     this.kitchenOrderNumber,
+    this.removedItems = const [],
   });
 
   factory OrderSnapshot.fromJson(Map<String, dynamic> json) => OrderSnapshot(
@@ -642,6 +692,7 @@ class OrderSnapshot {
     receivedAt: jDate(json['received_at']),
     sourceMetadata: jMap(json['source_metadata']),
     kitchenOrderNumber: jIntOrNull(json['kitchen_order_number']),
+    removedItems: jList(json['removed_items'], LineItem.fromJson),
   );
 
   String get customerName => customer.displayName.trim().isEmpty ? 'Guest' : customer.displayName.trim();
@@ -797,6 +848,13 @@ class LineItem {
   final String routing;
   final String printerId;
 
+  /// POS orders (Pi 2.3.0): the POS line id, whether it goes to a kitchen
+  /// station, and ADDED — rung at the terminal after the check was on the
+  /// tablet.
+  final String posRef;
+  final bool kitchen;
+  final bool added;
+
   const LineItem({
     this.id = '',
     this.position = 0,
@@ -810,6 +868,9 @@ class LineItem {
     this.children = const [],
     this.routing = '',
     this.printerId = '',
+    this.posRef = '',
+    this.kitchen = false,
+    this.added = false,
   });
 
   factory LineItem.fromJson(Map<String, dynamic> json) => LineItem(
@@ -825,6 +886,9 @@ class LineItem {
     children: jList(json['children'], LineItem.fromJson),
     routing: jStr(json['routing']),
     printerId: jStr(json['printer_id']),
+    posRef: jStr(json['pos_ref']),
+    kitchen: jBool(json['kitchen']),
+    added: jBool(json['added']),
   );
 
   /// The size worth showing: the vendor sends "Serving" for single-size items
@@ -1243,22 +1307,38 @@ class FloorSettings {
   final TicketToggles tickets;
   final DefaultTimes times;
 
+  /// Pi 2.3.0 (defaults on an older Pi).
+  final FinishingSettings finishing;
+  final CalloutSettings callout;
+
   const FloorSettings({
     this.features = const FeatureToggles(),
     this.tickets = const TicketToggles(),
     this.times = const DefaultTimes(),
+    this.finishing = const FinishingSettings(),
+    this.callout = const CalloutSettings(),
   });
 
   factory FloorSettings.fromJson(Map<String, dynamic> j) => FloorSettings(
     features: FeatureToggles.fromJson(jMap(j['features'])),
     tickets: TicketToggles.fromJson(jMap(j['tickets'])),
     times: DefaultTimes.fromJson(jMap(j['times'])),
+    finishing: FinishingSettings.fromJson(jMap(j['finishing'])),
+    callout: CalloutSettings.fromJson(jMap(j['callout'])),
   );
 
-  FloorSettings copyWith({FeatureToggles? features, TicketToggles? tickets, DefaultTimes? times}) => FloorSettings(
+  FloorSettings copyWith({
+    FeatureToggles? features,
+    TicketToggles? tickets,
+    DefaultTimes? times,
+    FinishingSettings? finishing,
+    CalloutSettings? callout,
+  }) => FloorSettings(
     features: features ?? this.features,
     tickets: tickets ?? this.tickets,
     times: times ?? this.times,
+    finishing: finishing ?? this.finishing,
+    callout: callout ?? this.callout,
   );
 }
 
@@ -1292,6 +1372,9 @@ class IntegrationStatus {
   final List<IntegrationProblem> problems;
   final DateTime? lastSeenAt;
 
+  /// The hub's order callout report (Pi 2.3.0 + hub 0.2.0), else null.
+  final CalloutHubReport? callout;
+
   const IntegrationStatus({
     this.connected = false,
     this.ok = false,
@@ -1299,6 +1382,7 @@ class IntegrationStatus {
     this.insertLive = false,
     this.problems = const [],
     this.lastSeenAt,
+    this.callout,
   });
 
   static IntegrationStatus? fromJson(Object? raw) {
@@ -1311,6 +1395,7 @@ class IntegrationStatus {
       insertLive: jBool(j['insert_live']),
       problems: jList(j['problems'], IntegrationProblem.fromJson).where((p) => p.text.isNotEmpty).toList(),
       lastSeenAt: jDate(j['last_seen_at']),
+      callout: CalloutHubReport.fromJson(j['callout']),
     );
   }
 
@@ -1599,12 +1684,36 @@ class LinkResult {
 class DriverReportLine {
   final String orderId;
   final int? kitchenNumber;
-  final String customer; // "Erik D."
+  final String customer; // "Erik D." — never shown on the report preview
   final String address;
   final int tipCents;
   final bool cash;
   final int cashCents;
   final int totalCents;
+
+  /// (Pi 2.3) House number + street only (no apt / city); '' from an older Pi.
+  final String street;
+
+  /// (Pi 2.3) The tip on the order (cash or card) and what the slip says in
+  /// total (card = total + tip, cash = the total); null from an older Pi.
+  final int? orderTipCents;
+  final int? slipTotalCents;
+
+  /// (Pi 2.2.3) The POS check behind the line, when the Pi cross-checked
+  /// with the POS: its reference and check # (null = none).
+  final String extRef;
+  final int? displayNumber;
+
+  /// Where the line came from (e.g. "online", "pos"); '' from an older Pi.
+  final String source;
+
+  /// Who had it: [DriverReportMatch.both], or only one side.
+  final DriverReportMatch match;
+
+  /// A short remark from the Pi, e.g. "POS only", "Quibase had Ali".
+  final String note;
+  final DateTime? outAt;
+  final DateTime? deliveredAt;
 
   const DriverReportLine({
     required this.orderId,
@@ -1615,7 +1724,28 @@ class DriverReportLine {
     this.cash = false,
     this.cashCents = 0,
     this.totalCents = 0,
+    this.extRef = '',
+    this.displayNumber,
+    this.source = '',
+    this.match = DriverReportMatch.both,
+    this.note = '',
+    this.outAt,
+    this.deliveredAt,
+    this.street = '',
+    this.orderTipCents,
+    this.slipTotalCents,
   });
+
+  /// The number printed on the slip, without "#": the kitchen # for an
+  /// online order, the POS check # for a POS one (whichever exists).
+  int? get ticketNumber => source == 'pos' ? (displayNumber ?? kitchenNumber) : (kitchenNumber ?? displayNumber);
+
+  /// The street the slip shows ([address] from an older Pi).
+  String get streetOrAddress => street.isNotEmpty ? street : address;
+
+  /// "Tip:" and "Total:" on the slip (an older Pi: [tipCents] / [totalCents]).
+  int get slipTipCents => orderTipCents ?? tipCents;
+  int get slipTotal => slipTotalCents ?? totalCents;
 
   factory DriverReportLine.fromJson(Map<String, dynamic> json) => DriverReportLine(
     orderId: jStr(json['order_id']),
@@ -1626,7 +1756,43 @@ class DriverReportLine {
     cash: json['cash'] == true,
     cashCents: jInt(json['cash_cents']),
     totalCents: jInt(json['total_cents']),
+    extRef: jStr(json['ext_ref']),
+    displayNumber: jIntOrNull(json['display_number']),
+    source: jStr(json['source']),
+    match: DriverReportMatch.parse(json['match']),
+    note: jStr(json['note']).trim(),
+    outAt: jDate(json['out_at']),
+    deliveredAt: jDate(json['delivered_at']),
+    street: jStr(json['street']).trim(),
+    orderTipCents: jIntOrNull(json['order_tip_cents']),
+    slipTotalCents: jIntOrNull(json['slip_total_cents']),
   );
+}
+
+/// Which side had a driver-report line (Pi 2.2.3 cross-checks with the POS).
+enum DriverReportMatch {
+  both,
+  posOnly,
+  quibaseOnly;
+
+  /// Missing or unknown (an older Pi) reads as [both].
+  static DriverReportMatch parse(Object? v) => switch (jStr(v)) {
+    'pos_only' => posOnly,
+    'quibase_only' => quibaseOnly,
+    _ => both,
+  };
+}
+
+/// Whether the Pi cross-checked a driver report with the POS (Pi 2.2.3;
+/// absent when the store has no POS hub).
+class DriverReportPos {
+  final bool checked;
+  final DateTime? asOf;
+  final String note;
+  const DriverReportPos({this.checked = false, this.asOf, this.note = ''});
+
+  factory DriverReportPos.fromJson(Map<String, dynamic> json) =>
+      DriverReportPos(checked: jBool(json['checked']), asOf: jDate(json['as_of']), note: jStr(json['note']).trim());
 }
 
 /// A driver's slip for a batch: what they collected in cash, their tips after
@@ -1642,6 +1808,16 @@ class DriverReport {
   final int tipAfterTaxCents;
   final int owedCents;
 
+  /// [owedCents] rounded to whole dollars (what changes hands); a Pi that
+  /// doesn't send `owed_rounded_cents` → [owedCents].
+  final int owedRoundedCents;
+
+  /// (Pi 2.2.3) The driver's POS Employee Number, the POS cross-check (null
+  /// = no POS hub, or an older Pi) and the Pi's remarks.
+  final String? driverPosNumber;
+  final DriverReportPos? pos;
+  final List<String> notes;
+
   const DriverReport({
     required this.batchId,
     required this.driverId,
@@ -1652,7 +1828,11 @@ class DriverReport {
     this.tipCents = 0,
     this.tipAfterTaxCents = 0,
     this.owedCents = 0,
-  });
+    int? owedRoundedCents,
+    this.driverPosNumber,
+    this.pos,
+    this.notes = const [],
+  }) : owedRoundedCents = owedRoundedCents ?? owedCents;
 
   factory DriverReport.fromJson(Map<String, dynamic> json) => DriverReport(
     batchId: jInt(json['batch_id']),
@@ -1664,6 +1844,14 @@ class DriverReport {
     tipCents: jInt(json['tip_cents']),
     tipAfterTaxCents: jInt(json['tip_after_tax_cents']),
     owedCents: jInt(json['owed_cents']),
+    owedRoundedCents: jIntOrNull(json['owed_rounded_cents']),
+    driverPosNumber: jStrOrNull(jStr(json['driver_pos_number']).trim()),
+    pos: json['pos'] is Map ? DriverReportPos.fromJson(jMap(json['pos'])) : null,
+    notes: [
+      if (json['notes'] is List)
+        for (final n in json['notes'] as List)
+          if (jStr(n).trim().isNotEmpty) jStr(n).trim(),
+    ],
   );
 }
 
@@ -1678,6 +1866,116 @@ class ReportPrintResult {
         raw is List ? raw.map((e) => e is Map ? jStr(jMap(e)['driver_name']) : '').toList(growable: false) : const [];
     return ReportPrintResult(printed: names(json['printed']), failed: names(json['failed']));
   }
+}
+
+/// `POST /api/drivers/{id}/report/print` (Pi 2.2.3) — one driver's report
+/// for the open batch so far, printed on the receipt printer.
+class DriverReportPrint {
+  final String driverId;
+  final String driverName;
+
+  /// The printer that printed it, and the one it failed over from (null
+  /// unless it was rerouted).
+  final String printedOn;
+  final String? reroutedFrom;
+  final DriverReport? report;
+
+  const DriverReportPrint({
+    this.driverId = '',
+    this.driverName = '',
+    this.printedOn = '',
+    this.reroutedFrom,
+    this.report,
+  });
+
+  factory DriverReportPrint.fromJson(Map<String, dynamic> json) => DriverReportPrint(
+    driverId: jStr(json['driver_id']),
+    driverName: jStr(json['driver_name']),
+    printedOn: jStr(json['printed_on']),
+    reroutedFrom: jStrOrNull(jStr(json['rerouted_from']).trim()),
+    report: json['report'] is Map ? DriverReport.fromJson(jMap(json['report'])) : null,
+  );
+}
+
+/// "Printed Juma's report" — plus where, when the Pi failed over from
+/// [reroutedFrom] (" on Front (Kitchen was down)").
+String driverReportPrintedMessage(String name, {String printedOn = '', String? reroutedFrom}) {
+  final base = "Printed $name's report";
+  if (reroutedFrom == null || reroutedFrom.isEmpty) return base;
+  return printedOn.isEmpty ? '$base ($reroutedFrom was down)' : '$base on $printedOn ($reroutedFrom was down)';
+}
+
+/// SSE `driver.report_printed` (Pi 2.3): the report a clock-out printed in
+/// the background — printed, or why not (`code` `nothing_printed` /
+/// `report_failed`).
+class DriverReportPrinted {
+  final String driverId;
+  final String driverName;
+  final String trigger;
+  final bool printed;
+  final String printedOn;
+  final String? reroutedFrom;
+  final String error;
+  final String? code;
+
+  const DriverReportPrinted({
+    this.driverId = '',
+    this.driverName = '',
+    this.trigger = '',
+    required this.printed,
+    this.printedOn = '',
+    this.reroutedFrom,
+    this.error = '',
+    this.code,
+  });
+
+  static DriverReportPrinted? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final j = jMap(raw);
+    return DriverReportPrinted(
+      driverId: jStr(j['driver_id']),
+      driverName: jStr(j['driver_name']).trim(),
+      trigger: jStr(j['trigger']),
+      printed: jBool(j['printed']),
+      printedOn: jStr(j['printed_on']),
+      reroutedFrom: jStrOrNull(jStr(j['rerouted_from']).trim()),
+      error: jStr(j['error']).trim(),
+      code: jStrOrNull(j['code']),
+    );
+  }
+
+  /// The app-wide toast: "Printed Juma's report" (info), or "Juma's report
+  /// didn't print — check the receipt printer" with the Pi's reason (red).
+  IntegrationToast toToast() {
+    final name = driverName.isEmpty ? 'The driver' : driverName;
+    if (printed) {
+      return IntegrationToast(
+        code: 'driver.report_printed',
+        text: driverReportPrintedMessage(name, printedOn: printedOn, reroutedFrom: reroutedFrom),
+        severity: Severity.info,
+      );
+    }
+    final who = driverName.isEmpty ? "The driver's" : "$driverName's";
+    final short = error.length > 60 ? '${error.substring(0, 57)}...' : error;
+    final why = short.isEmpty ? '' : ' ($short)';
+    return IntegrationToast(
+      code: 'driver.report_printed',
+      text: "$who report didn't print — check the receipt printer$why",
+      severity: Severity.serious,
+    );
+  }
+}
+
+/// `POST /api/drivers/{id}/clock-out`: the driver (as before) and whether a
+/// Pi >= 2.3 is printing their report in the background (`report_printing`;
+/// the outcome comes as SSE `driver.report_printed`).
+class ClockOutResult {
+  final Driver driver;
+  final bool reportPrinting;
+  const ClockOutResult(this.driver, {this.reportPrinting = false});
+
+  factory ClockOutResult.fromJson(Map<String, dynamic> json) =>
+      ClockOutResult(Driver.fromJson(json), reportPrinting: jBool(json['report_printing']));
 }
 
 /// A Quibase release the agent has cached for its tablets.

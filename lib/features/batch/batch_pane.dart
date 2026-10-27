@@ -375,25 +375,141 @@ class _DriverReportsCardState extends ConsumerState<_DriverReportsCard> {
   }
 }
 
-class _ReportRow extends StatelessWidget {
+class _ReportRow extends StatefulWidget {
   final DriverReport r;
   const _ReportRow(this.r);
 
   @override
+  State<_ReportRow> createState() => _ReportRowState();
+}
+
+class _ReportRowState extends State<_ReportRow> {
+  /// The deliveries are listed (tap "Show deliveries").
+  bool _open = false;
+
+  @override
   Widget build(BuildContext context) {
+    final r = widget.r;
     final owes = r.owedCents >= 0;
+    final pos = r.pos;
+    final row = Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Text(r.driverName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        ),
+        Expanded(flex: 2, child: _Stat('Deliveries', '${r.deliveries}')),
+        Expanded(flex: 2, child: _Stat('Cash owed', money(r.cashCents))),
+        Expanded(flex: 2, child: _Stat('Tips (A/T)', money(r.tipAfterTaxCents))),
+        // Pi 2.3: the whole-dollar amount first, the exact one small beside it.
+        Expanded(
+          flex: 3,
+          child: _Stat(
+            owes ? 'Owed to store' : 'Store owes driver',
+            money(r.owedRoundedCents.abs()),
+            exact: r.owedRoundedCents == r.owedCents ? null : money(r.owedCents.abs()),
+          ),
+        ),
+      ],
+    );
+    final unchecked = pos == null || pos.checked ? null : 'POS not checked${pos.note.isEmpty ? '' : ' — ${pos.note}'}';
+    final muted = TextStyle(fontSize: 14, color: context.palette.textMuted);
+    final remarks = r.lines.where((l) => l.note.isNotEmpty).length;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
+      child: unchecked == null && r.notes.isEmpty && r.lines.isEmpty
+          ? row
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                row,
+                if (unchecked != null)
+                  Text(unchecked, style: const TextStyle(fontSize: 14, color: QuiccColors.statusFiring)),
+                // Pi 2.2.3: the POS cross-check's remarks, small and muted.
+                if (r.notes.isNotEmpty) Text(r.notes.join(' · '), style: muted),
+                if (r.lines.isNotEmpty)
+                  Row(
+                    children: [
+                      TextButton.icon(
+                        key: ValueKey('report-lines-${r.driverId}'),
+                        onPressed: () => setState(() => _open = !_open),
+                        icon: Icon(_open ? Icons.expand_less : Icons.expand_more),
+                        label: Text(_open ? 'Hide deliveries' : 'Show deliveries (${r.lines.length})'),
+                      ),
+                      if (!_open && remarks > 0) Text('$remarks with a remark', style: muted),
+                    ],
+                  ),
+                if (_open) _ReportLines(r.lines),
+              ],
+            ),
+    );
+  }
+}
+
+/// The deliveries as the printed slip lists them: cash first, then card;
+/// "1104 531 Stevenson Ln", then "Tip: $x" left and "Total: $y" right, and
+/// the Pi's remark small under it. No customer names.
+class _ReportLines extends StatelessWidget {
+  final List<DriverReportLine> lines;
+  const _ReportLines(this.lines);
+
+  @override
+  Widget build(BuildContext context) {
+    final cash = [
+      for (final l in lines)
+        if (l.cash) l,
+    ];
+    final card = [
+      for (final l in lines)
+        if (!l.cash) l,
+    ];
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 440),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 0, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (title, group) in [('Cash', cash), ('Card', card)])
+              if (group.isNotEmpty) ...[
+                Padding(padding: const EdgeInsets.only(top: 6, bottom: 2), child: Eyebrow('$title · ${group.length}')),
+                for (final l in group) _ReportLine(l),
+              ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReportLine extends StatelessWidget {
+  final DriverReportLine l;
+  const _ReportLine(this.l);
+
+  @override
+  Widget build(BuildContext context) {
+    final n = l.ticketNumber;
+    final street = l.streetOrAddress;
+    final title = [if (n != null) '$n', if (street.isNotEmpty) street].join(' ');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            flex: 3,
-            child: Text(r.driverName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
-          Expanded(flex: 2, child: _Stat('Deliveries', '${r.deliveries}')),
-          Expanded(flex: 2, child: _Stat('Cash owed', money(r.cashCents))),
-          Expanded(flex: 2, child: _Stat('Tips (A/T)', money(r.tipAfterTaxCents))),
-          Expanded(flex: 3, child: _Stat(owes ? 'Owed to store' : 'Store owes driver', money(r.owedCents.abs()))),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Tip: ${money(l.slipTipCents)}', style: const TextStyle(fontSize: 15)),
+              Text('Total: ${money(l.slipTotal)}', style: const TextStyle(fontSize: 15)),
+            ],
+          ),
+          if (l.note.isNotEmpty) Text(l.note, style: TextStyle(fontSize: 14, color: context.palette.textMuted)),
         ],
       ),
     );
@@ -403,7 +519,10 @@ class _ReportRow extends StatelessWidget {
 class _Stat extends StatelessWidget {
   final String label;
   final String value;
-  const _Stat(this.label, this.value);
+
+  /// A smaller figure after [value] (the exact amount beside a rounded one).
+  final String? exact;
+  const _Stat(this.label, this.value, {this.exact});
 
   @override
   Widget build(BuildContext context) => Column(
@@ -411,7 +530,23 @@ class _Stat extends StatelessWidget {
     children: [
       Eyebrow(label),
       const SizedBox(height: 4),
-      Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
+      exact == null
+          ? Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600))
+          : Text.rich(
+              TextSpan(
+                text: value,
+                children: [
+                  TextSpan(
+                    text: '  ($exact)',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w400, color: context.palette.textMuted),
+                  ),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.fade,
+              softWrap: false,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+            ),
     ],
   );
 }

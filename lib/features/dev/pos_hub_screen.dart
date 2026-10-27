@@ -5,6 +5,7 @@ import '../../core/format.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_type.dart';
+import '../settings/callout_cards.dart';
 import '../settings/pos_settings_cards.dart';
 import '../settings/settings_card.dart';
 import 'dev_texts.dart';
@@ -26,6 +27,7 @@ class PosHubScreen extends StatelessWidget {
         title: 'POS switches',
         subtitle: 'What the hub does with the old POS. Saved on the Pi.',
       ),
+      FinishingOrdersCard(),
     ],
   );
 }

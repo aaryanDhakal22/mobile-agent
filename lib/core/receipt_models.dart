@@ -36,6 +36,76 @@ enum NumberSize {
   }
 }
 
+/// The driver-report slip's text size (Pi 2.3). [large] is how it printed
+/// before; [normal] (one size smaller) is the default.
+enum DriverReportSize {
+  small('small', 'Small'),
+  normal('normal', 'Normal'),
+  large('large', 'Large');
+
+  final String wire;
+  final String label;
+  const DriverReportSize(this.wire, this.label);
+
+  static DriverReportSize? parse(Object? v) {
+    for (final s in values) {
+      if (s.wire == v) return s;
+    }
+    return null;
+  }
+}
+
+/// Most extra space the Pi takes between lines, in printer dots, and the
+/// step the tablet's − / + move by.
+const int kSpacingMaxDots = 48;
+const int kSpacingStepDots = 4;
+
+/// Extra space (printer dots, 0–[kSpacingMaxDots]) on kitchen tickets and
+/// customer receipts (Pi 2.3): between an item and its first modifier
+/// ([itemMod]), between modifiers ([modMod]), and after an item without
+/// modifiers before the next item ([itemItem]). All 0 = how it always looked.
+class LineSpacing {
+  final int itemMod;
+  final int modMod;
+  final int itemItem;
+  const LineSpacing({this.itemMod = 0, this.modMod = 0, this.itemItem = 0});
+
+  static const LineSpacing none = LineSpacing();
+
+  /// Missing / out-of-range values fall back to [fallback]'s.
+  factory LineSpacing.fromJson(Object? raw, {LineSpacing fallback = none}) {
+    if (raw is! Map) return fallback;
+    final j = jMap(raw);
+    int read(String key, int fb) {
+      final v = jIntOrNull(j[key]);
+      return v == null || v < 0 || v > kSpacingMaxDots ? fb : v;
+    }
+
+    return LineSpacing(
+      itemMod: read('item_mod', fallback.itemMod),
+      modMod: read('mod_mod', fallback.modMod),
+      itemItem: read('item_item', fallback.itemItem),
+    );
+  }
+
+  Map<String, Object?> toJson() => {'item_mod': itemMod, 'mod_mod': modMod, 'item_item': itemItem};
+
+  LineSpacing copyWith({int? itemMod, int? modMod, int? itemItem}) => LineSpacing(
+    itemMod: _clamp(itemMod ?? this.itemMod),
+    modMod: _clamp(modMod ?? this.modMod),
+    itemItem: _clamp(itemItem ?? this.itemItem),
+  );
+
+  static int _clamp(int v) => v.clamp(0, kSpacingMaxDots);
+
+  @override
+  bool operator ==(Object other) =>
+      other is LineSpacing && other.itemMod == itemMod && other.modMod == modMod && other.itemItem == itemItem;
+
+  @override
+  int get hashCode => Object.hash(itemMod, modMod, itemItem);
+}
+
 /// Longest footer the Pi accepts.
 const int kFooterMaxLength = 32;
 
@@ -57,6 +127,12 @@ class ReceiptPrefs {
   final bool showPhone;
   final bool extraPaper;
 
+  /// (Pi 2.3) The driver-report slip's text size, and the extra line spacing
+  /// on kitchen tickets and receipts. A Pi without them leaves them out:
+  /// read as the defaults, still sent on PUT.
+  final DriverReportSize driverReportSize;
+  final LineSpacing spacing;
+
   const ReceiptPrefs({
     this.kitchenItemSize = ReceiptSize.large,
     this.kitchenNumberSize = NumberSize.xlarge,
@@ -66,6 +142,8 @@ class ReceiptPrefs {
     this.showStoreAddress = true,
     this.showPhone = true,
     this.extraPaper = true,
+    this.driverReportSize = DriverReportSize.normal,
+    this.spacing = LineSpacing.none,
   });
 
   /// What prints today (the agent's defaults); used when the Pi's answer
@@ -90,6 +168,8 @@ class ReceiptPrefs {
           : fallback.showStoreAddress,
       showPhone: json['show_phone'] is bool ? json['show_phone'] as bool : fallback.showPhone,
       extraPaper: json['extra_paper'] is bool ? json['extra_paper'] as bool : fallback.extraPaper,
+      driverReportSize: DriverReportSize.parse(json['driver_report_size']) ?? fallback.driverReportSize,
+      spacing: LineSpacing.fromJson(json['spacing'], fallback: fallback.spacing),
     );
   }
 
@@ -104,6 +184,8 @@ class ReceiptPrefs {
     'show_store_address': showStoreAddress,
     'show_phone': showPhone,
     'extra_paper': extraPaper,
+    'driver_report_size': driverReportSize.wire,
+    'spacing': spacing.toJson(),
   };
 
   /// [footerText] takes a String or null (null = store default); leaving it
@@ -117,6 +199,8 @@ class ReceiptPrefs {
     bool? showStoreAddress,
     bool? showPhone,
     bool? extraPaper,
+    DriverReportSize? driverReportSize,
+    LineSpacing? spacing,
   }) => ReceiptPrefs(
     kitchenItemSize: kitchenItemSize ?? this.kitchenItemSize,
     kitchenNumberSize: kitchenNumberSize ?? this.kitchenNumberSize,
@@ -126,6 +210,8 @@ class ReceiptPrefs {
     showStoreAddress: showStoreAddress ?? this.showStoreAddress,
     showPhone: showPhone ?? this.showPhone,
     extraPaper: extraPaper ?? this.extraPaper,
+    driverReportSize: driverReportSize ?? this.driverReportSize,
+    spacing: spacing ?? this.spacing,
   );
 
   @override
@@ -138,7 +224,9 @@ class ReceiptPrefs {
       other.copies == copies &&
       other.showStoreAddress == showStoreAddress &&
       other.showPhone == showPhone &&
-      other.extraPaper == extraPaper;
+      other.extraPaper == extraPaper &&
+      other.driverReportSize == driverReportSize &&
+      other.spacing == spacing;
 
   @override
   int get hashCode => Object.hash(
@@ -150,6 +238,8 @@ class ReceiptPrefs {
     showStoreAddress,
     showPhone,
     extraPaper,
+    driverReportSize,
+    spacing,
   );
 
   @override

@@ -892,16 +892,16 @@ void main() {
   });
 
   group('customer waiting (paid, not ready)', () {
-    /// A pickup cooking for [ago] min; [paid] = card (nothing due), else cash.
+    /// A cash pickup cooking for [ago] min; [paid] = settled at the store
+    /// (the customer is waiting), else not paid yet.
     StoredOrder pickup(String id, int k, {int ago = 8, bool paid = true, int readyIn = 10}) {
       final m = jsonDecode(arrivedPickupJson) as Map<String, dynamic>;
       final now = timeNow().toUtc();
       (m['order'] as Map)['id'] = id;
-      if (!paid) {
-        (m['order'] as Map)['payments'] = [
-          {'method': 'cash', 'amount_cents': 2755},
-        ];
-      }
+      (m['order'] as Map)['payments'] = [
+        {'method': 'cash', 'amount_cents': 2755},
+      ];
+      if (paid) (m['status'] as Map)['paid'] = true;
       (m['status'] as Map)
         ..['state'] = 'accepted'
         ..['kitchen_number'] = k

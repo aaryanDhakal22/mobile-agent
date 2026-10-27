@@ -195,6 +195,13 @@ class FloorState {
   Iterable<StoredOrder> get _shown =>
       settings.features.posPull ? orders.values : orders.values.where((o) => !o.isPos);
 
+  /// Terminal changes nobody OK'd yet (the blue CHANGED alert), oldest
+  /// change first.
+  List<StoredOrder> get pendingChanges => _sorted(
+    _shown.where((o) => o.changePending),
+    (o) => o.status.posChange?.at,
+  );
+
   /// Awaiting acceptance, oldest first.
   List<StoredOrder> get arrived => _sorted(
     _shown.where((o) => o.state == OrderState.arrived),
@@ -385,10 +392,19 @@ FloorUpdate applySseEvent(FloorState s, SseEvent ev) {
       final inner = jMap(m['order']);
       final o = StoredOrder.fromJson(inner['order'] is Map ? inner : m);
       if (o.id.isEmpty) return FloorUpdate(s);
-      // The soft chime plays once per new order (not for a replayed frame).
-      final chime = jBool(m['chime']) && !s.orders.containsKey(o.id) && !o.status.boardHidden;
+      // The soft chime plays once per new order (not for a replayed frame) —
+      // and once more for a hidden check that now qualifies for Kitchen
+      // (Pi 2.3.0: it shows as new).
+      final before = s.orders[o.id];
+      final fresh = before == null || (before.status.boardHidden && !o.status.boardHidden);
+      final chime = jBool(m['chime']) && fresh && !o.status.boardHidden;
       final next = s.withOrder(o);
       return FloorUpdate(chime ? next.copyWith(chimes: s.chimes + 1) : next);
+    case 'order.changed': // Pi 2.3.0: a terminal change — `{order, change}`
+      if (payload is! Map) return FloorUpdate(s);
+      final o = StoredOrder.fromJson(jMap(jMap(payload)['order']));
+      if (o.id.isEmpty) return FloorUpdate(s);
+      return FloorUpdate(s.withOrder(o));
     case 'settings.updated':
       if (payload is! Map) return FloorUpdate(s, refetch: true);
       final floor = s.floor;

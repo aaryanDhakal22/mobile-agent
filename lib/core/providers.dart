@@ -220,6 +220,13 @@ class FloorController extends Notifier<FloorState> {
       final a = AutoAssignment.fromJson(ev.json);
       if (a != null) _autoAssigned(a);
     }
+    // Pi 2.3: a clock-out's report printed (or didn't) in the background —
+    // the app-wide toast, once (kept out of the reducer so a refresh's
+    // replay doesn't show it twice).
+    if (ev.event == 'driver.report_printed') {
+      final p = DriverReportPrinted.fromJson(ev.json);
+      if (p != null) _set(state.copyWith(toast: p.toToast(), toasts: state.toasts + 1));
+    }
   }
 
   /// An SSE frame, as the stream delivers it (tests).
@@ -353,6 +360,32 @@ class FloorController extends Notifier<FloorState> {
     final saved = await _requireClient(ref).putTimes(next);
     _setSettings((s) => s.copyWith(times: saved));
     return saved;
+  }
+
+  Future<FinishingSettings> saveFinishing(FinishingSettings next) async {
+    final saved = await _requireClient(ref).putFinishing(next);
+    _setSettings((s) => s.copyWith(finishing: saved));
+    return saved;
+  }
+
+  Future<CalloutSettings> saveCallout(CalloutSettings next) async {
+    final saved = await _requireClient(ref).putCallout(next);
+    _setSettings((s) => s.copyWith(callout: saved));
+    return saved;
+  }
+
+  /// OK on the blue CHANGED alert: marked acked on the Pi (every tablet
+  /// stops ringing). Already OK'd elsewhere (409) → refetch.
+  Future<void> ackChange(String id, String changeId) async {
+    try {
+      _upsert([await _requireClient(ref).ackChange(id, changeId)]);
+    } on AgentException catch (e) {
+      if (e.isConflict || e.isNotFound) {
+        unawaited(refresh());
+        return;
+      }
+      rethrow;
+    }
   }
 
   Future<void> ready(String id) async {
@@ -617,23 +650,30 @@ class FloorController extends Notifier<FloorState> {
 
   /// Clock in: joins the back of the queue. On a 409 (already clocked in
   /// elsewhere) the roster is reloaded before the error reaches the UI.
-  Future<Driver> clockIn(String id) => _clock(id, (c) => c.clockIn(id));
+  Future<Driver> clockIn(String id) => _clock(id, (c) => c.clockIn(id), (d) => d);
 
   /// Clock out (only while available). 409 `driver_not_available` = out on a
-  /// run (or already off).
-  Future<Driver> clockOut(String id) => _clock(id, (c) => c.clockOut(id));
+  /// run (or already off). A Pi ≥ 2.3 prints the driver's report in the
+  /// background ([ClockOutResult.reportPrinting]; SSE `driver.report_printed`).
+  Future<ClockOutResult> clockOut(String id) => _clock(id, (c) => c.clockOut(id), (r) => r.driver);
 
-  Future<Driver> _clock(String id, Future<Driver> Function(AgentClient) op) async {
+  Future<T> _clock<T>(String id, Future<T> Function(AgentClient) op, Driver Function(T) driverOf) async {
     try {
-      final d = await op(_requireClient(ref));
+      final r = await op(_requireClient(ref));
+      final d = driverOf(r);
       final i = state.drivers.indexWhere((x) => x.id == id);
       if (i >= 0 && d.id == id) _set(state.copyWith(drivers: [...state.drivers]..[i] = d));
-      return d;
+      return r;
     } finally {
       // The queue position changes on clock-in; resync either way.
       unawaited(_reloadDrivers());
     }
   }
+
+  /// Prints one driver's report for the open batch so far (Pi 2.2.3; an
+  /// older Pi throws [kDriverReportUnsupported]).
+  Future<DriverReportPrint> printDriverReport(String driverId) =>
+      _requireClient(ref).printDriverReport(driverId);
 
   /// Optimistic: the list reorders at once, then the agent confirms.
   Future<void> reorderDrivers(List<Driver> ordered) async {

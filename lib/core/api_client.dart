@@ -80,6 +80,10 @@ class KitchenResend {
   );
 }
 
+/// [AgentException.code] for `POST /api/drivers/{id}/report/print` on a Pi
+/// older than 2.2.3: "This Pi needs an update to print one driver's report".
+const String kDriverReportUnsupported = 'driver_report_unsupported';
+
 /// [AgentException.code] for a 2.1.0 route an older Pi doesn't have
 /// (features / kitchen tickets / default times, schedule, geo choose): "This
 /// Pi needs an update".
@@ -656,6 +660,30 @@ class AgentClient {
   Future<List<DriverReport>> driverReports(int batchId) async =>
       jList(await _get('/api/batches/${batchId <= 0 ? 'current' : batchId}/driver-reports'), DriverReport.fromJson);
 
+  /// `POST /api/drivers/{id}/report/print` (Pi 2.2.3) — one driver's report
+  /// for the open batch so far, on the receipt printer (the Pi may first
+  /// cross-check with the POS for a few seconds). 404 `driver_not_found`;
+  /// 502 `nothing_printed`; 503 `printing_unavailable` (no printers). An older
+  /// Pi without the route (405, or a 404 that isn't `driver_not_found`) →
+  /// [kDriverReportUnsupported]. Never unpairs the tablet.
+  Future<DriverReportPrint> printDriverReport(String driverId) async {
+    try {
+      final body = await _send(
+        'POST',
+        '/api/drivers/${Uri.encodeComponent(driverId)}/report/print',
+        timeout: printTimeout,
+        mayRevoke: false,
+      );
+      return DriverReportPrint.fromJson(jMap(body));
+    } on AgentException catch (e) {
+      final missing = e.statusCode == 405 || (e.statusCode == 404 && e.code != 'driver_not_found');
+      if (missing) {
+        throw AgentException(e.message, statusCode: e.statusCode, code: kDriverReportUnsupported, body: e.body);
+      }
+      rethrow;
+    }
+  }
+
   /// `POST /api/batches/{id}/driver-reports/print` → how many slips printed
   /// (502 nothing_printed throws).
   Future<ReportPrintResult> printDriverReports(int batchId) async => ReportPrintResult.fromJson(
@@ -799,9 +827,11 @@ class AgentClient {
       Driver.fromJson(jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(id)}/clock-in')));
 
   /// `available` → `off` (closes the shift). 409 `driver_not_available` = off
-  /// already, or out on a run.
-  Future<Driver> clockOut(String id) async =>
-      Driver.fromJson(jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(id)}/clock-out')));
+  /// already, or out on a run. A Pi ≥ 2.3 answers at once with
+  /// `report_printing: true` ([ClockOutResult.reportPrinting]) and prints the
+  /// driver's report in the background (SSE `driver.report_printed`).
+  Future<ClockOutResult> clockOut(String id) async =>
+      ClockOutResult.fromJson(jMap(await _send('POST', '/api/drivers/${Uri.encodeComponent(id)}/clock-out')));
 
   /// Shift records of the last [days] days, newest first.
   Future<List<Shift>> listShifts({int days = 7}) async =>
@@ -950,6 +980,44 @@ class AgentClient {
   /// [kSettingsUnsupported]. A JSON 404 (unknown order) is kept — except on
   /// the settings routes ([settings]), where any 404 means "no such route"
   /// (an older Pi's web UI answers unknown `/api/*` GETs with one).
+  // --- Pi 2.3.0: finishing, terminal changes, the order callout ---------------
+
+  /// `GET /api/settings/finishing` (an older Pi → [kSettingsUnsupported]).
+  Future<FinishingSettings> getFinishing() => _v210Route(
+    () async => FinishingSettings.fromJson(jMap(await _get('/api/settings/finishing'))),
+    settings: true,
+  );
+
+  /// `PUT /api/settings/finishing` — 400 outside 0–240.
+  Future<FinishingSettings> putFinishing(FinishingSettings f) => _v210Route(
+    () async => FinishingSettings.fromJson(jMap(await _send('PUT', '/api/settings/finishing', body: f.toJson()))),
+    settings: true,
+  );
+
+  /// `GET /api/callout` — the settings, the hub's voices and state.
+  Future<CalloutView> getCallout() =>
+      _v210Route(() async => CalloutView.fromJson(jMap(await _get('/api/callout'))), settings: true);
+
+  /// `PUT /api/settings/callout` (missing keys keep their value).
+  Future<CalloutSettings> putCallout(CalloutSettings c) => _v210Route(
+    () async => CalloutSettings.fromJson(jMap(await _send('PUT', '/api/settings/callout', body: c.toJson()))),
+    settings: true,
+  );
+
+  /// `POST /api/callout/test` — the hub says "Order ready for ticket number
+  /// [number]" on the store speaker now ([kind] test | preview; [voice] ''
+  /// = the chosen one). Answers whether the hub is connected.
+  Future<bool> calloutTest(int number, {String voice = '', String kind = 'test'}) => _v210Route(() async {
+    final body = await _send('POST', '/api/callout/test', body: {'number': number, 'voice': voice, 'kind': kind});
+    return jBool(jMap(body)['hub_connected']);
+  }, settings: true);
+
+  /// `POST /api/orders/{id}/change/ack` — OK on the CHANGED alert. 409
+  /// `no_change` when it was OK'd elsewhere (or a newer change came in).
+  Future<StoredOrder> ackChange(String id, String changeId) async => StoredOrder.fromJson(
+    jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/change/ack', body: {'change_id': changeId})),
+  );
+
   static Future<T> _v210Route<T>(Future<T> Function() call, {bool settings = false}) async {
     try {
       return await call();

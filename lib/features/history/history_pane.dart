@@ -149,6 +149,10 @@ class HistoryRow extends StatelessWidget {
                         if (order.status.driverName != null && order.state != OrderState.cancelled)
                           'driver ${order.status.driverName}',
                         if (order.isCameBack) 'came back',
+                        if (order.isPickedUp)
+                          order.status.finishedBy == 'pos' ? 'picked up (closed at the POS)' : 'picked up',
+                        if (order.status.posChange != null) 'changed at the POS',
+                        if (o.removedItems.isNotEmpty) '${o.removedItems.length} removed',
                       ].join(' · '),
                       style: TextStyle(color: context.palette.textSecondary),
                     ),

@@ -103,6 +103,10 @@ class FriendlyError {
         return f('Nothing on this order goes to a kitchen printer.');
       case 'print_failed':
         return f("Printer problem — the kitchen tickets didn't print.", '', GuideId.printer);
+      case 'driver_report_unsupported':
+        return f("This Pi needs an update to print one driver's report", 'Tell the owner');
+      case 'printing_unavailable':
+        return f('No printers are set up on the Pi', 'Add them in the Quicc web app');
       case 'test_in_progress':
         return f('A test print is already running', 'Wait a few seconds');
       case 'already_accepted':
