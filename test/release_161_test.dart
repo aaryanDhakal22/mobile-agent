@@ -16,6 +16,7 @@ import 'package:http/testing.dart';
 import 'package:mobile_agent/core/alarm.dart';
 import 'package:mobile_agent/core/api_client.dart';
 import 'package:mobile_agent/core/floor_state.dart';
+import 'package:mobile_agent/core/local_log.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
@@ -66,8 +67,29 @@ class FakeUpdatePlatform extends UpdatePlatform {
     return confirmable;
   }
 
+  /// Android's API level (33 = silent-capable; 30 = the store's Android 11).
+  int api = 33;
+
+  /// Screens that never show up although Android accepted the request (the
+  /// Neostra's confirm screen): 'confirm' and/or 'screen'.
+  final Set<String> invisible = {};
+
   @override
-  Future<void> installWithScreen(String path) async => calls.add('screen:${path.split('/').last}');
+  Future<bool> installWithScreen(String path) async {
+    calls.add('screen:${path.split('/').last}');
+    return true;
+  }
+
+  @override
+  Future<int> sdk() async => api;
+
+  @override
+  Future<bool> watchScreen(Future<bool> Function() start, Duration within) async {
+    final before = calls.length;
+    if (!await start()) return false;
+    final route = calls.length > before ? calls.last.split(':').first : '';
+    return !invisible.contains(route);
+  }
 }
 
 final _apk = utf8.encode('fake apk bytes');
@@ -234,6 +256,55 @@ void main() {
       expect(c.read(updaterProvider).phase, UpdatePhase.installing);
     });
 
+    group('1.8.4: INSTALL NOW makes sure Android\'s screen opens', () {
+      Future<(ProviderContainer, FakeUpdatePlatform)> tapNeeded(int api) async {
+        final (c, platform, _) = await start(floor: _floor(batch: 8), silent: false);
+        platform.api = api;
+        platform.emit(InstallResult.pendingUserAction);
+        await _drain();
+        expect(c.read(updaterProvider).phase, UpdatePhase.needsTap);
+        platform.calls.clear();
+        return (c, platform);
+      }
+
+      test('Android 11 (the store): the APK screen, the route a manual install takes', () async {
+        final (c, platform) = await tapNeeded(30);
+        await c.read(updaterProvider.notifier).tapInstall();
+        expect(platform.calls, ['screen:quibase-20.apk']);
+        expect(c.read(updaterProvider).phase, UpdatePhase.installing);
+      });
+
+      test('Android 11, the APK screen never shows: falls back to the confirm screen', () async {
+        final (c, platform) = await tapNeeded(30);
+        platform.invisible.add('screen');
+        await c.read(updaterProvider.notifier).tapInstall();
+        expect(platform.calls, ['screen:quibase-20.apk', 'confirm']);
+        expect(c.read(updaterProvider).phase, UpdatePhase.installing);
+      });
+
+      test('Android 12+, the confirm screen never shows (what the Neostra did): the APK screen', () async {
+        final (c, platform) = await tapNeeded(33);
+        platform.invisible.add('confirm');
+        await c.read(updaterProvider.notifier).tapInstall();
+        expect(platform.calls, ['confirm', 'screen:quibase-20.apk']);
+        expect(c.read(updaterProvider).phase, UpdatePhase.installing);
+      });
+
+      test('neither screen shows: says so (no silent dead button), and logs each try', () async {
+        final (c, platform) = await tapNeeded(30);
+        platform.invisible.addAll({'screen', 'confirm'});
+        await c.read(updaterProvider.notifier).tapInstall();
+        final u = c.read(updaterProvider);
+        expect(u.phase, UpdatePhase.failed);
+        expect(u.error!.title, "Android didn't open its install screen");
+        expect(u.error!.details, contains('API 30'));
+        final log = c.read(localLogProvider).lines.join('\n');
+        expect(log, contains('INSTALL NOW tapped (needsTap)'));
+        expect(log, contains("Android's install screen did not open (APK)"));
+        expect(log, contains("Android's confirm screen did not open"));
+      });
+    });
+
     test('a failed install asks again; after two, INSTALL NOW uses Android\'s own screen', () async {
       final (c, platform, _) = await start(floor: _floor(batch: 8));
       platform.emit(InstallResult.failed, 'INSTALL_FAILED_INTERNAL_ERROR');
@@ -325,6 +396,7 @@ void main() {
       expect(find.text('Quibase 1.6.1 is ready'), findsOneWidget);
       expect(find.text('floor underneath'), findsOneWidget, reason: 'no lock: the app is still there');
       expect(find.textContaining('Install without scanning'), findsOneWidget);
+      expect(find.byKey(const ValueKey('update-allow-reopen')), findsOneWidget, reason: '1.8.4: reopen is off');
 
       await tester.tap(find.byKey(const ValueKey('update-later')));
       await tester.pump();
@@ -337,6 +409,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('update-install')));
       await tester.pump();
       expect(platform.calls, ['confirm']);
+      // 1.8.4: Android never finished → the prompt asks again (TRY AGAIN).
+      await tester.pump(kInstallTimeout + const Duration(seconds: 1));
+      expect(c.read(updaterProvider).phase, UpdatePhase.failed);
       await tester.pumpWidget(const SizedBox());
     });
 

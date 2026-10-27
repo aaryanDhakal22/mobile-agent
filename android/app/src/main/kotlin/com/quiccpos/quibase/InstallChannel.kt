@@ -68,15 +68,23 @@ object InstallChannel {
                 }
                 "installer" -> result.success(installerOf(app))
                 "canInstallSilently" -> result.success(Build.VERSION.SDK_INT >= 31 && installerOf(app) == app.packageName)
+                "sdk" -> result.success(Build.VERSION.SDK_INT)
                 "install" -> {
                     val path = call.argument<String>("path") ?: return@setMethodCallHandler result.error("bad_args", "path is required", null)
-                    val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", File(path))
-                    app.startActivity(
-                        Intent(Intent.ACTION_VIEW)
-                            .setDataAndType(uri, "application/vnd.android.package-archive")
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                    result.success(null)
+                    val opened = try {
+                        val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", File(path))
+                        app.startActivity(
+                            Intent(Intent.ACTION_VIEW)
+                                .setDataAndType(uri, "application/vnd.android.package-archive")
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                        true
+                    } catch (e: Exception) {
+                        Log.w(TAG, "install screen refused", e)
+                        false
+                    }
+                    Log.i(TAG, "install screen (APK) requested: $opened")
+                    result.success(opened)
                 }
                 "installSession" -> {
                     val path = call.argument<String>("path") ?: return@setMethodCallHandler result.error("bad_args", "path is required", null)
@@ -91,11 +99,19 @@ object InstallChannel {
                 "confirm" -> {
                     val i = pendingConfirm
                     if (i == null) {
+                        Log.i(TAG, "confirm screen: none pending")
                         result.success(false)
                     } else {
                         pendingConfirm = null
-                        app.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        result.success(true)
+                        val opened = try {
+                            app.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            true
+                        } catch (e: Exception) {
+                            Log.w(TAG, "confirm screen refused", e)
+                            false
+                        }
+                        Log.i(TAG, "confirm screen requested: $opened")
+                        result.success(opened)
                     }
                 }
                 "lastStatus" -> result.success(lastStatus)

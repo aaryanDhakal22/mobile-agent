@@ -212,7 +212,17 @@ mode: status, **INSTALL NOW**, **CHECK NOW**, what the Pi holds); developer
 mode → Config has the same card. If Android doesn't let Quibase install apps
 yet, the prompt says **ALLOW INSTALLS** (switch on, come back). A failed
 install asks again; after two failed sessions INSTALL NOW uses Android's own
-install screen. A release withdrawn on the agent is dropped at the next
+install screen. **1.8.4**: when Android has asked for a tap, INSTALL NOW makes
+sure a screen really opens — Android **11 and older** (the store's Neostra
+Swan 1) first take the **APK screen** (the route a manual install takes; the
+Neostra accepts the session's confirm screen and never shows it), Android 12+
+first the confirm screen; a route whose screen doesn't cover Quibase within
+4 s (`kScreenWait`, via `watchScreen`) is logged and the other one is tried;
+if neither opens, the prompt says *Android didn't open its install screen*.
+Every step lands in the local log (and so in diagnostics reports). With
+reopen off the prompt says to open Quibase from the home screen afterwards
+and offers **ALLOW REOPEN**. Proven on an Android 11 emulator (`quibase30`).
+A release withdrawn on the agent is dropped at the next
 check; older APKs in the cache are deleted when a new one is downloaded.
 After the install the ring service comes back by itself (`RestartReceiver`,
 below); the **screen** comes back too only when Quibase may "display over

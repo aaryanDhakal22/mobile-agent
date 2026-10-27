@@ -27,6 +27,14 @@ const Duration kInstallTimeout = Duration(minutes: 2);
 /// install screen instead.
 const int kSessionFailuresBeforeScreen = 2;
 
+/// INSTALL NOW waits this long for Android's screen to cover Quibase before
+/// it counts the route as not working and tries the other one (1.8.4).
+const Duration kScreenWait = Duration(seconds: 4);
+
+/// Android 12 (API 31): the first version that can install an update without
+/// a tap. Older ones (the store's Neostra, Android 11) always ask.
+const int kSilentInstallSdk = 31;
+
 /// What Android said about an install (InstallChannel.kt `status`).
 enum InstallResult { committed, success, pendingUserAction, aborted, failed }
 
@@ -97,11 +105,41 @@ class UpdatePlatform {
   /// The silent path: a PackageInstaller session (result on [results]).
   Future<void> installSession(String path) => _ch.invokeMethod('installSession', {'path': path});
 
-  /// Opens Android's confirm screen for a pending_user_action result.
+  /// Opens Android's confirm screen for a pending_user_action result (false:
+  /// none pending, or Android refused to open it).
   Future<bool> confirm() async => (await _ch.invokeMethod<bool>('confirm')) ?? false;
 
-  /// The old path: Android's own install screen.
-  Future<void> installWithScreen(String path) => _ch.invokeMethod('install', {'path': path});
+  /// The old path: Android's own install screen for the APK — the route a
+  /// manual install takes (false: Android refused to open it).
+  Future<bool> installWithScreen(String path) async =>
+      (await _ch.invokeMethod<bool>('install', {'path': path})) ?? true;
+
+  /// Android's API level (30 = Android 11); 0 where unknown.
+  Future<int> sdk() async {
+    try {
+      return (await _ch.invokeMethod<int>('sdk')) ?? 0;
+    } on MissingPluginException {
+      return 0;
+    }
+  }
+
+  /// Runs [start], which opens an Android screen, and says whether a screen
+  /// really came up over Quibase within [within] (Quibase stops being the
+  /// app in front). Some Android builds accept the request and show nothing.
+  Future<bool> watchScreen(Future<bool> Function() start, Duration within) async {
+    final opened = Completer<bool>();
+    void covered() {
+      if (!opened.isCompleted) opened.complete(true);
+    }
+
+    final l = AppLifecycleListener(onInactive: covered, onHide: covered, onPause: covered);
+    try {
+      if (!await start()) return false;
+      return await opened.future.timeout(within, onTimeout: () => false);
+    } finally {
+      l.dispose();
+    }
+  }
 }
 
 final updatePlatformProvider = Provider<UpdatePlatform>((_) => UpdatePlatform());
@@ -373,7 +411,7 @@ class Updater extends Notifier<UpdateState> {
     });
     try {
       if (_sessionFailures >= kSessionFailuresBeforeScreen) {
-        await platform.installWithScreen(path);
+        if (!await platform.installWithScreen(path)) throw StateError('Android refused to open its install screen');
         _installTimer?.cancel();
         state = state.copyWith(phase: UpdatePhase.needsTap);
       } else {
@@ -385,17 +423,62 @@ class Updater extends Notifier<UpdateState> {
     }
   }
 
-  /// INSTALL NOW on the prompt: Android's confirm screen when it asked for
-  /// one, else a fresh attempt.
+  /// INSTALL NOW on the prompt: Android's install screen when it asked for a
+  /// tap ([_openInstallScreen]), else a fresh attempt.
   Future<void> tapInstall() async {
+    _log.add('update', 'INSTALL NOW tapped (${state.phase.name})');
     if (state.phase == UpdatePhase.needPermission) {
       return ref.read(updatePlatformProvider).openInstallSettings();
     }
-    if (state.phase == UpdatePhase.needsTap && await ref.read(updatePlatformProvider).confirm()) {
-      state = state.copyWith(phase: UpdatePhase.installing);
-      return;
-    }
+    if (state.phase == UpdatePhase.needsTap) return _openInstallScreen();
     return installNow();
+  }
+
+  /// Android wants a tap: open its install screen, and make sure it opened
+  /// (1.8.4). Two routes — the APK screen (what a manual install uses) and the
+  /// pending session's confirm screen. Android 11 and older try the APK screen
+  /// first: the store's Neostra (Android 11) accepts the confirm screen and
+  /// never shows it, so INSTALL NOW looked dead. Android 12+ tries the confirm
+  /// screen first (after that one Quibase updates itself silently). A route
+  /// whose screen doesn't cover Quibase within [kScreenWait] is logged and the
+  /// other one is tried.
+  Future<void> _openInstallScreen() async {
+    final path = state.apkPath;
+    if (path == null) return _download();
+    final platform = ref.read(updatePlatformProvider);
+    final sdk = await platform.sdk();
+    Future<bool> apkScreen() async {
+      final ok = await platform.watchScreen(() => platform.installWithScreen(path), kScreenWait);
+      _log.add('update', ok ? "Android's install screen opened (APK)" : "Android's install screen did not open (APK)");
+      return ok;
+    }
+
+    Future<bool> confirmScreen() async {
+      final ok = await platform.watchScreen(platform.confirm, kScreenWait);
+      _log.add('update', ok ? "Android's confirm screen opened" : "Android's confirm screen did not open");
+      return ok;
+    }
+
+    final oldAndroid = sdk > 0 && sdk < kSilentInstallSdk;
+    for (final open in oldAndroid ? [apkScreen, confirmScreen] : [confirmScreen, apkScreen]) {
+      if (await open()) {
+        _installTimer?.cancel();
+        _installTimer = Timer(kInstallTimeout, () {
+          if (state.phase == UpdatePhase.installing) {
+            _fail(const FriendlyError("Android didn't finish the install", whatToDo: 'Tap TRY AGAIN'));
+          }
+        });
+        state = state.copyWith(phase: UpdatePhase.installing, clearError: true);
+        return;
+      }
+    }
+    _fail(
+      FriendlyError(
+        "Android didn't open its install screen",
+        whatToDo: 'Tap TRY AGAIN, or Store → Updates → INSTALL NOW',
+        details: 'Android API $sdk; tried ${oldAndroid ? 'the APK screen, then the confirm screen' : 'the confirm screen, then the APK screen'}',
+      ),
+    );
   }
 
   /// LATER on the prompt.
