@@ -149,7 +149,8 @@ void main() {
 
     testWidgets('not found → tap the map to place a pin, SAVE PIN sends it', (tester) async {
       final (_, f) = await pumpMap(tester, delivery('m1', 1201, geo: const {'state': 'not_found'}));
-      expect(find.text('Not found on the map — tap to place pin'), findsOneWidget);
+      expect(find.text('Not found on the map'), findsOneWidget);
+      expect(find.text('SEARCH ADDRESS'), findsOneWidget);
       expect(find.byKey(const ValueKey('confirm-pin')), findsNothing);
       await tester.tapAt(tester.getCenter(find.byType(FlutterMap)) + const Offset(40, 30));
       await tester.pump(const Duration(milliseconds: 400));
@@ -166,7 +167,8 @@ void main() {
     testWidgets('unavailable (never located) → "No map location", pin drop offered', (tester) async {
       final (_, f) = await pumpMap(tester, delivery('m1', 1201, geo: const {'state': 'unavailable'}));
       expect(find.text('Locating…'), findsNothing);
-      expect(find.text('No map location — tap to place pin'), findsOneWidget);
+      expect(find.text('No map location'), findsOneWidget);
+      expect(find.text('PLACE PIN'), findsOneWidget);
       await tester.tapAt(tester.getCenter(find.byType(FlutterMap)) + const Offset(-30, 20));
       await tester.pump(const Duration(milliseconds: 400));
       await tester.tap(find.byKey(const ValueKey('confirm-pin')));

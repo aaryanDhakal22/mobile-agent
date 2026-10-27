@@ -294,12 +294,34 @@ Every delivery's detail has a **map** above the address: the store, the
 customer's door and the driving route (from main, OSRM), "2.3 mi · 7 min",
 amber *approximate location* / red *outside delivery area* tags, pan + zoom,
 a recenter button; light or dark with the app. *Locating…* while main is
-still looking (geo `pending`). **Not found** → "Not found on the map — tap to
-place pin"; never located (geo `unavailable`) → "No map location — tap to
-place pin":
-tap where the door is, **SAVE PIN** (`POST /api/orders/{id}/pin`; main
-remembers it for the address and the route arrives as an order update). A
-located order can be re-pinned too (pin button). **Check address** (1.5.0):
+still looking (geo `pending`). **Not found** (1.7.2) → the plain words "Not
+found on the map" (never located, geo `unavailable`: "No map location"; geo
+`check`: "Address needs a check") above the map, with two buttons:
+
+- **PLACE PIN** → "Tap the map where the door is" over the map; tap where
+  the door is (tap again to move it), **SAVE PIN** (`POST
+  /api/orders/{id}/pin`; main remembers it for the address and the route
+  arrives as an order update); ✕ cancels. A tap on the map starts the pin
+  too.
+- **SEARCH ADDRESS** → a sheet with the street part of the address
+  (its first comma segment: "1613 Wadsworth Way" from "1613 Wadsworth Way,
+  HOUSE") to fix and **SEARCH** — `POST /api/orders/{id}/geo/search
+  {"query"}`, 202 = "Searching near the store…". Main answers as an order
+  update: geo `check` with candidates → pick one (the CHECK ADDRESS list,
+  `geo/choose`); `not_found` again, or nothing within 20 s → "No match — try
+  a different spelling, or PLACE PIN"; located → the sheet closes. 400 → "Type
+  a street and number"; 503 `main_offline` → "The Pi can't reach Quicc right
+  now — try again in a minute"; an older Pi or main (404 / 405 / 501) → "This
+  Pi needs an update to search addresses", SEARCH greys out and PLACE PIN
+  stays. Never unpairs the tablet. Without a map file only SEARCH ADDRESS is
+  offered.
+
+Only the order details offer these; the full-screen pin map (CHECK ADDRESS →
+drop a pin) goes straight to placing the pin. A located order can be
+re-pinned too (pin button). Main may mark a location **corrected** (geo
+`corrected`, 1.7.2: it placed a fixed address, not the one typed): a quiet
+amber *address corrected* tag next to the approx / outside-area tags (order
+map, Deliveries rows and chips, run map, alert map). **Check address** (1.5.0):
 when main found more than one place for the address (geo `check`), an amber
 CHECK ADDRESS tag / button offers up to 3 candidates
 (`POST /api/orders/{id}/geo/choose`) or a full-screen pin. Without a map file on the Pi
@@ -398,7 +420,7 @@ lib/
                               (+ driver reports), printers, settings, setup,
                               diagnose (Help + guides), illustrations,
                               order_detail, maps (delivery map, run map,
-                              offline tiles, check address), alert, arrived
+                              offline tiles, check + search address), alert, arrived
                               (accept controls + time picker), integration
                               (hub toasts + banner), update
                               (self-update: updater + prompt + Updates screen),

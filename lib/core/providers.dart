@@ -326,6 +326,10 @@ class FloorController extends Notifier<FloorState> {
   /// address arrives later as an order update.
   Future<void> chooseGeo(String orderId, int index) => _requireClient(ref).chooseGeo(orderId, index);
 
+  /// SEARCH ADDRESS (1.7.2): main searches [query] near the store; the
+  /// answer arrives later as an order update (candidates or not found).
+  Future<void> searchGeo(String orderId, String query) => _requireClient(ref).searchGeo(orderId, query);
+
   // --- 2.1.0 settings (saved on the Pi, shown at once) -----------------------
 
   void _setSettings(FloorSettings Function(FloorSettings) change) {

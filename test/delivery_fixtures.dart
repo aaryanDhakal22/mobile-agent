@@ -227,6 +227,13 @@ class FakeDeliveryFloor extends FloorController {
   }
 
   @override
+  Future<DefaultTimes> saveTimes(DefaultTimes next) async {
+    calls.add((op: 'times', ids: const [], driver: null, extra: next.toJson()));
+    state = state.copyWith(floor: state.floor!.copyWith(settings: state.settings.copyWith(times: next)));
+    return next;
+  }
+
+  @override
   Future<DeliverySettings> setDeliverySettings(DeliverySettings s) async {
     calls.add((op: 'settings', ids: const [], driver: null, extra: s.toJson()));
     final err = settingsError;

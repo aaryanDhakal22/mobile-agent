@@ -82,39 +82,7 @@ class CheckAddressSheet extends ConsumerStatefulWidget {
 }
 
 class _CheckAddressSheetState extends ConsumerState<CheckAddressSheet> {
-  int? _sending;
-  String? _error;
-
-  Future<void> _choose(int index) async {
-    setState(() {
-      _sending = index;
-      _error = null;
-    });
-    try {
-      await ref.read(floorProvider.notifier).chooseGeo(widget.order.id, index);
-      if (!mounted) return;
-      final nav = Navigator.of(context);
-      final messenger = ScaffoldMessenger.maybeOf(context);
-      nav.pop();
-      messenger?.showSnackBar(
-        const SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('Address chosen — the route shows in a moment'),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(
-        () => _error = switch (e) {
-          AgentException(code: kSettingsUnsupported) => 'This Pi needs an update to check addresses.',
-          AgentException(code: kMainOffline) => "The Pi can't reach Quicc right now — try again in a minute.",
-          _ => 'Not saved. ${FriendlyError.from(e).short}.',
-        },
-      );
-    } finally {
-      if (mounted) setState(() => _sending = null);
-    }
-  }
+  bool _busy = false;
 
   void _pin() {
     final nav = Navigator.of(context);
@@ -153,27 +121,13 @@ class _CheckAddressSheetState extends ConsumerState<CheckAddressSheet> {
                 'No suggestions for this one — drop a pin where the door is.',
                 style: TextStyle(color: context.palette.textMuted, fontSize: 16),
               ),
-            for (final (i, c) in candidates.indexed)
-              Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  key: ValueKey('candidate-$i'),
-                  minVerticalPadding: 14,
-                  leading: const Icon(Icons.place_outlined, color: QuiccColors.brand400, size: 30),
-                  title: Text(c.title, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600)),
-                  trailing: _sending == i
-                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 3))
-                      : const Text('THIS ONE', style: TextStyle(fontWeight: FontWeight.w800)),
-                  onTap: _sending == null ? () => _choose(i) : null,
-                ),
-              ),
-            if (_error != null) ...[const SizedBox(height: 8), InlineError(_error!)],
+            CandidateList(orderId: so.id, candidates: candidates, onBusy: (b) => setState(() => _busy = b)),
             const SizedBox(height: 12),
             SizedBox(
               height: 56,
               child: OutlinedButton.icon(
                 key: const ValueKey('drop-pin'),
-                onPressed: _sending == null ? _pin : null,
+                onPressed: _busy ? null : _pin,
                 icon: const Icon(Icons.push_pin_outlined),
                 label: const Text('NONE OF THESE — DROP A PIN'),
               ),
@@ -183,6 +137,83 @@ class _CheckAddressSheetState extends ConsumerState<CheckAddressSheet> {
       ),
     );
   }
+}
+
+/// The places main found for an address (up to 3): tap one → `geo/choose`,
+/// then the sheet closes with "Address chosen — …". Shared by CHECK ADDRESS
+/// and SEARCH ADDRESS (1.7.2). [onBusy] says while a choice is being saved.
+class CandidateList extends ConsumerStatefulWidget {
+  final String orderId;
+  final List<GeoCandidate> candidates;
+  final ValueChanged<bool>? onBusy;
+  const CandidateList({super.key, required this.orderId, required this.candidates, this.onBusy});
+
+  @override
+  ConsumerState<CandidateList> createState() => _CandidateListState();
+}
+
+class _CandidateListState extends ConsumerState<CandidateList> {
+  int? _sending;
+  String? _error;
+
+  void _setSending(int? i) {
+    _sending = i;
+    widget.onBusy?.call(i != null);
+  }
+
+  Future<void> _choose(int index) async {
+    setState(() {
+      _setSending(index);
+      _error = null;
+    });
+    try {
+      await ref.read(floorProvider.notifier).chooseGeo(widget.orderId, index);
+      if (!mounted) return;
+      final nav = Navigator.of(context);
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      nav.pop();
+      messenger?.showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('Address chosen — the route shows in a moment'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(
+        () => _error = switch (e) {
+          AgentException(code: kSettingsUnsupported) => 'This Pi needs an update to check addresses.',
+          AgentException(code: kMainOffline) => "The Pi can't reach Quicc right now — try again in a minute.",
+          _ => 'Not saved. ${FriendlyError.from(e).short}.',
+        },
+      );
+    } finally {
+      if (mounted) setState(() => _setSending(null));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final (i, c) in widget.candidates.indexed)
+        Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: ListTile(
+            key: ValueKey('candidate-$i'),
+            minVerticalPadding: 14,
+            leading: const Icon(Icons.place_outlined, color: QuiccColors.brand400, size: 30),
+            title: Text(c.title, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600)),
+            trailing: _sending == i
+                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 3))
+                : const Text('THIS ONE', style: TextStyle(fontWeight: FontWeight.w800)),
+            onTap: _sending == null ? () => _choose(i) : null,
+          ),
+        ),
+      if (_error != null) ...[const SizedBox(height: 8), InlineError(_error!)],
+    ],
+  );
 }
 
 /// Full-screen map to place the door of an address by hand (the existing
@@ -205,7 +236,12 @@ class PinAddressScreen extends ConsumerWidget {
         builder: (context, box) => ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            DeliveryMap(key: ValueKey('pin-map-$orderId'), order: so, height: (box.maxHeight - 80).clamp(280, 900)),
+            DeliveryMap(
+              key: ValueKey('pin-map-$orderId'),
+              order: so,
+              height: (box.maxHeight - 80).clamp(280, 900),
+              pinOnly: true,
+            ),
             const SizedBox(height: 8),
             if (so.geo?.state == GeoState.located)
               Text(
