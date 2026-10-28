@@ -287,17 +287,19 @@ The screen is kept on with `wakelock_plus`.
   mistake). The Pi takes an undo up to 2 min after READY; later, or once
   the order moved on, it says "Too late to undo"; an older Pi says "Update
   the Pi to undo READY".
-- **Fun lines and guest voices** for the order callout (Store settings ›
+- **Voice lines and guest voices** for the order callout (Store settings ›
   Order callout; each card only when the Pi has the setting and the store
-  hub says it speaks it). **Fun lines**: a slider 0–50 % in steps of 5 (how
-  many READY callouts say a fun line instead of "Order ready for ticket
-  number …"; `fun_chance`), **Your lines** (one per line, `{n}` = the
-  ticket number, empty = the hub's built-in lines; at most 10 lines of 120
-  letters, checked like the Pi; `fun_lines`) with SAVE, and **TRY A FUN
-  LINE** (`POST /api/callout/test {number: 290, kind: "fun"}` on the store
-  speaker; an older Pi: "Update the Pi for fun lines"). **Guest voices**: a
-  slider 0–50 % (`guest_chance`) and the voices to pick from (none = all
-  online voices, at most 10; `guest_voices` as a comma list).
+  hub says it speaks it). **Voice lines**: a voice can have its own line,
+  said whenever that voice calls an order (the chosen voice or a guest)
+  instead of "Order ready for ticket number …" — `<x>` becomes the ticket
+  number, a line without it is said before the normal words, at most 160
+  letters (checked like the Pi). Pick the voice (the chosen one first),
+  type the Line, SAVE (`voice_lines`, the whole object; an emptied line
+  leaves the voice out), PREVIEW ON THIS TABLET for that voice; below, the
+  voices with a line (tap = edit, ✕ = take it off). The voice picker shows
+  a speech bubble on a voice with a line. **Guest voices**: a slider 0–50 %
+  (`guest_chance`) and the voices to pick from (none = all online voices,
+  at most 10; `guest_voices` as a comma list).
 - **A longer voice list**: every English Kokoro voice, Piper voices and
   online **ElevenLabs** voices (~30). The picker scrolls; an online voice
   says "Online (ElevenLabs) · made on first use" instead of a count like

@@ -107,14 +107,12 @@ class CalloutSettings {
   static const int minRepeat = 1;
   static const int maxRepeat = 3;
 
-  /// 1.9.2: the percent of READY callouts said with a fun line instead
-  /// of the normal phrase, 0–100; null = an older Pi (the Fun lines card is
+  /// 1.9.2: each voice's own line, {voice id: line} — said instead of
+  /// "Order ready for ticket number …" whenever that voice calls an order
+  /// (`<x>` or `{n}` = the ticket number; a line without either is said
+  /// before the normal words). null = an older Pi (the Voice lines card is
   /// hidden and the field is never sent).
-  final int? funChance;
-
-  /// 1.9.2: the store's own fun lines, one per line ('' = the hub's
-  /// built-in lines; `{n}` = the spoken ticket number); null = an older Pi.
-  final String? funLines;
+  final Map<String, String>? voiceLines;
 
   /// 1.9.2: the percent of READY callouts said by a random guest voice
   /// instead of the chosen one, 0–50; null = an older Pi.
@@ -124,9 +122,8 @@ class CalloutSettings {
   /// voice); null = an older Pi.
   final String? guestVoices;
 
-  static const int maxFunChance = 100;
-  static const int maxFunLines = 10;
-  static const int maxFunLineLength = 120;
+  static const int maxVoiceLines = 60;
+  static const int maxVoiceLineLength = 160;
   static const int maxGuestChance = 50;
   static const int maxGuestVoices = 10;
 
@@ -138,8 +135,7 @@ class CalloutSettings {
     this.restoreSeconds = 1.5,
     this.chime = true,
     this.repeat,
-    this.funChance,
-    this.funLines,
+    this.voiceLines,
     this.guestChance,
     this.guestVoices,
   });
@@ -154,8 +150,12 @@ class CalloutSettings {
         .toDouble(),
     chime: jBool(j['chime'], true),
     repeat: jIntOrNull(j['repeat'])?.clamp(minRepeat, maxRepeat),
-    funChance: jIntOrNull(j['fun_chance'])?.clamp(0, maxFunChance),
-    funLines: j['fun_lines'] is String ? j['fun_lines'] as String : null,
+    voiceLines: j['voice_lines'] is Map
+        ? {
+            for (final e in (j['voice_lines'] as Map).entries)
+              if (e.value is String) '${e.key}': e.value as String,
+          }
+        : null,
     guestChance: jIntOrNull(j['guest_chance'])?.clamp(0, maxGuestChance),
     guestVoices: j['guest_voices'] is String ? j['guest_voices'] as String : null,
   );
@@ -168,8 +168,7 @@ class CalloutSettings {
     'restore_seconds': restoreSeconds,
     'chime': chime,
     'repeat': ?repeat,
-    'fun_chance': ?funChance,
-    'fun_lines': ?funLines,
+    'voice_lines': ?voiceLines,
     'guest_chance': ?guestChance,
     'guest_voices': ?guestVoices,
   };
@@ -181,6 +180,14 @@ class CalloutSettings {
       if (id.trim().isNotEmpty) id.trim(),
   ];
 
+  /// [voiceLines] with [voiceId]'s line set to [line] (trimmed), or left
+  /// out when it is empty.
+  Map<String, String> withVoiceLine(String voiceId, String line) {
+    final next = {...?voiceLines}..remove(voiceId);
+    if (line.trim().isNotEmpty) next[voiceId] = line.trim();
+    return next;
+  }
+
   CalloutSettings copyWith({
     bool? enabled,
     String? voice,
@@ -189,8 +196,7 @@ class CalloutSettings {
     double? restoreSeconds,
     bool? chime,
     int? repeat,
-    int? funChance,
-    String? funLines,
+    Map<String, String>? voiceLines,
     int? guestChance,
     String? guestVoices,
   }) => CalloutSettings(
@@ -201,8 +207,7 @@ class CalloutSettings {
     restoreSeconds: restoreSeconds ?? this.restoreSeconds,
     chime: chime ?? this.chime,
     repeat: repeat ?? this.repeat,
-    funChance: funChance ?? this.funChance,
-    funLines: funLines ?? this.funLines,
+    voiceLines: voiceLines ?? this.voiceLines,
     guestChance: guestChance ?? this.guestChance,
     guestVoices: guestVoices ?? this.guestVoices,
   );
@@ -217,8 +222,7 @@ class CalloutSettings {
       other.restoreSeconds == restoreSeconds &&
       other.chime == chime &&
       other.repeat == repeat &&
-      other.funChance == funChance &&
-      other.funLines == funLines &&
+      _sameLines(other.voiceLines, voiceLines) &&
       other.guestChance == guestChance &&
       other.guestVoices == guestVoices;
 
@@ -231,26 +235,23 @@ class CalloutSettings {
     restoreSeconds,
     chime,
     repeat,
-    funChance,
-    funLines,
+    voiceLines == null ? null : Object.hashAllUnordered(voiceLines!.entries.map((e) => Object.hash(e.key, e.value))),
     guestChance,
     guestVoices,
   );
 }
 
-/// What is wrong with the fun lines typed in [text] (the Pi's rule: at most
-/// 10 non-empty lines, each at most 120 characters), or null when they are
-/// fine.
-String? funLinesProblem(String text) {
-  final lines = text.split('\n').where((l) => l.trim().isNotEmpty).toList();
-  if (lines.length > CalloutSettings.maxFunLines) {
-    return 'At most ${CalloutSettings.maxFunLines} lines (now ${lines.length}).';
-  }
-  for (var i = 0; i < lines.length; i++) {
-    final len = lines[i].trimRight().length;
-    if (len > CalloutSettings.maxFunLineLength) {
-      return 'Line ${i + 1} is too long ($len letters; at most ${CalloutSettings.maxFunLineLength}).';
-    }
+bool _sameLines(Map<String, String>? a, Map<String, String>? b) {
+  if (a == null || b == null) return a == b;
+  return a.length == b.length && a.entries.every((e) => b[e.key] == e.value);
+}
+
+/// What is wrong with a voice line typed as [line] (the Pi's rule: at most
+/// 160 characters), or null when it is fine.
+String? voiceLineProblem(String line) {
+  final len = line.trim().length;
+  if (len > CalloutSettings.maxVoiceLineLength) {
+    return 'Too long: $len letters (at most ${CalloutSettings.maxVoiceLineLength}).';
   }
   return null;
 }
@@ -333,8 +334,8 @@ class CalloutHubReport {
   /// Hub 0.2.2: it can make a preview for a tablet (`callout.render`).
   final bool preview;
 
-  /// 1.9.2: it speaks fun lines (`fun_chance`, `fun_lines`).
-  final bool fun;
+  /// 1.9.2: it speaks each voice's own line (`voice_lines`).
+  final bool lines;
 
   /// 1.9.2: it speaks some callouts in a guest voice (`guest_chance`,
   /// `guest_voices`).
@@ -351,7 +352,7 @@ class CalloutHubReport {
     this.renderingTotal = 0,
     this.last,
     this.preview = false,
-    this.fun = false,
+    this.lines = false,
     this.guest = false,
   });
 
@@ -370,7 +371,7 @@ class CalloutHubReport {
       renderingTotal: jInt(r['total']),
       last: CalloutSpoken.fromJson(j['last']),
       preview: jBool(j['preview']),
-      fun: jBool(j['fun']),
+      lines: jBool(j['lines']),
       guest: jBool(j['guest']),
     );
   }
