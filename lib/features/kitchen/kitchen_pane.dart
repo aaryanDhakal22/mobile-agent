@@ -267,7 +267,8 @@ class _LaterTile extends StatelessWidget {
 
 /// "Customer waiting" (1.7.1, replaces the 1.5.0 green wave): a paid ticket
 /// that isn't ready gets a red lava bar, a red halo breathing round the
-/// card and "CUSTOMER WAITING · N min" — brighter and faster after
+/// card and "CUSTOMER WAITING" (1.9.2: no minutes — the ticket's one timer
+/// is enough) — brighter and faster after
 /// [kWaitingEscalate]. Motion off: a solid red bar and a thick red outline.
 const Duration kWaitingEscalate = Duration(minutes: 5);
 
@@ -317,7 +318,7 @@ class _WaitingHalo extends AnimatedWidget {
 }
 
 /// What the bar shows for a waiting ticket.
-typedef _Waiting = ({int minutes, bool hot, Animation<double>? lava});
+typedef _Waiting = ({bool hot, Animation<double>? lava});
 
 /// The kitchen ticket's paper look: a white body with dark text in either
 /// theme (the urgency colour lives in the header bar).
@@ -354,10 +355,9 @@ const double kTicketButtonHeight = 52;
 
 /// What of a ticket changes with the clock, besides its timer text: the
 /// lateness colour (in 5 s steps, as the old per-ticket timer redrew it —
-/// constant while green or fully red), the customer-waiting minutes and
-/// heat, and the CHANGED tag. The card draws the exact colour of the moment
-/// it rebuilds.
-typedef _CardTime = ({Color toneStep, int waitedMinutes, bool hot, bool changed});
+/// constant while green or fully red), the customer-waiting heat, and the
+/// CHANGED tag. The card draws the exact colour of the moment it rebuilds.
+typedef _CardTime = ({Color toneStep, bool hot, bool changed});
 
 /// Clamped: a tablet clock a little behind the Pi's would count below zero.
 Duration _sinceArrived(DateTime now, DateTime? arrived) {
@@ -373,7 +373,6 @@ _CardTime _cardTimeFor(DateTime now, StoredOrder so, DateTime? arrived, bool wav
   final waited = waitedRaw.isNegative ? Duration.zero : waitedRaw;
   return (
     toneStep: toneStep,
-    waitedMinutes: wave ? waited.inMinutes : 0,
     hot: wave && waited >= kWaitingEscalate,
     changed: so.changedTag(now),
   );
@@ -492,26 +491,25 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
     final motion = Motion.of(context, ref);
     final radius = BorderRadius.circular(QuiccRadius.md);
     // 1.9.0: the shared clock rebuilds the card only when its colour, the
-    // customer-waiting minutes / heat or the CHANGED tag move on; the timer
-    // line follows the clock by itself.
+    // customer-waiting heat or the CHANGED tag move on; the timer follows
+    // the clock by itself.
     return ClockBuilder<_CardTime>(
       select: (now) => _cardTime(now, so, arrived, wave),
       builder: (context, t, now) {
         final tone = lateColor(_sinceArrived(now, arrived), widget.greenTill);
-        final waited = Duration(minutes: t.waitedMinutes);
         final hot = t.hot;
         _syncWave(wave && motion.full, motion.scale(hot ? kWaitingLavaHot : kWaitingLava));
         // 1.8.0: changed at the POS (pending, or OK'd < 10 min ago).
         final changed = so.changedTag(now);
         final _Waiting? waiting = wave
-            ? (minutes: waited.inMinutes, hot: hot, lava: motion.full ? _wave : null)
+            ? (hot: hot, lava: motion.full ? _wave : null)
             : null;
         final body = Padding(
           padding: const EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.md, QuiccSpace.lg, QuiccSpace.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _TimerLine(order: so, arrived: arrived, tone: tone),
+              _TimerLine(arrived: arrived, tone: tone),
               QuiccSpace.gapSm,
               Text(
                 ticketHeading(so),
@@ -671,7 +669,7 @@ class _CardBar extends StatelessWidget {
   final Color tone;
 
   /// A paid ticket that isn't ready (1.7.1): red lava (or solid red with
-  /// Motion off) and "CUSTOMER WAITING · N min".
+  /// Motion off) and "CUSTOMER WAITING".
   final _Waiting? waiting;
   const _CardBar({required this.order, required this.tone, this.waiting});
 
@@ -774,7 +772,7 @@ class _CardBar extends StatelessWidget {
               children: [
                 row,
                 Text(
-                  'CUSTOMER WAITING · ${w.minutes} min',
+                  'CUSTOMER WAITING',
                   key: const ValueKey('customer-waiting'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -793,58 +791,28 @@ class _CardBar extends StatelessWidget {
   }
 }
 
-/// "12:03 · 7 min left · 4:36 PM" — time since the order arrived (coloured
-/// like the ticket), then the promised ready time.
+/// "12:03" — the ticket's one timer (1.9.2): time since the order was
+/// placed (sent to the kitchen), coloured like the ticket.
 class _TimerLine extends StatelessWidget {
-  final StoredOrder order;
   final DateTime? arrived;
   final Color tone;
-  const _TimerLine({required this.order, required this.arrived, required this.tone});
+  const _TimerLine({required this.arrived, required this.tone});
 
   @override
   Widget build(BuildContext context) {
-    final eta = order.status.estimatedReadyAt;
-    final secondary = context.palette.textSecondary;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        ClockText(
-          (now) => duration(_sinceArrived(now, arrived)),
-          textKey: const ValueKey('ticket-timer'),
-          style: QuiccType.number(
-            QuiccType.title,
-            weight: FontWeight.w700,
-            // Darker than the bar so it reads on the white ticket.
-            color: Color.lerp(tone, Colors.black, 0.35),
-            height: 1.1,
-          ),
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ClockText(
+        (now) => duration(_sinceArrived(now, arrived)),
+        textKey: const ValueKey('ticket-timer'),
+        style: QuiccType.number(
+          QuiccType.title,
+          weight: FontWeight.w700,
+          // Darker than the bar so it reads on the white ticket.
+          color: Color.lerp(tone, Colors.black, 0.35),
+          height: 1.1,
         ),
-        if (eta != null) ...[
-          QuiccSpace.gapMd,
-          Expanded(
-            child: ClockBuilder<(bool, String)>(
-              select: (now) {
-                final left = eta.difference(now);
-                final late = left.isNegative;
-                return (late, late ? 'LATE ${minutes(left)}' : '${minutes(left)} left · ${clock(eta)}');
-              },
-              builder: (context, v, _) {
-                final (late, text) = v;
-                return Text(
-                  text,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: QuiccType.text(
-                    late ? QuiccType.heading : QuiccType.body,
-                    weight: late ? FontWeight.w700 : FontWeight.w500,
-                    color: late ? QuiccColors.statusVoided : secondary,
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ],
+      ),
     );
   }
 }

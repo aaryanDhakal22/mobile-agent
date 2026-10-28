@@ -271,6 +271,16 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 1.9.2 — one timer per Kitchen ticket
+
+- A Kitchen ticket has **one timer**: the time since the order was sent to
+  the kitchen (coloured green → red as before). The "N min left · 4:36 PM" /
+  "LATE N min" line is gone.
+- The customer-waiting bar says just **CUSTOMER WAITING** (no minutes); the
+  red lava and halo are unchanged (and still heat up after 5 min).
+- Dine-in orders are tagged **COUNTER** everywhere, like the POS counter
+  checks.
+
 ## 1.9.1 — driver routes on their phones (with agent 2.3.7)
 
 * **Phone (Pushover device).** The driver dialog (Drivers → add / edit, and

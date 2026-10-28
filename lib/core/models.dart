@@ -45,7 +45,8 @@ enum OrderState {
 enum FulfillmentType {
   pickup('pickup', 'PICKUP'),
   delivery('delivery', 'DELIVERY'),
-  dineIn('dine_in', 'DINE-IN'),
+  // 1.9.2: dine-in says COUNTER, like the POS counter checks.
+  dineIn('dine_in', 'COUNTER'),
   unknown('', '');
 
   final String wire;
