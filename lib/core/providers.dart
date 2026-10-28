@@ -429,6 +429,16 @@ class FloorController extends Notifier<FloorState> {
     }
   }
 
+  /// UNDO on the "ready" pill (1.9.2): back to cooking.
+  Future<void> undoReady(String id) async {
+    try {
+      _upsert([await _requireClient(ref).undoReady(id)]);
+    } on AgentException catch (e) {
+      if (e.isConflict) unawaited(refresh());
+      rethrow;
+    }
+  }
+
   /// The customer receipt again.
   Future<void> reprint(String id) => _requireClient(ref).reprint(id);
 

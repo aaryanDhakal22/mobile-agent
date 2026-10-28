@@ -271,6 +271,41 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 1.9.2 — one timer per Kitchen ticket, UNDO after READY
+
+- A Kitchen ticket has **one timer**: the time since the order was sent to
+  the kitchen (coloured green → red as before). The "N min left · 4:36 PM" /
+  "LATE N min" line is gone.
+- The customer-waiting bar says just **CUSTOMER WAITING** (no minutes); the
+  red lava and halo are unchanged (and still heat up after 5 min).
+- Dine-in orders are tagged **COUNTER** everywhere, like the POS counter
+  checks.
+- **UNDO after READY** (with agent 2.3.8): READY shows a green pill
+  "#232 ready" with **UNDO** for 10 s (Kitchen and the order screen). UNDO
+  puts the order back to cooking — a paid counter check closed at the POS
+  would otherwise leave Kitchen at once (ticket 232, 2026-10-27, tapped by
+  mistake). The Pi takes an undo up to 2 min after READY; later, or once
+  the order moved on, it says "Too late to undo"; an older Pi says "Update
+  the Pi to undo READY".
+- **Voice lines and guest voices** for the order callout (Store settings ›
+  Order callout; each card only when the Pi has the setting and the store
+  hub says it speaks it). **Voice lines**: a voice can have its own line,
+  said whenever that voice calls an order (the chosen voice or a guest)
+  instead of "Order ready for ticket number …" — `<x>` becomes the ticket
+  number, a line without it is said before the normal words, at most 160
+  letters (checked like the Pi). Pick the voice (the chosen one first),
+  type the Line, SAVE (`voice_lines`, the whole object; an emptied line
+  leaves the voice out), PREVIEW ON THIS TABLET for that voice; below, the
+  voices with a line (tap = edit, ✕ = take it off). The voice picker shows
+  a speech bubble on a voice with a line. **Guest voices**: a slider 0–50 %
+  (`guest_chance`) and the voices to pick from (none = all online voices,
+  at most 10; `guest_voices` as a comma list).
+- **A longer voice list**: every English Kokoro voice, Piper voices and
+  online **ElevenLabs** voices (~30). The picker scrolls; an online voice
+  says "Online (ElevenLabs) · made on first use" instead of a count like
+  312/999 (each number is made over the internet the first time it is said,
+  then kept).
+
 ## 1.9.1 — driver routes on their phones (with agent 2.3.7)
 
 * **Phone (Pushover device).** The driver dialog (Drivers → add / edit, and

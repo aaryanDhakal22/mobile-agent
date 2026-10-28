@@ -940,11 +940,11 @@ void main() {
     Color barOf(WidgetTester tester, String id) =>
         tester.widget<Container>(inCard(id, find.byKey(const ValueKey('card-bar')))).color!;
 
-    testWidgets('red lava bar from the first frame, halo, "CUSTOMER WAITING · N min"; hotter after 5 min; first in line', (tester) async {
+    testWidgets('red lava bar from the first frame, halo, "CUSTOMER WAITING" (no minutes, 1.9.2); hotter after 5 min; first in line', (tester) async {
       // Cash first by urgency (ready sooner), the paid ones after it.
       await board(tester, [pickup('cash', 1101, paid: false, readyIn: 1), pickup('fresh', 1102, ago: 2), pickup('long', 1103, ago: 8)]);
-      expect(inCard('fresh', find.text('CUSTOMER WAITING · 2 min')), findsOneWidget);
-      expect(inCard('long', find.text('CUSTOMER WAITING · 8 min')), findsOneWidget);
+      expect(inCard('fresh', find.text('CUSTOMER WAITING')), findsOneWidget);
+      expect(inCard('long', find.text('CUSTOMER WAITING')), findsOneWidget);
       expect(inCard('cash', find.byKey(const ValueKey('customer-waiting'))), findsNothing);
       expect(inCard('fresh', find.byKey(const ValueKey('waiting-lava'))), findsOneWidget);
       expect(inCard('fresh', find.byKey(const ValueKey('paid-wave'))), findsOneWidget, reason: 'the halo');
@@ -955,16 +955,17 @@ void main() {
       // Waiting tickets lead the board.
       final x = {for (final id in ['cash', 'fresh', 'long']) id: tester.getTopLeft(find.byKey(ValueKey(id))).dx};
       expect(x['fresh']! < x['cash']! && x['long']! < x['cash']!, isTrue, reason: '$x');
-      // Counts up.
-      await tester.pump(const Duration(minutes: 1));
-      expect(inCard('fresh', find.text('CUSTOMER WAITING · 3 min')), findsOneWidget);
+      // Heats up past 5 min (the ticket's one timer counts; the line doesn't).
+      await tester.pump(const Duration(minutes: 3));
+      expect(inCard('fresh', find.text('CUSTOMER WAITING')), findsOneWidget);
+      expect(barOf(tester, 'fresh'), kWaitingRedHot);
       await tester.pumpWidget(const SizedBox());
     });
 
     testWidgets('Motion off: solid red bar and a thick red outline, nothing moving', (tester) async {
       await board(tester, [pickup('p', 1102)], motion: false);
       expect(find.byKey(const ValueKey('waiting-lava')), findsNothing);
-      expect(find.text('CUSTOMER WAITING · 8 min'), findsOneWidget);
+      expect(find.text('CUSTOMER WAITING'), findsOneWidget);
       expect(barOf(tester, 'p'), kWaitingRedHot);
       final outline = tester
           .widgetList<Container>(inCard('p', find.byType(Container)))
@@ -974,6 +975,16 @@ void main() {
       expect((outline.border! as Border).top.width, 4);
       await tester.pump();
       expect(tester.binding.hasScheduledFrame, isFalse);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('1.9.2: one timer per ticket — no "min left" / LATE line', (tester) async {
+      await board(tester, [pickup('cash', 1101, paid: false, readyIn: 1), pickup('late', 1104, paid: false, readyIn: -4)]);
+      for (final id in ['cash', 'late']) {
+        expect(inCard(id, find.byKey(const ValueKey('ticket-timer'))), findsOneWidget);
+        expect(inCard(id, find.textContaining('left')), findsNothing);
+        expect(inCard(id, find.textContaining('LATE')), findsNothing);
+      }
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -1143,3 +1154,4 @@ Future<void> _go(WidgetTester tester, ProviderContainer c, HomeDestination d) as
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 600));
 }
+
