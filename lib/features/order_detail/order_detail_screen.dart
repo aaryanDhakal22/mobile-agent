@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../kitchen/ready_undo.dart';
+import '../common/island.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
@@ -375,6 +377,21 @@ class _ActionsState extends ConsumerState<_Actions> {
     }
   }
 
+  /// READY, then the "#232 ready · UNDO" pill (1.9.2).
+  Future<void> _ready(StoredOrder so) async {
+    setState(() => _busy = true);
+    final island = Island.maybeOf(context);
+    final floor = ref.read(floorProvider.notifier);
+    try {
+      await floor.ready(so.id);
+      showReadyUndo(island, floor, so);
+    } catch (e) {
+      if (mounted) toastError(context, e, lead: 'Not marked ready', area: 'order');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final so = widget.order;
@@ -396,7 +413,7 @@ class _ActionsState extends ConsumerState<_Actions> {
                 backgroundColor: QuiccColors.statusPaid,
                 foregroundColor: QuiccColors.brand900,
               ),
-              onPressed: _busy ? null : () => _do(() => floor.ready(so.id), 'Marked ready', 'Not marked ready'),
+              onPressed: _busy ? null : () => _ready(so),
               icon: const Icon(Icons.check_circle_outline),
               label: const Text('READY'),
             ),

@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'ready_undo.dart';
+import '../common/island.dart';
 import '../../core/api_client.dart';
 import '../../core/clock.dart';
 import '../../core/floor_state.dart';
@@ -425,8 +427,12 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
 
   Future<void> _ready() async {
     setState(() => _busy = true);
+    // Read before the call: this ticket leaves the board with it.
+    final island = Island.maybeOf(context);
+    final floor = ref.read(floorProvider.notifier);
     try {
-      await ref.read(floorProvider.notifier).ready(widget.order.id);
+      await floor.ready(widget.order.id);
+      showReadyUndo(island, floor, widget.order);
     } catch (e) {
       if (mounted) {
         if (e is AgentException && e.isConflict) {

@@ -271,7 +271,7 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
-## 1.9.2 — one timer per Kitchen ticket
+## 1.9.2 — one timer per Kitchen ticket, UNDO after READY
 
 - A Kitchen ticket has **one timer**: the time since the order was sent to
   the kitchen (coloured green → red as before). The "N min left · 4:36 PM" /
@@ -280,6 +280,13 @@ The screen is kept on with `wakelock_plus`.
   red lava and halo are unchanged (and still heat up after 5 min).
 - Dine-in orders are tagged **COUNTER** everywhere, like the POS counter
   checks.
+- **UNDO after READY** (with agent 2.3.8): READY shows a green pill
+  "#232 ready" with **UNDO** for 10 s (Kitchen and the order screen). UNDO
+  puts the order back to cooking — a paid counter check closed at the POS
+  would otherwise leave Kitchen at once (ticket 232, 2026-10-27, tapped by
+  mistake). The Pi takes an undo up to 2 min after READY; later, or once
+  the order moved on, it says "Too late to undo"; an older Pi says "Update
+  the Pi to undo READY".
 
 ## 1.9.1 — driver routes on their phones (with agent 2.3.7)
 

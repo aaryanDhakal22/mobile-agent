@@ -506,6 +506,11 @@ class AgentClient {
   Future<StoredOrder> ready(String id) async =>
       StoredOrder.fromJson(jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/ready')));
 
+  /// A READY tapped by mistake back to cooking (agent 2.3.8; 409
+  /// `undo_expired` once it moved on or after 2 min; an older Pi: plain 404).
+  Future<StoredOrder> undoReady(String id) async =>
+      StoredOrder.fromJson(jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/undo-ready')));
+
   /// Revoke this tablet's own key on the agent (Settings → Unpair).
   Future<void> unpairSelf() async {
     await _send('POST', '/api/device/unpair');
