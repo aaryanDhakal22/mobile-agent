@@ -107,6 +107,29 @@ class CalloutSettings {
   static const int minRepeat = 1;
   static const int maxRepeat = 3;
 
+  /// 1.9.2: the percent of READY callouts said with a fun line instead
+  /// of the normal phrase, 0–100; null = an older Pi (the Fun lines card is
+  /// hidden and the field is never sent).
+  final int? funChance;
+
+  /// 1.9.2: the store's own fun lines, one per line ('' = the hub's
+  /// built-in lines; `{n}` = the spoken ticket number); null = an older Pi.
+  final String? funLines;
+
+  /// 1.9.2: the percent of READY callouts said by a random guest voice
+  /// instead of the chosen one, 0–50; null = an older Pi.
+  final int? guestChance;
+
+  /// 1.9.2: the guest voice ids, comma-separated ('' = every online
+  /// voice); null = an older Pi.
+  final String? guestVoices;
+
+  static const int maxFunChance = 100;
+  static const int maxFunLines = 10;
+  static const int maxFunLineLength = 120;
+  static const int maxGuestChance = 50;
+  static const int maxGuestVoices = 10;
+
   const CalloutSettings({
     this.enabled = true,
     this.voice = '',
@@ -115,6 +138,10 @@ class CalloutSettings {
     this.restoreSeconds = 1.5,
     this.chime = true,
     this.repeat,
+    this.funChance,
+    this.funLines,
+    this.guestChance,
+    this.guestVoices,
   });
 
   factory CalloutSettings.fromJson(Map<String, dynamic> j) => CalloutSettings(
@@ -127,6 +154,10 @@ class CalloutSettings {
         .toDouble(),
     chime: jBool(j['chime'], true),
     repeat: jIntOrNull(j['repeat'])?.clamp(minRepeat, maxRepeat),
+    funChance: jIntOrNull(j['fun_chance'])?.clamp(0, maxFunChance),
+    funLines: j['fun_lines'] is String ? j['fun_lines'] as String : null,
+    guestChance: jIntOrNull(j['guest_chance'])?.clamp(0, maxGuestChance),
+    guestVoices: j['guest_voices'] is String ? j['guest_voices'] as String : null,
   );
 
   Map<String, Object> toJson() => {
@@ -137,7 +168,18 @@ class CalloutSettings {
     'restore_seconds': restoreSeconds,
     'chime': chime,
     'repeat': ?repeat,
+    'fun_chance': ?funChance,
+    'fun_lines': ?funLines,
+    'guest_chance': ?guestChance,
+    'guest_voices': ?guestVoices,
   };
+
+  /// The guest voice ids ([guestVoices] split on commas); empty = every
+  /// online voice.
+  List<String> get guestVoiceIds => [
+    for (final id in (guestVoices ?? '').split(','))
+      if (id.trim().isNotEmpty) id.trim(),
+  ];
 
   CalloutSettings copyWith({
     bool? enabled,
@@ -147,6 +189,10 @@ class CalloutSettings {
     double? restoreSeconds,
     bool? chime,
     int? repeat,
+    int? funChance,
+    String? funLines,
+    int? guestChance,
+    String? guestVoices,
   }) => CalloutSettings(
     enabled: enabled ?? this.enabled,
     voice: voice ?? this.voice,
@@ -155,6 +201,10 @@ class CalloutSettings {
     restoreSeconds: restoreSeconds ?? this.restoreSeconds,
     chime: chime ?? this.chime,
     repeat: repeat ?? this.repeat,
+    funChance: funChance ?? this.funChance,
+    funLines: funLines ?? this.funLines,
+    guestChance: guestChance ?? this.guestChance,
+    guestVoices: guestVoices ?? this.guestVoices,
   );
 
   @override
@@ -166,10 +216,43 @@ class CalloutSettings {
       other.musicDip == musicDip &&
       other.restoreSeconds == restoreSeconds &&
       other.chime == chime &&
-      other.repeat == repeat;
+      other.repeat == repeat &&
+      other.funChance == funChance &&
+      other.funLines == funLines &&
+      other.guestChance == guestChance &&
+      other.guestVoices == guestVoices;
 
   @override
-  int get hashCode => Object.hash(enabled, voice, volume, musicDip, restoreSeconds, chime, repeat);
+  int get hashCode => Object.hash(
+    enabled,
+    voice,
+    volume,
+    musicDip,
+    restoreSeconds,
+    chime,
+    repeat,
+    funChance,
+    funLines,
+    guestChance,
+    guestVoices,
+  );
+}
+
+/// What is wrong with the fun lines typed in [text] (the Pi's rule: at most
+/// 10 non-empty lines, each at most 120 characters), or null when they are
+/// fine.
+String? funLinesProblem(String text) {
+  final lines = text.split('\n').where((l) => l.trim().isNotEmpty).toList();
+  if (lines.length > CalloutSettings.maxFunLines) {
+    return 'At most ${CalloutSettings.maxFunLines} lines (now ${lines.length}).';
+  }
+  for (var i = 0; i < lines.length; i++) {
+    final len = lines[i].trimRight().length;
+    if (len > CalloutSettings.maxFunLineLength) {
+      return 'Line ${i + 1} is too long ($len letters; at most ${CalloutSettings.maxFunLineLength}).';
+    }
+  }
+  return null;
 }
 
 /// One voice the hub offers.
@@ -179,7 +262,18 @@ class CalloutVoice {
   final String about;
   final int ready; // numbers 1..999 rendered
   final int total;
-  const CalloutVoice({required this.id, this.name = '', this.about = '', this.ready = 0, this.total = 999});
+
+  /// 1.9.2: an ElevenLabs voice — each number is made over the internet
+  /// the first time it is said, then kept ([ready] = how many are kept).
+  final bool online;
+  const CalloutVoice({
+    required this.id,
+    this.name = '',
+    this.about = '',
+    this.ready = 0,
+    this.total = 999,
+    this.online = false,
+  });
 
   factory CalloutVoice.fromJson(Map<String, dynamic> j) => CalloutVoice(
     id: jStr(j['id']),
@@ -187,9 +281,16 @@ class CalloutVoice {
     about: jStr(j['about']),
     ready: jInt(j['ready']),
     total: jInt(j['total'], 999),
+    online: jBool(j['online']),
   );
 
   String get label => name.isEmpty ? id : name;
+
+  /// How far along the voice is, for the voice picker: '' when every
+  /// number is ready.
+  String get status => online
+      ? 'Online (ElevenLabs) · made on first use'
+      : (ready < total ? 'getting ready $ready/$total' : '');
 }
 
 /// The last callout the hub spoke.
@@ -232,6 +333,13 @@ class CalloutHubReport {
   /// Hub 0.2.2: it can make a preview for a tablet (`callout.render`).
   final bool preview;
 
+  /// 1.9.2: it speaks fun lines (`fun_chance`, `fun_lines`).
+  final bool fun;
+
+  /// 1.9.2: it speaks some callouts in a guest voice (`guest_chance`,
+  /// `guest_voices`).
+  final bool guest;
+
   const CalloutHubReport({
     this.voice = '',
     this.defaultVoice = '',
@@ -243,6 +351,8 @@ class CalloutHubReport {
     this.renderingTotal = 0,
     this.last,
     this.preview = false,
+    this.fun = false,
+    this.guest = false,
   });
 
   static CalloutHubReport? fromJson(Object? raw) {
@@ -260,6 +370,8 @@ class CalloutHubReport {
       renderingTotal: jInt(r['total']),
       last: CalloutSpoken.fromJson(j['last']),
       preview: jBool(j['preview']),
+      fun: jBool(j['fun']),
+      guest: jBool(j['guest']),
     );
   }
 

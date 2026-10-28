@@ -31,6 +31,28 @@ const kCalloutInfo = InfoText(
       'Saved on the Pi for every tablet.',
 );
 
+const kFunLinesInfo = InfoText(
+  'Fun lines',
+  'Now and then a READY callout says a fun line instead of "Order ready for ticket number …". The slider '
+      'sets how often (Off = never).\n\n'
+      'Your lines: one per line, at most 10, each at most 120 letters. {n} is replaced by the ticket number; a '
+      'line without {n} is said before the normal words. Leave it empty for the built-in lines.\n\n'
+      'TRY A FUN LINE plays one on the store speaker now (ticket 290), even when the slider is Off.\n\n'
+      'Saved on the Pi for every tablet.',
+);
+
+const kGuestVoicesInfo = InfoText(
+  'Guest voices',
+  'Now and then a READY callout is said by a guest voice picked at random instead of the chosen voice. The '
+      'slider sets how often (Off = never).\n\n'
+      'Pick up to 10 voices, or none for all the online voices. Online voices are made over the internet the '
+      'first time a number is said, then kept on the store computer.\n\n'
+      'Saved on the Pi for every tablet.',
+);
+
+/// TRY A FUN LINE says one with this ticket number.
+const int kFunTryNumber = 290;
+
 const kFinishingInfo = InfoText(
   'Finishing orders',
   'A ready pickup stays on the books until it is picked up. Terminal orders (counter and takeout rung at the '
@@ -94,6 +116,8 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
   String? _previewError;
   Timer? _poll;
   final _number = TextEditingController(text: '102');
+  final _funLines = TextEditingController();
+  String? _funLinesFrom; // the saved lines the field was filled from
 
   @override
   void initState() {
@@ -106,6 +130,7 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
   void dispose() {
     _poll?.cancel();
     _number.dispose();
+    _funLines.dispose();
     super.dispose();
   }
 
@@ -114,7 +139,12 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
     if (client == null) return;
     try {
       final v = await client.getCallout();
-      if (mounted) setState(() => _view = v);
+      if (mounted) {
+        setState(() {
+          _view = v;
+          _syncFunLines(v.settings.funLines);
+        });
+      }
     } on AgentException catch (e) {
       if (e.code == kSettingsUnsupported && mounted) {
         _poll?.cancel();
@@ -127,14 +157,22 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
 
   CalloutSettings get _settings => _draft ?? _view?.settings ?? ref.read(floorProvider).settings.callout;
 
-  Future<void> _save(CalloutSettings next, String done) async {
+  /// Fills Your lines with the Pi's [saved] lines unless someone is editing
+  /// them ([force]: after SAVE).
+  void _syncFunLines(String? saved, {bool force = false}) {
+    if (saved == null) return;
+    if (force || _funLinesFrom == null || _funLines.text == _funLinesFrom) _funLines.text = saved;
+    _funLinesFrom = saved;
+  }
+
+  Future<CalloutSettings?> _save(CalloutSettings next, String done) async {
     setState(() {
       _draft = next;
       _saving = true;
     });
     try {
       final saved = await ref.read(floorProvider.notifier).saveCallout(next);
-      if (!mounted) return;
+      if (!mounted) return saved;
       setState(
         () => _view = CalloutView(
           settings: saved,
@@ -144,8 +182,10 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
         ),
       );
       toast(context, done);
+      return saved;
     } catch (e) {
       if (mounted) toastError(context, e, lead: 'Callout not changed', area: 'settings');
+      return null;
     } finally {
       if (mounted) {
         setState(() {
@@ -154,6 +194,23 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
         });
       }
     }
+  }
+
+  /// SAVE under Your lines.
+  Future<void> _saveFunLines() async {
+    final text = _funLines.text.trim();
+    final saved = await _save(
+      _settings.copyWith(funLines: text),
+      text.isEmpty ? 'Fun lines: the built-in ones' : 'Fun lines saved',
+    );
+    if (saved != null && mounted) setState(() => _syncFunLines(saved.funLines ?? text, force: true));
+  }
+
+  /// A voice ticked or unticked under Guest voices.
+  void _toggleGuest(CalloutSettings s, CalloutVoice v, bool on) {
+    final ids = [...s.guestVoiceIds.where((id) => id != v.id), if (on) v.id];
+    final done = on ? 'Guest voice: ${v.label}' : 'Not a guest: ${v.label}';
+    unawaited(_save(s.copyWith(guestVoices: ids.join(',')), done));
   }
 
   /// The Ticket # field, or null (with a toast) when it isn't 1–9999.
@@ -204,8 +261,8 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
     }
   }
 
-  Future<void> _speak({required String kind, String voice = ''}) async {
-    final n = _ticket();
+  Future<void> _speak({required String kind, String voice = '', int? number}) async {
+    final n = number ?? _ticket();
     if (n == null) return;
     setState(() => _speaking = true);
     try {
@@ -214,10 +271,22 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
       toast(
         context,
         connected
-            ? (kind == 'preview' ? 'Playing on the store speaker…' : 'Calling #$n on the store speaker…')
+            ? switch (kind) {
+                'preview' => 'Playing on the store speaker…',
+                'fun' => 'Playing a fun line for #$n on the store speaker…',
+                _ => 'Calling #$n on the store speaker…',
+              }
             : 'Sent — but the store hub is not connected, so nothing will play yet',
         error: !connected,
       );
+    } on AgentException catch (e) {
+      // An older Pi refuses the kind.
+      if (!mounted) return;
+      if (kind == 'fun' && e.statusCode == 400) {
+        toast(context, 'Update the Pi for fun lines', error: true);
+      } else {
+        toastError(context, e, lead: 'Nothing played', area: 'settings');
+      }
     } catch (e) {
       if (mounted) toastError(context, e, lead: 'Nothing played', area: 'settings');
     } finally {
@@ -251,7 +320,7 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
     final previewBusy = _speaking || _preparing;
     final label = QuiccType.text(QuiccType.body, weight: FontWeight.w600);
     final hint = QuiccType.text(QuiccType.label, color: palette.textSecondary);
-    return SettingsCard(
+    final card = SettingsCard(
       key: const ValueKey('callout-card'),
       title: 'Order callout',
       info: kCalloutInfo,
@@ -283,12 +352,21 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
             for (final v in voices)
               DropdownMenuItem(
                 value: v.id,
-                child: Text(
-                  '${v.label} — ${v.about}${v.ready < v.total ? '  (getting ready ${v.ready}/${v.total})' : ''}',
-                  overflow: TextOverflow.ellipsis,
+                child: Row(
+                  children: [
+                    Flexible(child: Text('${v.label} — ${v.about}', overflow: TextOverflow.ellipsis)),
+                    if (v.status.isNotEmpty)
+                      Text(
+                        v.online ? '  · ${v.status}' : '  (${v.status})',
+                        key: ValueKey('voice-status-${v.id}'),
+                        style: hint,
+                      ),
+                  ],
                 ),
               ),
           ],
+          // ~30 voices: a scrolling menu, not one over the whole screen.
+          menuMaxHeight: 480,
           onChanged: busy || voices.isEmpty
               ? null
               : (id) {
@@ -342,6 +420,16 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
               _previewError!,
               key: const ValueKey('callout-preview-error'),
               style: QuiccType.text(QuiccType.label, weight: FontWeight.w600, color: QuiccColors.statusVoided),
+            ),
+          ),
+        if (selected != null && selected.online)
+          Padding(
+            padding: const EdgeInsets.only(top: QuiccSpace.xs),
+            child: Text(
+              'An online (ElevenLabs) voice: each number is made over the internet the first time it is said, '
+              'then kept on the store computer.',
+              key: const ValueKey('callout-voice-online'),
+              style: hint,
             ),
           ),
         if (hub != null && hub.rendering)
@@ -439,7 +527,167 @@ class _OrderCalloutCardState extends ConsumerState<OrderCalloutCard> {
         ],
       ],
     );
+    // 1.9.2: fun lines and guest voices, each only when the Pi has the
+    // setting and the hub says it speaks them.
+    final fun = s.funChance != null && (hub?.fun ?? false);
+    final guest = s.guestChance != null && (hub?.guest ?? false);
+    if (!fun && !guest) return card;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        card,
+        if (fun) _funCard(s, busy: busy, previewBusy: previewBusy, label: label, hint: hint),
+        if (guest) _guestCard(s, voices, busy: busy, label: label, hint: hint),
+      ],
+    );
   }
+
+  Widget _funCard(
+    CalloutSettings s, {
+    required bool busy,
+    required bool previewBusy,
+    required TextStyle label,
+    required TextStyle hint,
+  }) {
+    final chance = s.funChance!;
+    final problem = funLinesProblem(_funLines.text);
+    final edited = _funLines.text.trim() != (_funLinesFrom ?? '').trim();
+    return SettingsCard(
+      key: const ValueKey('callout-fun-card'),
+      title: 'Fun lines',
+      info: kFunLinesInfo,
+      subtitle: 'Now and then a fun line instead of "Order ready for ticket number …".',
+      children: [
+        _SliderRow(
+          key: const ValueKey('callout-fun-chance'),
+          label: 'Fun lines',
+          value: chance.toDouble(),
+          min: 0,
+          max: 50,
+          divisions: 10,
+          text: _chanceText(chance),
+          textWidth: 150,
+          onChanged: busy ? null : (v) => setState(() => _draft = s.copyWith(funChance: v.round())),
+          onChangeEnd: (v) => _save(
+            s.copyWith(funChance: v.round()),
+            v.round() == 0 ? 'Fun lines off' : 'Fun lines: ${v.round()}% of callouts',
+          ),
+        ),
+        const Divider(),
+        Text('Your lines', style: label),
+        QuiccSpace.gapXs,
+        TextField(
+          key: const ValueKey('callout-fun-lines'),
+          controller: _funLines,
+          minLines: 3,
+          maxLines: 8,
+          keyboardType: TextInputType.multiline,
+          decoration: InputDecoration(
+            hintText: 'Alright alright alright, order for {n} is ready at the counter.',
+            helperText: 'One per line. {n} = the ticket number. Empty = the built-in lines.',
+            helperMaxLines: 2,
+            errorText: problem,
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        QuiccSpace.gapSm,
+        Wrap(
+          spacing: QuiccSpace.md,
+          runSpacing: QuiccSpace.sm,
+          children: [
+            SizedBox(
+              height: 56,
+              child: FilledButton(
+                key: const ValueKey('callout-fun-save'),
+                onPressed: busy || problem != null || !edited ? null : _saveFunLines,
+                child: const Text('SAVE'),
+              ),
+            ),
+            SizedBox(
+              height: 56,
+              child: OutlinedButton.icon(
+                key: const ValueKey('callout-fun-try'),
+                onPressed: previewBusy ? null : () => _speak(kind: 'fun', number: kFunTryNumber),
+                icon: const Icon(Icons.speaker_outlined),
+                label: const Text('TRY A FUN LINE'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _guestCard(
+    CalloutSettings s,
+    List<CalloutVoice> voices, {
+    required bool busy,
+    required TextStyle label,
+    required TextStyle hint,
+  }) {
+    final chance = s.guestChance!;
+    final ids = s.guestVoiceIds;
+    final full = ids.length >= CalloutSettings.maxGuestVoices;
+    return SettingsCard(
+      key: const ValueKey('callout-guest-card'),
+      title: 'Guest voices',
+      info: kGuestVoicesInfo,
+      subtitle:
+          "Now and then a guest voice calls the order instead. Online voices are made the first time they're used.",
+      children: [
+        _SliderRow(
+          key: const ValueKey('callout-guest-chance'),
+          label: 'Guest voices',
+          value: chance.toDouble(),
+          min: 0,
+          max: CalloutSettings.maxGuestChance.toDouble(),
+          divisions: CalloutSettings.maxGuestChance,
+          text: _chanceText(chance),
+          textWidth: 150,
+          onChanged: busy ? null : (v) => setState(() => _draft = s.copyWith(guestChance: v.round())),
+          onChangeEnd: (v) => _save(
+            s.copyWith(guestChance: v.round()),
+            v.round() == 0 ? 'Guest voices off' : 'Guest voices: ${v.round()}% of callouts',
+          ),
+        ),
+        const Divider(),
+        Row(
+          children: [
+            Expanded(child: Text('Which voices', style: label)),
+            if (ids.isNotEmpty)
+              TextButton(
+                key: const ValueKey('callout-guest-all'),
+                onPressed: busy ? null : () => _save(s.copyWith(guestVoices: ''), 'Guest voices: all online voices'),
+                child: const Text('ALL ONLINE VOICES'),
+              ),
+          ],
+        ),
+        Text(
+          ids.isEmpty
+              ? 'All online voices'
+              : '${ids.length} picked${full ? ' — at most ${CalloutSettings.maxGuestVoices}' : ''}',
+          key: const ValueKey('callout-guest-summary'),
+          style: hint,
+        ),
+        QuiccSpace.gapSm,
+        Wrap(
+          spacing: QuiccSpace.sm,
+          runSpacing: QuiccSpace.sm,
+          children: [
+            for (final v in voices)
+              FilterChip(
+                key: ValueKey('callout-guest-${v.id}'),
+                label: Text(v.online ? '${v.label} · online' : v.label),
+                selected: ids.contains(v.id),
+                onSelected: busy || (full && !ids.contains(v.id)) ? null : (on) => _toggleGuest(s, v, on),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  static String _chanceText(int v) => v == 0 ? 'Off' : '$v% of callouts';
 
   static String _secs(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
 
@@ -498,6 +746,7 @@ class _SliderRow extends StatelessWidget {
   final double max;
   final int divisions;
   final String text;
+  final double textWidth;
   final ValueChanged<double>? onChanged;
   final ValueChanged<double> onChangeEnd;
   const _SliderRow({
@@ -508,6 +757,7 @@ class _SliderRow extends StatelessWidget {
     required this.max,
     required this.divisions,
     required this.text,
+    this.textWidth = 96,
     required this.onChanged,
     required this.onChangeEnd,
   });
@@ -531,7 +781,7 @@ class _SliderRow extends StatelessWidget {
           ),
         ),
         SizedBox(
-          width: 96,
+          width: textWidth,
           child: Text(
             text,
             textAlign: TextAlign.right,

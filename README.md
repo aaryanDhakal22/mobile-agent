@@ -287,6 +287,22 @@ The screen is kept on with `wakelock_plus`.
   mistake). The Pi takes an undo up to 2 min after READY; later, or once
   the order moved on, it says "Too late to undo"; an older Pi says "Update
   the Pi to undo READY".
+- **Fun lines and guest voices** for the order callout (Store settings ›
+  Order callout; each card only when the Pi has the setting and the store
+  hub says it speaks it). **Fun lines**: a slider 0–50 % in steps of 5 (how
+  many READY callouts say a fun line instead of "Order ready for ticket
+  number …"; `fun_chance`), **Your lines** (one per line, `{n}` = the
+  ticket number, empty = the hub's built-in lines; at most 10 lines of 120
+  letters, checked like the Pi; `fun_lines`) with SAVE, and **TRY A FUN
+  LINE** (`POST /api/callout/test {number: 290, kind: "fun"}` on the store
+  speaker; an older Pi: "Update the Pi for fun lines"). **Guest voices**: a
+  slider 0–50 % (`guest_chance`) and the voices to pick from (none = all
+  online voices, at most 10; `guest_voices` as a comma list).
+- **A longer voice list**: every English Kokoro voice, Piper voices and
+  online **ElevenLabs** voices (~30). The picker scrolls; an online voice
+  says "Online (ElevenLabs) · made on first use" instead of a count like
+  312/999 (each number is made over the internet the first time it is said,
+  then kept).
 
 ## 1.9.1 — driver routes on their phones (with agent 2.3.7)
 
