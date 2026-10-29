@@ -831,6 +831,18 @@ class AgentClient {
     }
   }
 
+  /// `GET /api/settings/changes` (agent 2.3.11) — the Pi's settings history,
+  /// newest first; null when the Pi predates it.
+  Future<List<SettingsChange>?> settingsChanges({int limit = 100}) async {
+    try {
+      final m = jMap(await _get('/api/settings/changes', {'limit': '$limit'}));
+      return jList(m['changes'], SettingsChange.fromJson);
+    } on AgentException catch (e) {
+      if (e.statusCode == 404 || e.statusCode == 405) return null;
+      rethrow;
+    }
+  }
+
   // --- app updates -------------------------------------------------------------
 
   /// `GET /api/app/latest` — the Quibase release the agent has cached, or
