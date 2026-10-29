@@ -271,6 +271,15 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 1.9.3 — who changed a setting (with agent 2.3.11)
+
+- Developer mode → Logs has a **Settings changes** card: every setting
+  changed on the Pi, newest first — when, which tablet (by its name) or the
+  Pi web page, and each switch / value from → to (`ON → OFF`, `15 → 20`),
+  with the same names as Settings. Kept on the Pi for 90 days, refreshed
+  every 30 s while shown (REFRESH asks at once). An older Pi says it needs
+  the 2.3.11 update. The Pi card also shows them as `settings` lines.
+
 ## 1.9.2 — one timer per Kitchen ticket, UNDO after READY
 
 - A Kitchen ticket has **one timer**: the time since the order was sent to

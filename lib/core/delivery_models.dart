@@ -302,6 +302,51 @@ class PiEvent {
   );
 }
 
+/// One entry of the Pi's settings history (2.3.11, `GET
+/// /api/settings/changes`): a section's keys that changed, old → new, and who
+/// did it — a paired tablet by name or the Pi web page.
+class SettingsChange {
+  final int id;
+  final DateTime? at;
+  final String section;
+  final String byKind; // tablet | web
+  final String byName;
+  final List<SettingsDiff> changes;
+  const SettingsChange({
+    required this.id,
+    this.at,
+    required this.section,
+    this.byKind = 'web',
+    this.byName = '',
+    this.changes = const [],
+  });
+
+  bool get byTablet => byKind == 'tablet';
+
+  factory SettingsChange.fromJson(Map<String, dynamic> json) {
+    final by = jMap(json['by']);
+    return SettingsChange(
+      id: jInt(json['id']),
+      at: jDate(json['at']),
+      section: jStr(json['section']),
+      byKind: jStr(by['kind'], 'web'),
+      byName: jStr(by['name']),
+      changes: jList(json['changes'], SettingsDiff.fromJson),
+    );
+  }
+}
+
+/// One key of a [SettingsChange]: JSON values (null = not set).
+class SettingsDiff {
+  final String key;
+  final Object? from;
+  final Object? to;
+  const SettingsDiff({required this.key, this.from, this.to});
+
+  factory SettingsDiff.fromJson(Map<String, dynamic> json) =>
+      SettingsDiff(key: jStr(json['key']), from: json['from'], to: json['to']);
+}
+
 List<String> _ids(Object? raw) => raw is List
     ? raw.map((e) => jStr(e)).where((s) => s.isNotEmpty).toList(growable: false)
     : const <String>[];
