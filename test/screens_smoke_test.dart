@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mobile_agent/core/time.dart';
 import 'package:mobile_agent/core/api_client.dart';
 import 'package:mobile_agent/core/floor_state.dart';
 import 'package:mobile_agent/core/friendly_error.dart';
@@ -523,7 +524,7 @@ void main() {
         handler: (req) async => http.Response(
           jsonEncode({
             'code': '482913',
-            'expires_at': DateTime.now().toUtc().add(const Duration(minutes: 5)).toIso8601String(),
+            'expires_at': timeNow().toUtc().add(const Duration(minutes: 5)).toIso8601String(),
           }),
           200,
         ),
