@@ -8,10 +8,50 @@ class ChangeLine {
   final String name;
   final int quantity;
   final bool kitchen;
-  const ChangeLine({required this.name, this.quantity = 1, this.kitchen = false});
 
-  factory ChangeLine.fromJson(Map<String, dynamic> j) =>
-      ChangeLine(name: jStr(j['name']), quantity: jInt(j['quantity'], 1), kitchen: jBool(j['kitchen']));
+  /// Pi 2.4.0: what the changed quantity is worth (cents; 0 = unknown).
+  final int priceCents;
+  const ChangeLine({required this.name, this.quantity = 1, this.kitchen = false, this.priceCents = 0});
+
+  factory ChangeLine.fromJson(Map<String, dynamic> j) => ChangeLine(
+    name: jStr(j['name']),
+    quantity: jInt(j['quantity'], 1),
+    kitchen: jBool(j['kitchen']),
+    priceCents: jInt(j['price_cents']),
+  );
+}
+
+/// Pi 2.4.0: a delivery's total or payment changed at the terminal.
+class MoneyChange {
+  final int fromTotalCents;
+  final int toTotalCents;
+  final bool fromPaid;
+  final bool toPaid;
+  final int fromCashCents;
+  final int toCashCents;
+  const MoneyChange({
+    this.fromTotalCents = 0,
+    this.toTotalCents = 0,
+    this.fromPaid = false,
+    this.toPaid = false,
+    this.fromCashCents = 0,
+    this.toCashCents = 0,
+  });
+
+  static MoneyChange? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final j = jMap(raw);
+    return MoneyChange(
+      fromTotalCents: jInt(j['from_total_cents']),
+      toTotalCents: jInt(j['to_total_cents']),
+      fromPaid: jBool(j['from_paid']),
+      toPaid: jBool(j['to_paid']),
+      fromCashCents: jInt(j['from_cash_cents']),
+      toCashCents: jInt(j['to_cash_cents']),
+    );
+  }
+
+  bool get paymentChanged => fromPaid != toPaid;
 }
 
 /// A terminal change to a check already on the tablet (`status.pos_change`).
@@ -29,6 +69,9 @@ class PosChange {
   final String driverName;
   final DateTime? ackedAt;
 
+  /// Pi 2.4.0: a delivery's total / payment changed (null = it didn't).
+  final MoneyChange? money;
+
   const PosChange({
     required this.id,
     this.at,
@@ -38,6 +81,7 @@ class PosChange {
     this.removed = const [],
     this.driverName = '',
     this.ackedAt,
+    this.money,
   });
 
   static PosChange? fromJson(Object? raw) {
@@ -54,6 +98,7 @@ class PosChange {
       removed: jList(j['removed'], ChangeLine.fromJson),
       driverName: jStr(j['driver_name']),
       ackedAt: jDate(j['acked_at']),
+      money: MoneyChange.fromJson(j['money']),
     );
   }
 
@@ -289,9 +334,8 @@ class CalloutVoice {
 
   /// How far along the voice is, for the voice picker: '' when every
   /// number is ready.
-  String get status => online
-      ? 'Online (ElevenLabs) · made on first use'
-      : (ready < total ? 'getting ready $ready/$total' : '');
+  String get status =>
+      online ? 'Online (ElevenLabs) · made on first use' : (ready < total ? 'getting ready $ready/$total' : '');
 }
 
 /// The last callout the hub spoke.

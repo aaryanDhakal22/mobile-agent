@@ -228,37 +228,31 @@ void main() {
     return c;
   }
 
-  testWidgets('Drivers tab: status, clock in / out, daily reset time, shifts', (tester) async {
-    final shifts = (jsonDecode(shiftsJson) as List).cast<Map<String, dynamic>>().map(Shift.fromJson).toList();
-    await pumpHome(tester, _floorWith(withArrived: false), shifts: shifts);
+  testWidgets('2.0.0 Drivers tab: Unassigned first, big buttons in queue order, clocked out small; clock in / out', (
+    tester,
+  ) async {
+    await pumpHome(tester, _floorWith(withArrived: false));
     await tester.tap(find.text('Drivers').last);
     await tester.pump(const Duration(milliseconds: 600));
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Everyone is clocked out daily at 10:00 AM (set in the agent web UI).'), findsOneWidget);
-    expect(find.text('Ana · NEXT'), findsOneWidget);
-    expect(find.text('CLOCK IN'), findsOneWidget, reason: 'only Lee is off');
-    expect(find.text('CLOCK OUT'), findsNWidgets(3));
-    expect(find.text('OFF'), findsOneWidget);
-    expect(find.text('OUT'), findsOneWidget);
-    expect(find.text('AVAILABLE'), findsNWidgets(2));
-    expect(find.textContaining('Clocked out ·'), findsOneWidget);
-    expect(find.textContaining('In since '), findsNWidgets(3));
+    expect(find.byKey(const ValueKey('unassigned-button')), findsOneWidget);
+    expect(find.text('Nothing unassigned'), findsOneWidget, reason: 'opens on Unassigned');
+    for (final id in ['d-ana', 'd-joe', 'd-sam']) {
+      expect(find.byKey(ValueKey('driver-button-$id')), findsOneWidget, reason: id);
+    }
+    expect(find.byKey(const ValueKey('off-button-d-lee')), findsOneWidget, reason: 'clocked out: small');
+    expect(find.text('NEXT'), findsOneWidget);
+    expect(find.text('OUT'), findsWidgets);
+    expect(find.text('CLOCK IN'), findsNothing);
 
-    // Sam is out on a run: removing is refused up front, no confirm dialog.
-    await tester.tap(find.byTooltip('Remove').at(2));
+    await tester.tap(find.byKey(const ValueKey('off-button-d-lee')));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining("Can't remove a driver who is out on a run"), findsOneWidget);
-    expect(find.text('REMOVE'), findsNothing);
-
-    await tester.tap(find.text('SHIFTS'));
+    expect(find.text('CLOCK IN'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('driver-button-d-ana')));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(tester.takeException(), isNull);
-    expect(find.text('Shifts — last 7 days'), findsOneWidget);
-    expect(find.text('ON SHIFT'), findsOneWidget);
-    expect(find.text('AUTO OUT'), findsOneWidget);
+    expect(find.text('CLOCK OUT'), findsOneWidget);
+    expect(find.text('PRINT REPORT'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -374,7 +368,7 @@ void main() {
         find.descendant(of: find.byType(AlarmHost), matching: find.byType(Stack)).first,
       );
       final order = stack.children.map((w) => (w as Positioned).child.runtimeType).toList();
-      expect(order.indexOf(DispatchFlash), lessThan(order.indexOf(NewOrderAlert)));
+      expect(order.indexOf(DispatchFlash), lessThan(order.indexOf(NewOrderAlertSlot)));
 
       // A tap lands on the alert, not the flash.
       await tester.tapAt(const Offset(480, 300));

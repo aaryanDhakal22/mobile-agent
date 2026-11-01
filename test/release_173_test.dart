@@ -143,6 +143,13 @@ Future<ProviderContainer> _pumpPane(WidgetTester tester, AgentClient client) asy
   return c;
 }
 
+/// 2.0.0: shows a driver on the Drivers tab (their button on the right).
+Future<void> _show(WidgetTester tester, String id) async {
+  final on = find.byKey(ValueKey('driver-button-$id'));
+  await tester.tap(on.evaluate().isNotEmpty ? on : find.byKey(ValueKey('off-button-$id')));
+  await tester.pump();
+}
+
 Future<void> _settle(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 100));
@@ -293,7 +300,7 @@ void main() {
   });
 
   group('Drivers pane', () {
-    testWidgets('PRINT REPORT on every driver row, whatever the status; tap prints that driver\'s', (tester) async {
+    testWidgets('PRINT REPORT for every driver, whatever the status; tap prints the shown driver\'s', (tester) async {
       final (client, calls, _) = _pi((req) {
         if (req.url.path.endsWith('/report/print')) {
           return _json({'driver_id': 'd-juma', 'driver_name': 'Juma', 'printed_on': 'Front', 'report': _report()});
@@ -301,12 +308,14 @@ void main() {
         return _json(_roster);
       });
       await _pumpPane(tester, client);
-      expect(find.text('PRINT REPORT'), findsNWidgets(3));
-      for (final id in ['d-juma', 'd-lee', 'd-sam']) {
-        expect(find.byKey(ValueKey('print-report-$id')), findsOneWidget);
+      // 2.0.0: the tab opens on Unassigned — no driver buttons on top.
+      expect(find.text('PRINT REPORT'), findsNothing);
+      for (final id in ['d-lee', 'd-sam', 'd-juma']) {
+        await _show(tester, id);
+        expect(find.byKey(const ValueKey('print-report')), findsOneWidget, reason: id);
       }
 
-      await tester.tap(find.byKey(const ValueKey('print-report-d-juma')));
+      await tester.tap(find.byKey(const ValueKey('print-report')));
       await _settle(tester);
       expect(calls, contains('POST /api/drivers/d-juma/report/print'));
       expect(find.text("Printed Juma's report"), findsOneWidget);
@@ -319,7 +328,8 @@ void main() {
         (_) => _json({'driver_id': 'd-juma', 'driver_name': 'Juma', 'printed_on': 'Front', 'rerouted_from': 'Kitchen'}),
       );
       await _pumpPane(tester, client);
-      await tester.tap(find.byKey(const ValueKey('print-report-d-juma')));
+      await _show(tester, 'd-juma');
+      await tester.tap(find.byKey(const ValueKey('print-report')));
       await _settle(tester);
       expect(find.text("Printed Juma's report on Front (Kitchen was down)"), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
@@ -339,7 +349,8 @@ void main() {
       ]) {
         final (client, _, revoked) = _pi((_) => resp());
         await _pumpPane(tester, client);
-        await tester.tap(find.byKey(const ValueKey('print-report-d-juma')));
+        await _show(tester, 'd-juma');
+        await tester.tap(find.byKey(const ValueKey('print-report')));
         await _settle(tester);
         expect(find.text(text), findsOneWidget);
         expect(_snackColor(tester), QuiccColors.statusVoided);
@@ -356,7 +367,8 @@ void main() {
         return _json(_roster);
       });
       await _pumpPane(tester, client);
-      await tester.tap(find.text('CLOCK OUT').first);
+      await _show(tester, 'd-juma');
+      await tester.tap(find.text('CLOCK OUT'));
       await _settle(tester);
       expect(calls, contains('POST /api/drivers/d-juma/clock-out'));
       expect(find.text('Juma clocked out — printing his report…'), findsOneWidget);
@@ -369,7 +381,8 @@ void main() {
         (req) => req.url.path.endsWith('/clock-out') ? _json({..._juma, 'status': 'off'}) : _json(_roster),
       );
       await _pumpPane(tester, client);
-      await tester.tap(find.text('CLOCK OUT').first);
+      await _show(tester, 'd-juma');
+      await tester.tap(find.text('CLOCK OUT'));
       await _settle(tester);
       expect(find.text('Juma clocked out'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());

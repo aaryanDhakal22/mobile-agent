@@ -15,6 +15,7 @@ import 'callout_cards.dart';
 import 'chime_picker.dart';
 import 'delivery_area_card.dart';
 import 'deliveries_settings_card.dart';
+import 'drivers_settings_card.dart';
 import 'pos_settings_cards.dart';
 import 'receipt_settings_card.dart';
 import 'settings_card.dart';
@@ -40,6 +41,12 @@ class StoreSettingsScreen extends StatelessWidget {
           title: 'Deliveries',
           caption: 'How AUTO plans runs, which deliveries count as close to a run, and auto-assign.',
           children: [DeliveryAreaCard(), DeliveriesSettingsCard(), AutoAssignCard()],
+        ),
+        SettingsGroup(
+          key: ValueKey('group-drivers'),
+          title: 'Drivers',
+          caption: 'Your drivers, their Driver # and phones, and the shifts.',
+          children: [DriversSettingsCard()],
         ),
         SettingsGroup(
           key: ValueKey('group-times'),

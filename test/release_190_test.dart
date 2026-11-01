@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 // Quibase 1.9.0: the updater never sticks in "installing" and backs off a
 // damaged download.
 import 'dart:async';
@@ -617,7 +619,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('READY: a ghost shrinks to 85 % and fades where the ticket was; the others glide', (tester) async {
+    testWidgets('READY (2.0.0): the ghost squashes, implodes with a ✓ burst; the others slide springily', (
+      tester,
+    ) async {
       final orders = [for (var i = 0; i < 4; i++) cooking('k$i', 1101 + i, const Duration(minutes: 5))];
       final (_, f) = await pumpKitchen(tester, orders);
       // Dealt across three columns: k0 k1 k2 / k3. k0 leaves → k1 moves into
@@ -632,19 +636,39 @@ void main() {
       expect(find.byKey(const ValueKey('k0')), findsNothing, reason: 'the ghost is not the ticket');
       final k1After = tester.getTopLeft(slot('k1'));
       expect(k1After.dx, lessThan(k1Before.dx));
-      // Drawn where it was, gliding to its new place.
-      expect(grid(tester).flip.shiftOf('k1').dx, closeTo(k1Before.dx - k1After.dx, 1));
+      final dist = k1Before.dx - k1After.dx;
+      // Drawn where it was, sliding to its new place.
+      expect(grid(tester).flip.shiftOf('k1').dx, closeTo(dist, 1));
 
-      await tester.pump(const Duration(milliseconds: 110));
-      final s = tester.widget<ScaleTransition>(find.descendant(of: ghost, matching: find.byType(ScaleTransition)).first).scale.value;
-      expect(s, inExclusiveRange(kTicketExitScale, 1.0));
-      expect(grid(tester).flip.shiftOf('k1').dx, inExclusiveRange(0, k1Before.dx - k1After.dx));
+      // The squash: wider, flatter.
+      await tester.pump(const Duration(milliseconds: 60));
+      var (sx, sy, _) = implodeAt(60 / kTicketExit.inMilliseconds);
+      expect(sx, greaterThan(1.0));
+      expect(sy, lessThan(1.0));
+      // Springy: past its spot a little (the shift changes sign), no burst yet.
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(grid(tester).flip.shiftOf('k1').dx, lessThan(0), reason: 'overshoots');
+      expect(find.byKey(const ValueKey('ready-burst')), findsNothing);
+      // Collapsed to (almost) nothing; the ✓ bursts where it was.
+      await tester.pump(const Duration(milliseconds: 180));
+      (sx, sy, _) = implodeAt(300 / kTicketExit.inMilliseconds);
+      expect(sx, lessThan(0.3));
+      expect(find.byKey(const ValueKey('ready-burst')), findsOneWidget);
 
       await tester.pump(const Duration(milliseconds: 200));
       expect(ghost, findsNothing);
       expect(grid(tester).ghosts, isEmpty);
-      expect(grid(tester).flip.shiftOf('k1'), Offset.zero);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(grid(tester).flip.shiftOf('k1').dx.abs(), lessThan(0.5));
       await tester.pumpWidget(const SizedBox());
+    });
+
+    test('SpringyCurve: overshoots once then rests at 1', () {
+      const c = SpringyCurve();
+      final ys = [for (var i = 0; i <= 100; i++) c.transform(i / 100)];
+      expect(ys.first, 0);
+      expect(ys.last, 1);
+      expect(ys.reduce(math.max), inInclusiveRange(1.05, 1.15));
     });
 
     testWidgets('Motion off: fades only — no transform on a new ticket, the ghost or a squish; nothing glides', (
@@ -663,7 +687,8 @@ void main() {
       expect(find.byKey(const ValueKey('squish')), findsNothing);
       final ghost = find.byKey(const ValueKey('kitchen-ghost-k0'));
       expect(ghost, findsOneWidget, reason: 'it fades');
-      expect(find.descendant(of: ghost, matching: find.byType(ScaleTransition)), findsNothing);
+      expect(find.descendant(of: ghost, matching: find.byType(Transform)), findsNothing);
+      expect(find.byKey(const ValueKey('ready-burst')), findsNothing);
       expect(grid(tester).flip.shiftOf('k1'), Offset.zero);
       await tester.pump(const Duration(milliseconds: 200));
       expect(ghost, findsNothing);

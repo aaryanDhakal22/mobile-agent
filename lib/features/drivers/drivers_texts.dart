@@ -3,8 +3,13 @@ import '../common/info_button.dart';
 // The (i) copy for the Drivers tab and the driver button.
 
 const kClockInfo = InfoText(
-  'Clock in / clock out',
-  'Tap CLOCK IN when a driver starts their shift. They join the back of the queue and can be '
+  'The Drivers tab',
+  'The buttons on the right: UNASSIGNED (deliveries marked delivered with no driver), the drivers '
+      'who are clocked in (in queue order — hold one and drag it to change the queue), and the ones '
+      'who are clocked out, small and grey. Tap one to see their deliveries this batch.\n\n'
+      'Tap a delivery to select it (hold it to open it), then tap a driver to give it to them. '
+      'Nothing goes to a clocked-out driver.\n\n'
+      'Tap CLOCK IN when a driver starts their shift. They join the back of the queue and can be '
       'sent out with orders.\n\n'
       'Tap CLOCK OUT when they go home. You can only clock out a driver who is here — if they are '
       'out on a run, tap I HAVE RETURNED first. Clocking out prints their driver report on the '
@@ -12,23 +17,7 @@ const kClockInfo = InfoText(
       'PRINT REPORT prints one driver\'s report for this batch so far, any time: their deliveries, '
       'the cash they collected, their tips and what they owe the store. When the store uses the POS, '
       'the Pi checks the POS\'s deliveries for that driver too and marks anything only one side had.\n\n'
-      'Everyone is clocked out automatically once a day (the time is shown on this screen).',
-);
-
-const kQueueInfo = InfoText(
-  'The queue',
-  'The number next to a driver is their place in the queue. Number 1 is NEXT: they get the next '
-      'delivery.\n\n'
-      'A driver who comes back from a run goes to the back of the queue.\n\n'
-      'To change the order by hand, hold the ≡ handle and drag the driver up or down.',
-);
-
-const kRemoveDriverInfo = InfoText(
-  'Remove a driver',
-  'The bin icon takes a driver off the list for good — use it when someone stops working here, '
-      'not at the end of a shift (use CLOCK OUT for that).\n\n'
-      'Past orders and shift records keep their name. A driver who is out on a run can\'t be '
-      'removed until they are back.',
+      'Everyone is clocked out automatically once a day (the time is set on the Pi web page).',
 );
 
 const kDriverButtonInfo = InfoText(

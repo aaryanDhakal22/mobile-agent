@@ -297,6 +297,17 @@ class _ReceiptSettingsCardState extends ConsumerState<ReceiptSettingsCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        _Setting(
+          label: 'Customer receipt format',
+          info: kReceiptFormatInfo,
+          child: _Choice<ReceiptFormat>(
+            key: const ValueKey('receipt-format'),
+            values: ReceiptFormat.values,
+            label: (s) => s.label,
+            selected: d.format,
+            onChanged: (v) => _edit((p) => p.copyWith(format: v)),
+          ),
+        ),
         const _Heading('Kitchen tickets'),
         _Setting(
           label: 'Item text size',
@@ -588,7 +599,13 @@ class _Choice<T> extends StatelessWidget {
   final String Function(T) label;
   final T selected;
   final ValueChanged<T> onChanged;
-  const _Choice({required this.values, required this.label, required this.selected, required this.onChanged});
+  const _Choice({
+    super.key,
+    required this.values,
+    required this.label,
+    required this.selected,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) => Align(

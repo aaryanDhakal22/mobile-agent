@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -55,17 +54,6 @@ FloorState pooled(FloorState s, String driver, List<String> ids) => s.withOrders
 final sendBar = find.byKey(const ValueKey('send-next'));
 
 /// Long-press [from], drag it onto [to], drop.
-Future<void> longDrag(WidgetTester tester, Finder from, Finder to) async {
-  final g = await tester.startGesture(tester.getCenter(from));
-  await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
-  final target = tester.getCenter(to);
-  await g.moveTo(target - const Offset(0, 20));
-  await tester.pump();
-  await g.moveTo(target);
-  await tester.pump();
-  await g.up();
-  await tester.pump();
-}
 
 /// Lets dialogs / routes animate without waiting for spinners to stop.
 Future<void> settle(WidgetTester tester) async {
@@ -116,7 +104,7 @@ void main() {
       await tester.pump(const Duration(seconds: 2)); // tickers
       expect(tester.takeException(), isNull);
 
-      expect(find.text('Unassigned · 3'), findsOneWidget);
+      expect(find.text('Waiting · 3'), findsOneWidget);
       expect(find.text('NEXT'), findsOneWidget);
       expect(box('d-ana'), findsOneWidget);
       expect(box('d-joe'), findsOneWidget);
@@ -162,16 +150,16 @@ void main() {
     });
   }
 
-  testWidgets('a single tap on a row, a pooled chip and an out stop opens the order', (tester) async {
+  testWidgets('2.0.0: a hold on a row or a pooled chip opens the order; a tap on an out stop too', (tester) async {
     await pumpPane(tester);
-    await tester.tap(find.byKey(const ValueKey('row-d1')));
+    await tester.longPress(find.byKey(const ValueKey('row-d1')));
     await tester.pumpAndSettle();
     expect(find.byType(OrderDetailScreen), findsOneWidget);
     expect(find.text('1101'), findsWidgets);
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('chip-d3')));
+    await tester.longPress(find.byKey(const ValueKey('chip-d3')));
     await tester.pumpAndSettle();
     expect(find.byType(OrderDetailScreen), findsOneWidget);
     await tester.pageBack();
@@ -186,15 +174,16 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('select mode: tap rows, tap a driver box → moved; tap the left column → back', (tester) async {
+  testWidgets('2.0.0: a tap selects (no Select button), a driver box takes them, Waiting takes them back', (
+    tester,
+  ) async {
     final (_, f) = await pumpPane(tester);
-    await tester.tap(find.byKey(const ValueKey('select')));
-    await tester.pump();
+    expect(find.byKey(const ValueKey('select')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('row-d1')));
     await tester.tap(find.byKey(const ValueKey('row-d5')));
     await tester.pump();
     expect(find.text('2 selected'), findsOneWidget);
-    expect(find.byType(OrderDetailScreen), findsNothing, reason: 'select mode: a tap selects');
+    expect(find.byType(OrderDetailScreen), findsNothing, reason: 'a tap selects');
 
     await tester.tap(find.byKey(const ValueKey('driver-header-d-joe')));
     await tester.pump();
@@ -202,58 +191,58 @@ void main() {
     expect(pool.ids.toSet(), {'d1', 'd5'});
     expect(pool.driver, 'd-joe');
     expect(find.byKey(const ValueKey('chip-d1')), findsOneWidget);
-    expect(find.text('Unassigned · 1'), findsOneWidget);
+    expect(find.text('Waiting · 1'), findsOneWidget);
+    expect(find.byKey(const ValueKey('select-bar')), findsNothing, reason: 'nothing selected any more');
 
-    // Select a pooled chip and tap the left column: unassigned.
-    await tester.tap(find.byKey(const ValueKey('select')));
-    await tester.pump();
+    // Select a pooled chip and tap Waiting: out of the pool.
     await tester.tap(find.byKey(const ValueKey('chip-d1')));
     await tester.pump();
     expect(find.text('1 selected'), findsOneWidget);
-    await tester.tap(find.text('Unassigned · 1'));
+    await tester.tap(find.text('Waiting · 1'));
     await tester.pump();
     final back = callsOf(f, 'pool').last;
     expect(back.ids, ['d1']);
     expect(back.driver, isNull);
     expect(find.byKey(const ValueKey('row-d1')), findsOneWidget);
 
-    // Cancel leaves select mode.
-    await tester.tap(find.byKey(const ValueKey('select')));
+    // SELECT ALL picks every waiting delivery; CLEAR drops the selection.
+    await tester.tap(find.byKey(const ValueKey('row-d1')));
     await tester.pump();
-    await tester.tap(find.text('Cancel'));
+    await tester.tap(find.byKey(const ValueKey('select-all')));
+    await tester.pump();
+    expect(find.text('2 selected'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('select-clear')));
     await tester.pump();
     expect(find.byKey(const ValueKey('select-bar')), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('drag: left → driver, driver → driver, driver → left', (tester) async {
-    final (_, f) = await pumpPane(tester);
-
-    await longDrag(tester, find.byKey(const ValueKey('row-d1')), box('d-joe'));
-    expect(callsOf(f, 'pool').last.ids, ['d1']);
-    expect(callsOf(f, 'pool').last.driver, 'd-joe');
-    expect(find.byKey(const ValueKey('chip-d1')), findsOneWidget);
-
-    await longDrag(tester, find.byKey(const ValueKey('chip-d3')), box('d-joe'));
-    expect(callsOf(f, 'pool').last.ids, ['d3']);
-    expect(callsOf(f, 'pool').last.driver, 'd-joe');
-
-    await longDrag(tester, find.byKey(const ValueKey('chip-d3')), leftColumn);
-    expect(callsOf(f, 'pool').last.ids, ['d3']);
-    expect(callsOf(f, 'pool').last.driver, isNull);
-    expect(find.byKey(const ValueKey('row-d3')), findsOneWidget);
-
-    // Dropping on the box it came from does nothing.
-    final n = f.calls.length;
-    await longDrag(tester, find.byKey(const ValueKey('chip-d1')), box('d-joe'));
-    expect(f.calls.length, n);
+  testWidgets('2.0.0: one pooled stop selected — ▲ / ▼ move it within the pool; no drag and drop', (tester) async {
+    final s = pooled(deliveryFloor(), 'd-joe', ['d1', 'd5']);
+    final (c, f) = await pumpPane(tester, fake: FakeDeliveryFloor(s));
+    expect(find.byType(LongPressDraggable<Object>), findsNothing);
+    final run = [for (final o in c.read(floorProvider).poolFor('d-joe')) o.id];
+    expect(run.length, greaterThan(1));
+    final last = run.last;
+    await tester.tap(find.byKey(ValueKey('chip-$last')));
+    await tester.pump();
+    expect(tester.widget<IconButton>(find.byKey(const ValueKey('stop-down'))).onPressed, isNull, reason: 'last already');
+    await tester.tap(find.byKey(const ValueKey('stop-up')));
+    await tester.pump();
+    final call = callsOf(f, 'poolOrder').single;
+    expect(call.driver, 'd-joe');
+    expect(call.ids, [...run.sublist(0, run.length - 2), last, run[run.length - 2]]);
+    // Two selected: no arrows.
+    await tester.tap(find.byKey(ValueKey('chip-${run.first}')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('stop-up')), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('✕ on a pooled chip puts it back on the left', (tester) async {
     final (_, f) = await pumpPane(tester);
     await tester.tap(
-      find.descendant(of: find.byKey(const ValueKey('chip-d3')), matching: find.byTooltip('Back to unassigned')),
+      find.descendant(of: find.byKey(const ValueKey('chip-d3')), matching: find.byTooltip('Back to Waiting')),
     );
     await tester.pump();
     expect(callsOf(f, 'pool').single.ids, ['d3']);
@@ -347,12 +336,15 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('dragging, moving or sending clears the glow', (tester) async {
+    testWidgets('selecting, moving or sending clears the glow', (tester) async {
       final (c, _) = await pumpPane(tester);
       c.read(deliveryHighlightProvider.notifier).show(['d5']);
       await tester.pump();
       expect(glowOn('d5'), findsOneWidget);
-      await longDrag(tester, find.byKey(const ValueKey('row-d1')), box('d-joe'));
+      await tester.tap(find.byKey(const ValueKey('row-d1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('driver-header-d-joe')));
+      await tester.pump();
       expect(c.read(deliveryHighlightProvider), isEmpty);
       expect(glowOn('d5'), findsNothing);
 
@@ -404,7 +396,7 @@ void main() {
     testWidgets('no glow when there is nothing to plan', (tester) async {
       final s = pooled(deliveryFloor(), 'd-joe', ['d1', 'd2', 'd5']);
       await pumpPane(tester, fake: FakeDeliveryFloor(s), motion: true);
-      expect(find.text('Unassigned · 0'), findsOneWidget);
+      expect(find.text('Waiting · 0'), findsOneWidget);
       expect(find.byKey(const ValueKey('lava-glow')), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
@@ -424,7 +416,7 @@ void main() {
     await pumpPane(tester, fake: FakeDeliveryFloor(s.copyWith(drivers: off)));
     expect(find.text('No driver clocked in — clock one in on the Drivers tab.'), findsOneWidget);
     expect(sendBar, findsNothing);
-    expect(find.text('Unassigned · 5'), findsOneWidget, reason: 'pools of unavailable drivers show as unassigned');
+    expect(find.text('Waiting · 5'), findsOneWidget, reason: 'pools of unavailable drivers show as unassigned');
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -576,9 +568,12 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('dragging a yellow stop to the left drops just that suggestion', (tester) async {
+    testWidgets('a yellow stop selected and Waiting tapped drops just that suggestion', (tester) async {
       final (c, f) = await withPreview(tester);
-      await longDrag(tester, find.byKey(const ValueKey('yellow-d5')), leftColumn);
+      await tester.tap(find.byKey(const ValueKey('yellow-d5')));
+      await tester.pump();
+      await tester.tap(leftColumn);
+      await tester.pump();
       expect(c.read(autoPreviewProvider)!.suggestedIds, {'d1'});
       expect(callsOf(f, 'pool'), isEmpty, reason: 'it was never pooled');
       expect(find.byKey(const ValueKey('row-d5')), findsOneWidget);

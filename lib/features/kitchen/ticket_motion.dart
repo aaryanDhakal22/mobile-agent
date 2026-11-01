@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
@@ -9,20 +10,32 @@ import '../../core/models.dart';
 import '../../core/motion.dart';
 import '../../core/time.dart';
 
-// "Bubbly" Kitchen (1.9.0): a new ticket pops in, a READY ticket shrinks away
-// while the others glide to their new places, and the big buttons squish
+// "Bubbly" Kitchen (1.9.0, 2.0.0): a new ticket pops in, a READY ticket
+// implodes while the others slide springily to their new places, and the big buttons squish
 // when pressed (common/squish.dart). Everything follows Motion (lib/core/motion.dart): durations
 // through Motion.scale; with Motion off only fades, no transforms.
 
 /// The pop: 0 → 110 % → 95 % → 100 % with a small jiggle.
 const Duration kTicketPop = Duration(milliseconds: 520);
 
-/// A READY ticket shrinks to [kTicketExitScale] and fades out.
-const Duration kTicketExit = Duration(milliseconds: 220);
-const double kTicketExitScale = 0.85;
+/// A READY ticket implodes (2.0.0, owner): a squash, then it collapses to a
+/// point in about 280 ms, and a small green ✓ bursts where it vanished.
+const Duration kTicketExit = Duration(milliseconds: 460);
 
-/// The others glide to their new places.
-const Duration kTicketGlide = Duration(milliseconds: 260);
+/// The part of [kTicketExit] the collapse takes; the ✓ burst finishes it.
+const double kTicketCollapseEnd = 0.62;
+
+/// The others slide to their new places, springy: past the spot a little,
+/// one wobble, settled (2.0.0).
+const Duration kTicketGlide = Duration(milliseconds: 450);
+
+/// The slide's spring: overshoots about 11 %, then about 1 %, then rests.
+class SpringyCurve extends Curve {
+  const SpringyCurve();
+
+  @override
+  double transformInternal(double t) => 1 - math.exp(-5.5 * t) * math.cos(8.0 * t);
+}
 
 /// Only a ticket accepted this recently pops (an older one that shows up
 /// with a refresh just appears).
@@ -147,6 +160,7 @@ class FlipController {
 
   bool enabled = true;
   Duration duration = kTicketGlide;
+  Curve curve = const SpringyCurve();
   RenderBox? _grid;
   final Map<Object, _Track> _tracks = {};
   Ticker? _ticker;
@@ -163,7 +177,7 @@ class FlipController {
     if (t.start == null) return Offset.zero;
     final k = _t(t, now);
     if (k >= 1) return Offset.zero;
-    return t.from * (1 - Curves.easeOutCubic.transform(k));
+    return t.from * (1 - curve.transform(k));
   }
 
   /// The glide offset the ticket was last drawn with (tests).
@@ -378,23 +392,49 @@ class AnimatedKitchenGridState extends ConsumerState<AnimatedKitchenGrid> with T
 
   Widget _ghost(BuildContext context, String id, _Ghost g) {
     final card = widget.itemBuilder(context, g.order, true);
-    final fade = Tween<double>(begin: 1, end: 0).chain(CurveTween(curve: Curves.easeIn)).animate(g.c);
+    if (!_motion.full) {
+      // Motion off: a quick fade, nothing else.
+      return Positioned.fromRect(
+        key: ValueKey('kitchen-ghost-$id'),
+        rect: g.rect,
+        child: IgnorePointer(
+          child: ExcludeSemantics(
+            child: FadeTransition(opacity: Tween<double>(begin: 1, end: 0).animate(g.c), child: card),
+          ),
+        ),
+      );
+    }
     return Positioned.fromRect(
       key: ValueKey('kitchen-ghost-$id'),
       rect: g.rect,
       child: IgnorePointer(
         child: ExcludeSemantics(
-          child: FadeTransition(
-            opacity: fade,
-            child: _motion.full
-                ? ScaleTransition(
-                    scale: Tween<double>(
-                      begin: 1,
-                      end: kTicketExitScale,
-                    ).chain(CurveTween(curve: Curves.easeInCubic)).animate(g.c),
-                    child: card,
-                  )
-                : card,
+          child: AnimatedBuilder(
+            animation: g.c,
+            builder: (context, child) {
+              final v = g.c.value;
+              final (sx, sy, fade) = implodeAt(v);
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  if (fade > 0)
+                    Positioned.fill(
+                      child: Opacity(
+                        opacity: fade,
+                        child: Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.diagonal3Values(sx, sy, 1),
+                          child: child,
+                        ),
+                      ),
+                    ),
+                  Positioned.fill(
+                    child: Center(child: ReadyBurst(t: burstAt(v))),
+                  ),
+                ],
+              );
+            },
+            child: card,
           ),
         ),
       ),
@@ -452,4 +492,93 @@ class AnimatedKitchenGridState extends ConsumerState<AnimatedKitchenGrid> with T
       children: [grid, for (final e in _ghosts.entries) _ghost(context, e.key, e.value)],
     );
   }
+}
+
+/// The implode at [v] (0..1 of [kTicketExit]): the ticket's x / y scale and
+/// opacity. A squash first (wider, flatter), then it collapses to a point by
+/// [kTicketCollapseEnd], fading at the very end.
+(double, double, double) implodeAt(double v) {
+  const squashEnd = 0.18;
+  if (v <= squashEnd) {
+    final k = Curves.easeOut.transform(v / squashEnd);
+    return (1 + 0.05 * k, 1 - 0.10 * k, 1);
+  }
+  if (v >= kTicketCollapseEnd) return (0, 0, 0);
+  final k = Curves.easeInBack.transform((v - squashEnd) / (kTicketCollapseEnd - squashEnd)).clamp(-0.2, 1.0);
+  final sx = (1.05 * (1 - k)).clamp(0.0, 1.2);
+  final sy = (0.90 * (1 - k)).clamp(0.0, 1.2);
+  final fade = v < kTicketCollapseEnd - 0.12 ? 1.0 : ((kTicketCollapseEnd - v) / 0.12).clamp(0.0, 1.0);
+  return (sx, sy, fade);
+}
+
+/// The ✓ burst's own time (0..1) at [v]: it starts as the ticket is nearly
+/// gone and runs to the end; 0 before.
+double burstAt(double v) {
+  const start = kTicketCollapseEnd - 0.12;
+  if (v <= start) return 0;
+  return ((v - start) / (1 - start)).clamp(0.0, 1.0);
+}
+
+/// The small green ✓ burst where a READY ticket vanished: a check that pops
+/// to full size and fades, with a ring and a few dots flying out.
+class ReadyBurst extends StatelessWidget {
+  final double t;
+  const ReadyBurst({super.key, required this.t});
+
+  static const _green = Color(0xFF34C77B);
+
+  @override
+  Widget build(BuildContext context) {
+    if (t <= 0 || t >= 1) return const SizedBox.shrink();
+    final pop = Curves.easeOutBack.transform(math.min(1, t / 0.45));
+    final fade = t < 0.6 ? 1.0 : (1 - (t - 0.6) / 0.4);
+    return IgnorePointer(
+      child: Opacity(
+        opacity: fade.clamp(0.0, 1.0),
+        child: SizedBox(
+          width: 120,
+          height: 120,
+          child: CustomPaint(
+            key: const ValueKey('ready-burst'),
+            painter: _BurstPainter(t),
+            child: Center(
+              child: Transform.scale(
+                scale: 0.4 + 0.6 * pop,
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: const BoxDecoration(color: _green, shape: BoxShape.circle),
+                  child: const Icon(Icons.check_rounded, color: Color(0xFFFFFFFF), size: 32),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BurstPainter extends CustomPainter {
+  final double t;
+  _BurstPainter(this.t);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final k = Curves.easeOut.transform(t);
+    final ring = Paint()
+      ..color = ReadyBurst._green.withValues(alpha: (1 - k) * 0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+    canvas.drawCircle(c, 24 + 30 * k, ring);
+    final dot = Paint()..color = ReadyBurst._green.withValues(alpha: 1 - k);
+    for (var i = 0; i < 6; i++) {
+      final a = i * math.pi / 3 + math.pi / 6;
+      canvas.drawCircle(c + Offset(math.cos(a), math.sin(a)) * (28 + 28 * k), 4 * (1 - k) + 1, dot);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BurstPainter old) => old.t != t;
 }

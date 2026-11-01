@@ -4,6 +4,7 @@ import '../../core/clock.dart';
 import '../../core/delivery_models.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
@@ -11,17 +12,6 @@ import '../common/widgets.dart';
 import '../maps/check_address_sheet.dart';
 import '../maps/geo_format.dart';
 import 'lava_glow.dart';
-
-/// What a drag on the Deliveries screen carries: the order ids, the driver
-/// whose pool they came from (null = the unassigned column) and whether
-/// they are AUTO suggestions (yellow — not in any pool yet).
-class DeliveryDrag {
-  final List<String> ids;
-  final String? fromDriver;
-  final bool suggestion;
-  final List<String> numbers;
-  const DeliveryDrag({required this.ids, this.fromDriver, this.suggestion = false, this.numbers = const []});
-}
 
 /// "#1104" (kitchen number) — the vendor id for an order without one.
 String orderNumber(StoredOrder o) {
@@ -34,54 +24,6 @@ String numbersList(List<String> n) {
   if (n.isEmpty) return '';
   if (n.length == 1) return n.first;
   return '${n.sublist(0, n.length - 1).join(', ')} and ${n.last}';
-}
-
-/// What sits under the finger while dragging: the kitchen numbers.
-class DragFeedback extends StatelessWidget {
-  final List<String> numbers;
-  const DragFeedback({super.key, required this.numbers});
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: Colors.transparent,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.lg, vertical: QuiccSpace.md),
-      decoration: BoxDecoration(
-        color: QuiccColors.brand400,
-        borderRadius: BorderRadius.circular(QuiccRadius.md),
-        boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 12, offset: Offset(0, 4))],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.delivery_dining, color: QuiccColors.brand900),
-          QuiccSpace.gapSm,
-          Text(
-            numbers.join('  '),
-            style: QuiccType.number(QuiccType.heading, weight: FontWeight.w700, color: QuiccColors.brand900),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-/// Draggable on long-press (a tap stays a tap): [child] dims while it's
-/// being dragged. [onDragStarted] lets the screen drop a highlight.
-class DeliveryDraggable extends StatelessWidget {
-  final DeliveryDrag data;
-  final Widget child;
-  final VoidCallback? onDragStarted;
-  const DeliveryDraggable({super.key, required this.data, required this.child, this.onDragStarted});
-
-  @override
-  Widget build(BuildContext context) => LongPressDraggable<DeliveryDrag>(
-    data: data,
-    onDragStarted: onDragStarted,
-    feedback: DragFeedback(numbers: data.numbers),
-    childWhenDragging: Opacity(opacity: 0.3, child: child),
-    child: child,
-  );
 }
 
 /// A delivery waiting on the left: kitchen #, customer, address, mi · min,
@@ -97,7 +39,10 @@ class UnassignedRow extends StatelessWidget {
   final bool highlight;
   final int targetMinutes;
   final HeldFor? heldFor;
+
+  /// Tap = select it (2.0.0); hold = open its details.
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   const UnassignedRow({
     super.key,
     required this.order,
@@ -107,6 +52,7 @@ class UnassignedRow extends StatelessWidget {
     required this.targetMinutes,
     this.heldFor,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -127,103 +73,113 @@ class UnassignedRow extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(QuiccRadius.lg),
         onTap: onTap,
-        child: Opacity(
-          opacity: cooking ? 0.55 : 1,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(QuiccSpace.md, QuiccSpace.md, QuiccSpace.md, QuiccSpace.md),
-            child: Row(
-              children: [
-                if (selectMode)
-                  Padding(
-                    padding: const EdgeInsets.only(right: QuiccSpace.xs),
-                    child: Icon(
-                      selected ? Icons.check_box : Icons.check_box_outline_blank,
-                      color: selected ? QuiccColors.brand400 : context.palette.textMuted,
+        onLongPress: onLongPress,
+        child: ClockBuilder<bool>(
+          // 2.0.0: a delivery whose time is up counts as ready even if
+          // nobody pressed READY — it isn't dimmed any more.
+          select: (now) => cooking && !order.timeUp(now),
+          builder: (context, dim, _) => Opacity(
+            opacity: dim ? 0.55 : 1,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(QuiccSpace.md, QuiccSpace.md, QuiccSpace.md, QuiccSpace.md),
+              child: Row(
+                children: [
+                  if (selectMode)
+                    Padding(
+                      padding: const EdgeInsets.only(right: QuiccSpace.xs),
+                      child: Icon(
+                        selected ? Icons.check_box : Icons.check_box_outline_blank,
+                        color: selected ? QuiccColors.brand400 : context.palette.textMuted,
+                      ),
                     ),
-                  ),
-                SizedBox(
-                  width: 70,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          order.displayNumber,
-                          style: QuiccType.number(QuiccType.heading + 4, weight: FontWeight.w700, color: QuiccColors.brand400),
-                        ),
-                      ),
-                      if (order.isPos) const PosTag(size: 10),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        o.customerName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
-                      ),
-                      Text(
-                        address == null || address.isEmpty ? 'No address' : address.oneLine,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
-                      ),
-                      const SizedBox(height: 2),
-                      Wrap(
-                        spacing: QuiccSpace.sm,
-                        runSpacing: 2,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          if (drive != null)
-                            Text(drive, style: QuiccType.text(QuiccType.label, weight: FontWeight.w600)),
-                          if (g != null && g.needsCheck)
-                            CheckAddressTag(order: order)
-                          else if (hint != null)
-                            Text(
-                              hint,
-                              style: QuiccType.text(
-                                QuiccType.caption,
-                                color: context.palette.textMuted,
-                              ).copyWith(fontStyle: FontStyle.italic),
+                  SizedBox(
+                    width: 70,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            order.displayNumber,
+                            style: QuiccType.number(
+                              QuiccType.heading + 4,
+                              weight: FontWeight.w700,
+                              color: QuiccColors.brand400,
                             ),
-                          ...geoTags(g),
-                          if (heldFor != null) HeldForTag(heldFor: heldFor!, key: ValueKey('held-${order.id}')),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                QuiccSpace.gapSm,
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      order.isPaid ? 'PAID' : 'CASH ${money(order.cashDueCents)}',
-                      style: QuiccType.number(
-                        QuiccType.label,
-                        weight: FontWeight.w700,
-                        color: order.isPaid ? context.palette.textMuted : QuiccColors.statusFiring,
-                      ),
+                          ),
+                        ),
+                        if (order.isPos) const PosTag(size: 10),
+                      ],
                     ),
-                    if ((order.status.tipCents ?? o.money.tipCents) > 0)
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          o.customerName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
+                        ),
+                        Text(
+                          address == null || address.isEmpty ? 'No address' : address.oneLine,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
+                        ),
+                        const SizedBox(height: 2),
+                        Wrap(
+                          spacing: QuiccSpace.sm,
+                          runSpacing: 2,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (drive != null)
+                              Text(drive, style: QuiccType.text(QuiccType.label, weight: FontWeight.w600)),
+                            if (g != null && g.needsCheck)
+                              CheckAddressTag(order: order)
+                            else if (hint != null)
+                              Text(
+                                hint,
+                                style: QuiccType.text(
+                                  QuiccType.caption,
+                                  color: context.palette.textMuted,
+                                ).copyWith(fontStyle: FontStyle.italic),
+                              ),
+                            ...geoTags(g),
+                            if (heldFor != null) HeldForTag(heldFor: heldFor!, key: ValueKey('held-${order.id}')),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  QuiccSpace.gapSm,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
                       Text(
-                        'tip ${money(order.status.tipCents ?? o.money.tipCents)}',
+                        order.isPaid ? 'PAID' : 'CASH ${money(order.cashDueCents)}',
                         style: QuiccType.number(
                           QuiccType.label,
-                          weight: FontWeight.w500,
-                          color: context.palette.textSecondary,
+                          weight: FontWeight.w700,
+                          color: order.isPaid ? context.palette.textMuted : QuiccColors.statusFiring,
                         ),
                       ),
-                    cooking ? _ReadyIn(order: order) : _Age(order: order, targetMinutes: targetMinutes),
-                  ],
-                ),
-              ],
+                      if ((order.status.tipCents ?? o.money.tipCents) > 0)
+                        Text(
+                          'tip ${money(order.status.tipCents ?? o.money.tipCents)}',
+                          style: QuiccType.number(
+                            QuiccType.label,
+                            weight: FontWeight.w500,
+                            color: context.palette.textSecondary,
+                          ),
+                        ),
+                      cooking ? _ReadyIn(order: order) : _Age(order: order, targetMinutes: targetMinutes),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -260,6 +216,7 @@ class _ReadyIn extends StatelessWidget {
     final eta = order.status.estimatedReadyAt;
     return ClockText((now) {
       final left = eta?.difference(now);
+      if (left != null && left.inSeconds <= 0) return "time's up";
       return left == null
           ? 'cooking'
           : (left.inSeconds <= 30 ? 'ready any minute' : 'ready in ~${(left.inSeconds / 60).ceil()} min');
@@ -301,7 +258,10 @@ class PoolStopChip extends StatelessWidget {
   final bool yellow;
   final bool selectMode;
   final bool selected;
+
+  /// Tap = select it (2.0.0); hold = open its details; ✕ = back to Waiting.
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final VoidCallback onRemove;
   const PoolStopChip({
     super.key,
@@ -310,6 +270,7 @@ class PoolStopChip extends StatelessWidget {
     required this.selectMode,
     required this.selected,
     required this.onTap,
+    this.onLongPress,
     required this.onRemove,
   });
 
@@ -318,10 +279,8 @@ class PoolStopChip extends StatelessWidget {
     final g = order.geo;
     final drive = driveLabel(g) ?? geoHint(g);
     final tip = order.order.money.tipCents;
-    final cooking = order.state != OrderState.ready;
-    final border = selected
-        ? QuiccColors.brand400
-        : (yellow ? QuiccColors.statusFiring : context.palette.borderSoft);
+    final cooking = order.state != OrderState.ready && !order.timeUp(timeNow());
+    final border = selected ? QuiccColors.brand400 : (yellow ? QuiccColors.statusFiring : context.palette.borderSoft);
     return Container(
       margin: const EdgeInsets.only(bottom: QuiccSpace.sm),
       decoration: BoxDecoration(
@@ -337,6 +296,7 @@ class PoolStopChip extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(QuiccRadius.md),
           onTap: onTap,
+          onLongPress: onLongPress,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(QuiccSpace.md, QuiccSpace.xs, 2, QuiccSpace.sm),
             child: Column(
@@ -373,7 +333,7 @@ class PoolStopChip extends StatelessWidget {
                       child: IconButton(
                         padding: EdgeInsets.zero,
                         iconSize: 20,
-                        tooltip: yellow ? 'Drop this suggestion' : 'Back to unassigned',
+                        tooltip: yellow ? 'Drop this suggestion' : 'Back to Waiting',
                         icon: Icon(Icons.close, color: context.palette.textMuted),
                         onPressed: onRemove,
                       ),
@@ -388,7 +348,11 @@ class PoolStopChip extends StatelessWidget {
                     if (tip > 0)
                       Text(
                         'tip ${money(tip)}',
-                        style: QuiccType.number(QuiccType.caption, weight: FontWeight.w500, color: context.palette.textSecondary),
+                        style: QuiccType.number(
+                          QuiccType.caption,
+                          weight: FontWeight.w500,
+                          color: context.palette.textSecondary,
+                        ),
                       ),
                     if (drive != null)
                       Text(drive, style: QuiccType.text(QuiccType.caption, color: context.palette.textSecondary)),
@@ -542,10 +506,18 @@ class OutRunCard extends StatelessWidget {
                     ),
                   QuiccSpace.gapSm,
                   if (orders.isEmpty)
-                    Text('No orders on this run.', style: QuiccType.text(QuiccType.label, color: context.palette.textMuted))
+                    Text(
+                      'No orders on this run.',
+                      style: QuiccType.text(QuiccType.label, color: context.palette.textMuted),
+                    )
                   else
                     for (final o in orders)
-                      StopAddressLine(key: ValueKey('out-stop-${o.id}'), order: o, color: color, onTap: () => onOpen(o)),
+                      StopAddressLine(
+                        key: ValueKey('out-stop-${o.id}'),
+                        order: o,
+                        color: color,
+                        onTap: () => onOpen(o),
+                      ),
                 ],
               ),
             ),

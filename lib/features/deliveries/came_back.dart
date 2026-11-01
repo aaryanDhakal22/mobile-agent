@@ -17,18 +17,18 @@ import '../maps/geo_format.dart';
 import 'delivery_widgets.dart';
 import 'send_out.dart';
 
-/// How long a came-back delivery is held to send it to Unassigned, at
+/// How long a came-back delivery is held to send it to Waiting, at
 /// animation speed 1× (Store settings → Sound & look scales it).
 const Duration kCameBackHold = Duration(seconds: 1);
 
 /// What a single tap on a came-back delivery says.
-const String kCameBackTapHint = 'Press and hold to send to Unassigned';
+const String kCameBackTapHint = 'Press and hold to send to Waiting';
 
 /// "Came back · N" (1.7.1): deliveries the driver brought back that staff
-/// chose to TRY AGAIN with. It sits under the Unassigned list in the left
+/// chose to TRY AGAIN with. It sits under the Waiting list in the left
 /// column, below a rule, and only while there is one. The rows can't be
 /// dragged or selected into a pool (and NEXT / AUTO leave them alone); a
-/// press and hold sends one to Unassigned. Its own list scrolls, so the
+/// press and hold sends one to Waiting. Its own list scrolls, so the
 /// regular deliveries above keep their room.
 class CameBackSection extends StatelessWidget {
   final List<StoredOrder> orders;
@@ -53,7 +53,7 @@ class CameBackSection extends StatelessWidget {
               QuiccSpace.gapMd,
               Expanded(
                 child: Text(
-                  'Hold one to send it to Unassigned',
+                  'Hold one to send it to Waiting',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
@@ -78,7 +78,7 @@ class CameBackSection extends StatelessWidget {
 
 /// One came-back delivery: kitchen #, customer, street, how long it has been
 /// back and CASH / PAID. Pressing fills a bar left to right; held to the end
-/// (~1 s) the delivery goes to Unassigned, let go early and nothing happens.
+/// (~1 s) the delivery goes to Waiting, let go early and nothing happens.
 /// A single tap only says how.
 class CameBackRow extends ConsumerStatefulWidget {
   final StoredOrder order;
@@ -150,11 +150,11 @@ class _CameBackRowState extends ConsumerState<CameBackRow> with SingleTickerProv
     setState(() => _busy = true);
     try {
       await ref.read(floorProvider.notifier).releaseCameBack(widget.order.id);
-      _say('$n is back in Unassigned', done: true);
+      _say('$n is back in Waiting', done: true);
     } catch (e) {
       if (!mounted) return;
       final msg = switch (e) {
-        AgentException(code: 'not_came_back') => '$n is already back in Unassigned.',
+        AgentException(code: 'not_came_back') => '$n is already back in Waiting.',
         AgentException(code: kNotDeliveredUnsupported) => 'This Pi needs an update',
         _ => null,
       };

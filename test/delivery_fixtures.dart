@@ -215,6 +215,47 @@ class FakeDeliveryFloor extends FloorController {
     calls.add((op: 'returned', ids: const [], driver: driverId, extra: const {}));
   }
 
+  // 2.0.0 (Pi 2.4.0): the stop order, the Drivers tab's moves, MARK
+  // DELIVERED / back.
+  @override
+  Future<void> setPoolOrder(String driverId, List<String> orderIds) async {
+    calls.add((op: 'poolOrder', ids: orderIds, driver: driverId, extra: const {}));
+    final seq = {for (var i = 0; i < orderIds.length; i++) orderIds[i]: i + 1};
+    state = state.withOrders([
+      for (final id in orderIds)
+        if (state.orders[id] != null)
+          state.orders[id]!.copyWith(status: state.orders[id]!.status.copyWith(poolSeq: seq[id])),
+    ]);
+  }
+
+  @override
+  Future<List<StoredOrder>> reassign(List<String> orderIds, String? driverId) async {
+    calls.add((op: 'reassign', ids: orderIds, driver: driverId, extra: const {}));
+    final d = driverId == null ? null : state.drivers.where((x) => x.id == driverId).firstOrNull;
+    final moved = [
+      for (final id in orderIds)
+        if (state.orders[id] != null)
+          state.orders[id]!.copyWith(
+            status: driverId == null
+                ? state.orders[id]!.status.copyWith(clearDriver: true, markedDelivered: const MarkedDelivered())
+                : state.orders[id]!.status.copyWith(driverId: driverId, driverName: d?.name),
+          ),
+    ];
+    state = state.withOrders(moved);
+    return moved;
+  }
+
+  @override
+  Future<StoredOrder> markDelivered(String id) async {
+    calls.add((op: 'delivered', ids: [id], driver: null, extra: const {}));
+    final o = state.orders[id]!;
+    final next = o.copyWith(
+      status: o.status.copyWith(state: OrderState.delivered, clearPool: true, clearDriver: true, markedDelivered: const MarkedDelivered()),
+    );
+    state = state.withOrders([next]);
+    return next;
+  }
+
   @override
   Future<PoolTrip> poolTrip(String driverId, List<String> orderIds) async {
     calls.add((op: 'trip', ids: orderIds, driver: driverId, extra: const {}));
@@ -287,3 +328,4 @@ Future<ProviderContainer> deliveryContainer(
 }
 
 List<Call> callsOf(FakeDeliveryFloor f, String op) => f.calls.where((c) => c.op == op).toList();
+

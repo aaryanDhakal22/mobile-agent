@@ -40,6 +40,12 @@ class TimePickerMath {
 /// delivery time for a delivery.
 int defaultMinutesFor(StoredOrder o, DefaultTimes times) => times.forType(o.order.fulfillment.type);
 
+/// A future order's default lead (2.0.0, Pi 2.4.0, owner): a delivery starts
+/// the store's delivery target before it is due (due 6:40 with a 40-min
+/// target rings at 6:00); anything else its default time.
+int futureLeadFor(StoredOrder o, DefaultTimes times, int deliveryTargetMinutes) =>
+    o.isDelivery && deliveryTargetMinutes > 0 ? deliveryTargetMinutes : defaultMinutesFor(o, times);
+
 class TimePicker extends StatefulWidget {
   /// X.
   final int base;

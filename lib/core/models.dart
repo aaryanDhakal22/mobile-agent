@@ -99,8 +99,7 @@ class StoredOrder {
   /// A delivery that can sit in a driver's pool: accepted (cooking) or ready
   /// — and not one that came back (1.7.1), which waits in "Came back" until
   /// staff send it to Unassigned.
-  bool get isPoolable =>
-      isDelivery && !status.cameBack && (state == OrderState.accepted || state == OrderState.ready);
+  bool get isPoolable => isDelivery && !status.cameBack && (state == OrderState.accepted || state == OrderState.ready);
 
   /// A delivery the driver brought back that staff chose to TRY AGAIN with
   /// (1.7.1, Pi 2.2.1): it waits in the Deliveries screen's "Came back"
@@ -108,6 +107,22 @@ class StoredOrder {
   /// holds it to send it to Unassigned.
   bool get isCameBack =>
       isDelivery && status.cameBack && state != OrderState.delivered && state != OrderState.cancelled;
+
+  /// Pi 2.4.0: delivered with no driver — waits under Unassigned on the
+  /// Drivers tab until staff move it to the driver who took it.
+  bool get isUnassigned =>
+      isDelivery && state == OrderState.delivered && (status.driverId ?? '').isEmpty && status.markedDelivered != null;
+
+  /// MARK DELIVERED is offered (order details only): an open delivery not
+  /// out yet — cooking or ready, pooled or not, or waiting in Came back.
+  bool get canMarkDelivered => isDelivery && (state == OrderState.accepted || state == OrderState.ready);
+
+  /// A cooking delivery whose estimated ready time has passed (2.0.0): it
+  /// counts as ready for planning even though nobody pressed READY.
+  bool timeUp(DateTime now) {
+    final eta = status.estimatedReadyAt;
+    return isDelivery && state == OrderState.accepted && eta != null && !eta.isAfter(now);
+  }
 
   /// When the customer placed it (the clock the delivery target runs on);
   /// falls back to when it reached us for orders without a placed time.
@@ -318,6 +333,15 @@ class OrderStatus {
   /// The last terminal change to this check (rings until OK).
   final PosChange? posChange;
 
+  /// Pi 2.4.0: marked delivered with no driver (MARK DELIVERED, or moved to
+  /// Unassigned on the Drivers tab). Kept once a driver is assigned.
+  final MarkedDelivered? markedDelivered;
+
+  /// Pi 2.4.0: a future order's kitchen tickets / receipt printed early (at
+  /// its first ACCEPT).
+  final bool earlyKitchen;
+  final bool earlyReceipt;
+
   const OrderStatus({
     required this.state,
     this.arrivalDate,
@@ -360,6 +384,9 @@ class OrderStatus {
     this.finishedBy = '',
     this.posClosed = false,
     this.posChange,
+    this.markedDelivered,
+    this.earlyKitchen = false,
+    this.earlyReceipt = false,
   });
 
   factory OrderStatus.fromJson(Map<String, dynamic> json) => OrderStatus(
@@ -404,6 +431,9 @@ class OrderStatus {
     finishedBy: jStr(json['finished_by']),
     posClosed: jBool(json['pos_closed']),
     posChange: PosChange.fromJson(json['pos_change']),
+    markedDelivered: MarkedDelivered.fromJson(json['marked_delivered']),
+    earlyKitchen: jBool(json['early_kitchen']),
+    earlyReceipt: jBool(json['early_receipt']),
   );
 
   /// The same status in [driverId]'s pool (null = unassigned) — the
@@ -451,7 +481,123 @@ class OrderStatus {
     finishedBy: finishedBy,
     posClosed: posClosed,
     posChange: posChange,
+    markedDelivered: markedDelivered,
+    earlyKitchen: earlyKitchen,
+    earlyReceipt: earlyReceipt,
   );
+
+  /// The optimistic copy of a floor step shown before the Pi answers
+  /// (READY / ACCEPT / MARK DELIVERED / a move between drivers, 2.0.0).
+  /// [clearPool] takes it out of its pool; [clearDriver] off its driver.
+  OrderStatus copyWith({
+    OrderState? state,
+    int? kitchenNumber,
+    int? prepMinutes,
+    DateTime? estimatedReadyAt,
+    DateTime? acceptedAt,
+    DateTime? readyAt,
+    DateTime? deliveredAt,
+    String? driverId,
+    String? driverName,
+    MarkedDelivered? markedDelivered,
+    int? poolSeq,
+    bool clearPool = false,
+    bool clearDriver = false,
+  }) => OrderStatus(
+    state: state ?? this.state,
+    arrivalDate: arrivalDate,
+    printedDate: printedDate,
+    batchId: batchId,
+    kitchenNumber: kitchenNumber ?? this.kitchenNumber,
+    prepMinutes: prepMinutes ?? this.prepMinutes,
+    estimatedReadyAt: estimatedReadyAt ?? this.estimatedReadyAt,
+    acceptedAt: acceptedAt ?? this.acceptedAt,
+    readyAt: readyAt ?? this.readyAt,
+    outAt: outAt,
+    deliveredAt: deliveredAt ?? this.deliveredAt,
+    cancelledAt: cancelledAt,
+    driverId: clearDriver ? null : (driverId ?? this.driverId),
+    driverName: clearDriver ? null : (driverName ?? this.driverName),
+    poolDriverId: clearPool ? null : poolDriverId,
+    pooledAt: clearPool ? null : pooledAt,
+    poolSeq: clearPool ? null : (poolSeq ?? this.poolSeq),
+    extSource: extSource,
+    extRef: extRef,
+    displayNumber: displayNumber,
+    paid: paid,
+    paidAt: paidAt,
+    cashDueCents: cashDueCents,
+    tipCents: tipCents,
+    boardHidden: boardHidden,
+    sentAt: sentAt,
+    localOnly: localOnly,
+    flag: flag,
+    posCheckNumber: posCheckNumber,
+    posDriverNote: posDriverNote,
+    future: future,
+    scheduledLeadMinutes: scheduledLeadMinutes,
+    ringAt: ringAt,
+    rerung: rerung,
+    autoAccepted: autoAccepted,
+    cameBack: clearPool ? false : cameBack,
+    notDelivered: notDelivered,
+    finishedAt: finishedAt,
+    finishedBy: finishedBy,
+    posClosed: posClosed,
+    posChange: posChange,
+    markedDelivered: markedDelivered ?? this.markedDelivered,
+    earlyKitchen: earlyKitchen,
+    earlyReceipt: earlyReceipt,
+  );
+}
+
+/// Who did something on the floor (Pi 2.4.0): a tablet by its name, or the
+/// Pi web page.
+class MarkedBy {
+  final String kind;
+  final String name;
+  const MarkedBy({this.kind = '', this.name = ''});
+
+  bool get isTablet => kind == 'tablet';
+
+  /// "Counter" / "Pi web page" / "the POS".
+  String get label => switch (kind) {
+    'pos' => 'the POS',
+    'tablet' => name.isEmpty ? 'a tablet' : name,
+    _ => name.isEmpty ? 'Pi web page' : name,
+  };
+}
+
+/// A delivery marked delivered with no driver (Pi 2.4.0): when, who, the
+/// driver it was taken from (moved to Unassigned) and the drivers available
+/// then.
+class MarkedDelivered {
+  final DateTime? at;
+  final MarkedBy by;
+  final OrderState? prevState;
+  final String fromDriver;
+  final List<String> available;
+  const MarkedDelivered({
+    this.at,
+    this.by = const MarkedBy(),
+    this.prevState,
+    this.fromDriver = '',
+    this.available = const [],
+  });
+
+  static MarkedDelivered? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final m = jMap(raw);
+    final by = m['by'] is Map ? jMap(m['by']) : const <String, dynamic>{};
+    final prev = jStr(m['prev_state']);
+    return MarkedDelivered(
+      at: jDate(m['at']),
+      by: MarkedBy(kind: jStr(by['kind']), name: jStr(by['name'])),
+      prevState: prev.isEmpty ? null : OrderState.parse(prev),
+      fromDriver: jStr(m['from_driver']),
+      available: m['available'] is List ? [for (final x in m['available'] as List) jStr(x)] : const [],
+    );
+  }
 }
 
 /// What NOT DELIVERED does with a delivery the driver brought back.
@@ -1300,6 +1446,11 @@ class TicketToggles {
   final bool onlineCashDelivery;
   final bool onlineCard;
 
+  /// Pi 2.4.0: a future order's first ACCEPT prints its kitchen tickets
+  /// (DO NOT MAKE) / its customer receipt (FUTURE) early. Off by default.
+  final bool futureKitchen;
+  final bool futureReceipt;
+
   const TicketToggles({
     this.posDelivery = false,
     this.posTakeout = false,
@@ -1307,6 +1458,8 @@ class TicketToggles {
     this.onlineCashPickup = true,
     this.onlineCashDelivery = true,
     this.onlineCard = true,
+    this.futureKitchen = false,
+    this.futureReceipt = false,
   });
 
   factory TicketToggles.fromJson(Map<String, dynamic> j) => TicketToggles(
@@ -1316,6 +1469,8 @@ class TicketToggles {
     onlineCashPickup: jBool(j['online_cash_pickup'], true),
     onlineCashDelivery: jBool(j['online_cash_delivery'], true),
     onlineCard: jBool(j['online_card'], true),
+    futureKitchen: jBool(j['future_kitchen']),
+    futureReceipt: jBool(j['future_receipt']),
   );
 
   Map<String, bool> toJson() => {
@@ -1325,6 +1480,8 @@ class TicketToggles {
     'online_cash_pickup': onlineCashPickup,
     'online_cash_delivery': onlineCashDelivery,
     'online_card': onlineCard,
+    'future_kitchen': futureKitchen,
+    'future_receipt': futureReceipt,
   };
 
   TicketToggles withKey(String key, bool on) => TicketToggles.fromJson({...toJson(), key: on});

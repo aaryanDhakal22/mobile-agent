@@ -192,6 +192,8 @@ void main() {
         'online_cash_pickup': true,
         'online_cash_delivery': true,
         'online_card': true,
+        'future_kitchen': false, // 2.0.0
+        'future_receipt': false,
       });
       expect(const FeatureToggles().withKey('paid_wave', false).paidWave, isFalse);
       expect(

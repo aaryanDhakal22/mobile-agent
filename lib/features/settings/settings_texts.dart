@@ -93,6 +93,16 @@ const kReceiptsInfo = InfoText(
       'puts everything back to how it came.',
 );
 
+const kReceiptFormatInfo = InfoText(
+  'Customer receipt format',
+  'Expanded is the receipt as it always printed: every item with all its extras and their prices, '
+      'and a Sum for each item.\n\n'
+      'Condensed prints each item on one line priced with all its extras, and only its first extra '
+      'under it — usually the one that matters (the size, the soda flavour) — plus the item\'s note. '
+      'Totals, payment, address and notes stay the same.\n\n'
+      'Reprints follow it too. Kitchen tickets never change.',
+);
+
 const kKitchenItemSizeInfo = InfoText(
   'Item text size',
   'How big the food items print on the kitchen tickets. Bigger is easier to read from a '

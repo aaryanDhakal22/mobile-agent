@@ -320,7 +320,9 @@ void main() {
       await pumpAlert(tester, _withArrived([StoredOrder.fromJson(m)]));
       expect(find.byKey(const ValueKey('time-picker')), findsOneWidget);
       expect(find.byKey(const ValueKey('nudge-plus')), findsNothing);
-      expect(_acceptLabel(tester), 'CONFIRM · 35 MIN BEFORE');
+      // 2.0.0: a future delivery starts the store's delivery target before
+      // it is due (45 min here), not the delivery prep time.
+      expect(_acceptLabel(tester), 'CONFIRM · 45 MIN BEFORE');
       await _done(tester);
     });
   });

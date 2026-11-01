@@ -13,6 +13,7 @@ import '../settings/settings_card.dart';
 import 'dev_log.dart';
 import 'dev_texts.dart';
 import 'dev_widgets.dart';
+import 'settings_history.dart';
 
 enum _Filter { all, connection, floor, errors }
 
@@ -97,6 +98,7 @@ class _DevLogsScreenState extends ConsumerState<DevLogsScreen> {
           ],
         ),
         const _PiLogCard(),
+        const SettingsHistoryCard(),
         SettingsCard(
           title: DevText.errorsTitle,
           info: kLogsInfo,

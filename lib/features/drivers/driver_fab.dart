@@ -169,6 +169,24 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
     }
   }
 
+  /// CLOCK IN on the card (2.0.0): the driver joins the back of the queue.
+  Future<void> _clockIn(Driver d) async {
+    if (_busyId != null) return;
+    setState(() => _busyId = d.id);
+    try {
+      await ref.read(floorProvider.notifier).clockIn(d.id);
+      if (mounted) toast(context, '${d.name} clocked in — back of the queue', rightInset: _toastInset);
+    } catch (e) {
+      if (mounted) {
+        e is AgentException && e.isConflict
+            ? toast(context, '${d.name} is already clocked in', error: true, rightInset: _toastInset)
+            : toastError(context, e, lead: 'Not clocked in', area: 'drivers', rightInset: _toastInset);
+      }
+    } finally {
+      if (mounted) setState(() => _busyId = null);
+    }
+  }
+
   /// The NEXT card's big button: send the next driver out — or, when the
   /// rules say something needs planning first, open that screen.
   Future<void> _onNext() async {
@@ -250,6 +268,10 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
   Widget build(BuildContext context) {
     final m = Motion.of(context, ref);
     final out = ref.watch(floorProvider.select((s) => s.driversOut));
+    final off = _expanded
+        ? ([...ref.watch(floorProvider.select((s) => s.drivers))].where((d) => d.isOff).toList()
+            ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())))
+        : const <Driver>[];
     final last = ref.watch(lastReturnProvider);
     final canUndo = last != null && last.undoable;
     // Only built while open: the plan reads the whole floor.
@@ -285,10 +307,8 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
                     reverseDuration: d(180),
                     switchInCurve: m.full ? Curves.easeOutBack : Curves.linear,
                     switchOutCurve: Curves.easeInCubic,
-                    layoutBuilder: (current, previous) => Stack(
-                      alignment: Alignment.bottomRight,
-                      children: [...previous, ?current],
-                    ),
+                    layoutBuilder: (current, previous) =>
+                        Stack(alignment: Alignment.bottomRight, children: [...previous, ?current]),
                     transitionBuilder: (child, anim) => FadeTransition(
                       opacity: anim,
                       child: m.full
@@ -322,6 +342,11 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
                                       ),
                                       if (d != out.last) QuiccSpace.gapSm,
                                     ],
+                                  // 2.0.0: clock a driver in from any screen.
+                                  if (off.isNotEmpty) ...[
+                                    QuiccSpace.gapLg,
+                                    _ClockInRow(drivers: off, busyId: _busyId, onTap: _clockIn),
+                                  ],
                                 ],
                               ),
                             ),
@@ -578,10 +603,7 @@ class _NextCard extends StatelessWidget {
                 if (more > 0)
                   Padding(
                     padding: const EdgeInsets.only(top: QuiccSpace.xs),
-                    child: Text(
-                      '+ $more more',
-                      style: QuiccType.text(QuiccType.label, color: p.textMuted),
-                    ),
+                    child: Text('+ $more more', style: QuiccType.text(QuiccType.label, color: p.textMuted)),
                   ),
               ],
               if (plan.reason != null) ...[
@@ -658,10 +680,7 @@ class _TicketLine extends StatelessWidget {
               style: QuiccType.text(QuiccType.body, weight: FontWeight.w600, color: p.textPrimary),
             ),
           ),
-          if (stop.suggested) ...[
-            const _Tag('AUTO', color: QuiccColors.statusFiring),
-            QuiccSpace.gapXs,
-          ],
+          if (stop.suggested) ...[const _Tag('AUTO', color: QuiccColors.statusFiring), QuiccSpace.gapXs],
           _Tag(ready ? 'Ready' : 'Cooking', color: ready ? QuiccColors.statusPaid : QuiccColors.statusOpen),
         ],
       ),
@@ -682,7 +701,10 @@ class _Tag extends StatelessWidget {
       borderRadius: BorderRadius.circular(QuiccRadius.sm),
       border: Border.all(color: color.withValues(alpha: 0.7)),
     ),
-    child: Text(text, style: QuiccType.text(QuiccType.caption, weight: FontWeight.w700, color: color)),
+    child: Text(
+      text,
+      style: QuiccType.text(QuiccType.caption, weight: FontWeight.w700, color: color),
+    ),
   );
 }
 
@@ -732,6 +754,54 @@ class _DriverPill extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// CLOCK IN on the driver card (2.0.0): a chip per clocked-out driver; a tap
+/// clocks them in (back of the queue). Clocking out stays on the Drivers tab.
+class _ClockInRow extends StatelessWidget {
+  final List<Driver> drivers;
+  final String? busyId;
+  final void Function(Driver) onTap;
+  const _ClockInRow({required this.drivers, required this.busyId, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      key: const ValueKey('fab-clock-in'),
+      constraints: const BoxConstraints(maxWidth: 520),
+      padding: const EdgeInsets.all(QuiccSpace.md),
+      decoration: BoxDecoration(
+        color: p.bgElevated,
+        borderRadius: BorderRadius.circular(QuiccRadius.lg),
+        border: Border.all(color: p.borderSoft),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Eyebrow('Clock in'),
+          QuiccSpace.gapSm,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: QuiccSpace.sm,
+            runSpacing: QuiccSpace.sm,
+            children: [
+              for (final d in drivers)
+                ActionChip(
+                  key: ValueKey('fab-clock-in-${d.id}'),
+                  avatar: busyId == d.id
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.add, size: 18),
+                  label: Text(d.name, style: QuiccType.text(QuiccType.body, weight: FontWeight.w600)),
+                  onPressed: busyId == d.id ? null : () => onTap(d),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }

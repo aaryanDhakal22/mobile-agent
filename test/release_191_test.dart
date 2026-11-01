@@ -14,7 +14,7 @@ import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/core/providers.dart';
 import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/common/island.dart';
-import 'package:mobile_agent/features/drivers/drivers_pane.dart';
+import 'package:mobile_agent/features/settings/drivers_settings_card.dart';
 import 'package:mobile_agent/features/integration/integration_alerts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -85,7 +85,7 @@ Future<ProviderContainer> _pump(WidgetTester tester, _Pi pi, List<Driver> driver
       container: c,
       child: MaterialApp(
         theme: darkTheme(),
-        home: const IslandHost(child: Scaffold(body: DriversPane())),
+        home: const IslandHost(child: Scaffold(body: SingleChildScrollView(child: DriversSettingsCard()))),
       ),
     ),
   );
@@ -268,7 +268,7 @@ void main() {
       final pi = _Pi((req) => req.method == 'GET' ? _json([_abdul.toJson()]) : _json(const {}));
       await _pump(tester, pi, const [_abdul]);
 
-      await tester.tap(find.byTooltip('Edit name / Driver #'));
+      await tester.tap(find.byTooltip('Edit'));
       await _settle(tester);
       expect(find.widgetWithText(TextField, 'abdul'), findsOneWidget);
       await tester.enterText(_device, 'abdul2');
@@ -276,7 +276,7 @@ void main() {
       await _settle(tester);
       expect(pi.bodyOf('PATCH /api/drivers/d-abdul'), {'pushover_device': 'abdul2'});
 
-      await tester.tap(find.byTooltip('Edit name / Driver #'));
+      await tester.tap(find.byTooltip('Edit'));
       await _settle(tester);
       await tester.enterText(_device, '');
       await tester.tap(find.byKey(const ValueKey('driver-save')));
@@ -291,7 +291,7 @@ void main() {
       await _pump(tester, pi, const [_ana, _abdul]);
 
       // Ana has no phone saved.
-      await tester.tap(find.byTooltip('Edit name / Driver #').first);
+      await tester.tap(find.byKey(const ValueKey('edit-driver-d-ana')));
       await _settle(tester);
       expect(_sendTest, findsOneWidget);
       expect(_testEnabled(tester), isFalse);
@@ -302,7 +302,7 @@ void main() {
       await _settle(tester);
 
       // Abdul has.
-      await tester.tap(find.byTooltip('Edit name / Driver #').last);
+      await tester.tap(find.byKey(const ValueKey('edit-driver-d-abdul')));
       await _settle(tester);
       expect(_testEnabled(tester), isTrue);
       await tester.enterText(_device, 'abdul2');
