@@ -184,9 +184,12 @@ class _CameBackRowState extends ConsumerState<CameBackRow> with SingleTickerProv
       child: Card(
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
+        color: p.bgElevated,
+        elevation: 3,
+        shadowColor: Colors.black.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? 0.5 : 0.15),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(QuiccRadius.lg),
-          side: BorderSide(color: QuiccColors.statusFiring.withValues(alpha: 0.5)),
+          side: BorderSide(color: QuiccColors.statusFiring.withValues(alpha: 0.6), width: 1.5),
         ),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -221,16 +224,16 @@ class _CameBackRowState extends ConsumerState<CameBackRow> with SingleTickerProv
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            o.customerName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
-                          ),
-                          Text(
                             streetOf(so),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: QuiccType.text(QuiccType.label, color: p.textSecondary),
+                            style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
+                          ),
+                          Text(
+                            o.customerName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: QuiccType.text(QuiccType.label - 1, color: p.textSecondary),
                           ),
                         ],
                       ),

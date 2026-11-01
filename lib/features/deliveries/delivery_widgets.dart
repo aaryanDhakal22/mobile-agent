@@ -65,10 +65,17 @@ class UnassignedRow extends StatelessWidget {
     final address = o.fulfillment.address;
     final card = Card(
       margin: EdgeInsets.zero,
-      color: selected ? QuiccColors.brand400.withValues(alpha: 0.14) : null,
+      // 2.0.1: raised off the column (lighter fill, an edge and a shadow)
+      // so the rows don't blend together.
+      color: selected ? QuiccColors.brand400.withValues(alpha: 0.14) : context.palette.bgElevated,
+      elevation: 3,
+      shadowColor: Colors.black.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? 0.5 : 0.15),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(QuiccRadius.lg),
-        side: BorderSide(color: selected ? QuiccColors.brand400 : Colors.transparent, width: 2),
+        side: BorderSide(
+          color: selected ? QuiccColors.brand400 : QuiccColors.brand400.withValues(alpha: 0.35),
+          width: selected ? 2 : 1.5,
+        ),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(QuiccRadius.lg),
@@ -117,17 +124,18 @@ class UnassignedRow extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // 2.0.1: the address leads (big), the name is small under it.
+                        Text(
+                          address == null || address.isEmpty ? 'No address' : address.oneLine,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
+                        ),
                         Text(
                           o.customerName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
-                        ),
-                        Text(
-                          address == null || address.isEmpty ? 'No address' : address.oneLine,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
+                          style: QuiccType.text(QuiccType.label - 1, color: context.palette.textSecondary),
                         ),
                         const SizedBox(height: 2),
                         Wrap(
