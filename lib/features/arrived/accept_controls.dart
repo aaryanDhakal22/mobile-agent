@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/accept_errors.dart';
 import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/friendly_error.dart';
@@ -14,29 +15,7 @@ import '../common/squish.dart';
 import '../common/widgets.dart';
 import 'time_picker.dart';
 
-/// Shown while a timed-out accept is being read back from the agent.
-const String kAcceptChecking = "Couldn't confirm — checking…";
-
-/// Staff-facing message for a failed accept. A transport error / timeout is
-/// ambiguous (the agent may have claimed the order before the answer was
-/// lost), so it only says we're checking — see [acceptRecheckMessage].
-String acceptErrorMessage(Object e) {
-  if (e is AgentException) {
-    if (e.isPrinterFailure) {
-      return 'Printer problem — order NOT accepted. Check the printers and try again.';
-    }
-    if (e.isNetwork) return kAcceptChecking;
-    if (e.isConflict) {
-      return switch (e.code) {
-        'already_accepted' => 'Already accepted on another screen.',
-        'invalid_state' => 'This order was cancelled or closed with its batch — it can\'t be accepted.',
-        _ => 'Not accepted. ${FriendlyError.from(e).short}.',
-      };
-    }
-    if (e.isNotFound) return 'This order is no longer on the agent.';
-  }
-  return 'Not accepted. ${FriendlyError.from(e).short}.';
-}
+export '../../core/accept_errors.dart';
 
 /// After [kAcceptChecking]: what the agent says about the order now. null
 /// = the order was accepted after all (it leaves the arrived queue).
@@ -95,31 +74,30 @@ class _AcceptControlsState extends ConsumerState<AcceptControls> {
   /// The technical text behind [_error] (Details link + local log).
   String _details = '';
 
+  /// 2.0.0: ACCEPT is instant — the order leaves the ring and its ticket
+  /// pops onto Kitchen at once, while the Pi is told in the background. If
+  /// it doesn't land the order rings again and this shows why
+  /// ([acceptErrorsProvider]).
   Future<void> _accept(int? prep) async {
     if (_busy) return;
     setState(() {
-      _busy = true;
       _error = null;
       _details = '';
     });
+    final floor = ref.read(floorProvider.notifier);
+    final log = ref.read(localLogProvider);
+    final id = widget.order.id;
     try {
-      await ref.read(floorProvider.notifier).accept(widget.order.id, prep);
-      // On success the order leaves the arrived queue and this widget unmounts.
+      await floor.accept(id, prep);
     } catch (e) {
-      if (!mounted) return;
-      final f = FriendlyError.from(e);
-      ref.read(localLogProvider).warn('accept', '${widget.order.id}: ${f.details}');
-      setState(() {
-        _error = acceptErrorMessage(e);
-        _details = f.details;
-      });
-      if (e is AgentException && e.isNetwork) {
-        // The claim may have landed: read the order back before saying no.
-        final o = await ref.read(floorProvider.notifier).recheck(widget.order.id);
-        if (mounted) setState(() => _error = acceptRecheckMessage(o));
+      log.warn('accept', '$id: ${FriendlyError.from(e).details}');
+      // Still on screen (it never left, or rings again here): say why.
+      if (mounted) {
+        setState(() {
+          _error = acceptErrorMessageFor(e);
+          _details = FriendlyError.from(e).details;
+        });
       }
-    } finally {
-      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -150,16 +128,19 @@ class _AcceptControlsState extends ConsumerState<AcceptControls> {
   Widget build(BuildContext context) {
     final so = widget.order;
     final times = ref.watch(floorProvider.select((s) => s.settings.times));
-    final base = defaultMinutesFor(so, times);
+    final target = ref.watch(floorProvider.select((s) => s.floor?.deliveryTargetMinutes ?? 0));
+    final lead = so.needsLead;
+    final base = lead ? futureLeadFor(so, times, target) : defaultMinutesFor(so, times);
     final selected = _prep ?? base;
     final fg = widget.onBrand ? QuiccColors.brand900 : null;
     final muted = fg?.withValues(alpha: 0.7) ?? context.palette.textMuted;
     final rerung = so.status.rerung;
-    final lead = so.needsLead;
     final due = so.dueAt;
     // 1.6.0: a delivery's normal ring is one big ACCEPT at the store's
     // delivery default with −5 / +5 nudges (no X / X+5 / X+10).
     final quickDelivery = so.isDelivery && !rerung && !lead;
+    // 2.0.0: an ACCEPT that left the screen and didn't land rings again.
+    final acceptError = ref.watch(acceptErrorsProvider.select((m) => m[so.id]));
 
     final String eyebrow;
     final String action;
@@ -273,9 +254,9 @@ class _AcceptControlsState extends ConsumerState<AcceptControls> {
           QuiccSpace.gapMd,
           SizedBox(height: 64, child: confirm),
         ],
-        if (_error != null) ...[
+        if ((_error ?? acceptError) != null) ...[
           QuiccSpace.gapMd,
-          InlineError(_error!, details: _details, onRetry: _busy ? null : onConfirm),
+          InlineError((_error ?? acceptError)!, details: _details, onRetry: _busy ? null : onConfirm),
         ],
       ],
     );

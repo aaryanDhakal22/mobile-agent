@@ -24,6 +24,7 @@ const _defaultsJson = <String, Object?>{
   'extra_paper': true,
   'driver_report_size': 'normal',
   'spacing': {'item_mod': 0, 'mod_mod': 0, 'item_item': 0},
+  'format': 'expanded', // 2.0.0
 };
 
 /// Plays the agent's receipt routes; records every request.
@@ -220,7 +221,7 @@ void main() {
       expect(find.text('Online (receipt)'), findsOneWidget, reason: 'the picker starts on the receipt printer');
       expect(find.text('This Pi needs an update for receipt settings'), findsNothing);
       // Every control has its (i).
-      expect(find.byTooltip('What is this?'), findsNWidgets(13));
+      expect(find.byTooltip('What is this?'), findsNWidgets(14)); // 2.0.0: + the receipt format
       await tester.pumpWidget(const SizedBox());
     });
 

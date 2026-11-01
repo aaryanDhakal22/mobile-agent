@@ -232,6 +232,10 @@ const String kCameBack = 'came_back';
 /// routes (≤ 2.2.0): "This Pi needs an update".
 const String kNotDeliveredUnsupported = 'not_delivered_unsupported';
 
+/// Pi 2.4.0 routes missing (an older Pi): MARK DELIVERED / Back to
+/// deliveries, moving deliveries between drivers, the pool's stop order.
+const String kUnassignedUnsupported = 'unassigned_unsupported';
+
 /// [AgentException.code] for SEARCH ADDRESS (1.7.2) on a Pi or main without
 /// the search (404 / 405 / 501): "This Pi needs an update".
 const String kGeoSearchUnsupported = 'geo_search_unsupported';
@@ -503,8 +507,17 @@ class AgentClient {
     }
   }
 
-  Future<StoredOrder> ready(String id) async =>
-      StoredOrder.fromJson(jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/ready')));
+  /// [callout] false (Pi 2.4.0, READY held 1 s): the store hub doesn't call
+  /// the order out. An older Pi ignores the body (a normal READY).
+  Future<StoredOrder> ready(String id, {bool callout = true}) async => StoredOrder.fromJson(
+    jMap(
+      await _send(
+        'POST',
+        '/api/orders/${Uri.encodeComponent(id)}/ready',
+        body: callout ? null : const {'callout': false},
+      ),
+    ),
+  );
 
   /// A READY tapped by mistake back to cooking (agent 2.3.8; 409
   /// `undo_expired` once it moved on or after 2 min; an older Pi: plain 404).
@@ -719,6 +732,68 @@ class AgentClient {
       jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/release', mayRevoke: false)),
     ),
   );
+
+  // --- Unassigned + the Drivers tab (Pi 2.4.0) ---------------------------------
+
+  /// `POST /api/orders/{id}/delivered` — MARK DELIVERED: an open delivery
+  /// (cooking or ready, pooled or not) is delivered with no driver and waits
+  /// under Unassigned on the Drivers tab. 409 `invalid_state`.
+  Future<StoredOrder> markDelivered(String id) => _unassignedRoute(
+    () async => StoredOrder.fromJson(
+      jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/delivered', mayRevoke: false)),
+    ),
+  );
+
+  /// `POST /api/orders/{id}/undeliver` — Back to deliveries: an Unassigned
+  /// delivery goes back to cooking / ready. 409 `not_unassigned`.
+  Future<StoredOrder> undeliver(String id) => _unassignedRoute(
+    () async => StoredOrder.fromJson(
+      jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/undeliver', mayRevoke: false)),
+    ),
+  );
+
+  /// `POST /api/deliveries/reassign {order_ids, driver_id}` — delivered / out
+  /// deliveries move to a clocked-in driver ([driverId] null = Unassigned,
+  /// delivered ones only). All or nothing; answers the moved orders. 409
+  /// `driver_not_available` (clocked out), `invalid_state` (an out one to
+  /// Unassigned), `not_out_or_delivered`.
+  Future<List<StoredOrder>> reassign(List<String> orderIds, {String? driverId}) => _unassignedRoute(() async {
+    final body = await _send(
+      'POST',
+      '/api/deliveries/reassign',
+      body: {'order_ids': orderIds, 'driver_id': driverId ?? ''},
+      mayRevoke: false,
+    );
+    return jList(body, StoredOrder.fromJson);
+  });
+
+  /// `POST /api/drivers/{id}/pool/order {order_ids}` — the pool's stop order
+  /// (the ▲▼ arrows): the whole pool, first stop first. Kept until the pool
+  /// changes. 400 when the ids aren't exactly the pool.
+  Future<List<StoredOrder>> setPoolOrder(String driverId, List<String> orderIds) => _unassignedRoute(() async {
+    final body = await _send(
+      'POST',
+      '/api/drivers/${Uri.encodeComponent(driverId)}/pool/order',
+      body: {'order_ids': orderIds},
+      mayRevoke: false,
+    );
+    return jList(body, StoredOrder.fromJson);
+  });
+
+  /// A missing 2.4.0 route (405, or a 404 that isn't the route's own
+  /// `not_found` / `driver_not_found`) is [kUnassignedUnsupported].
+  static Future<T> _unassignedRoute<T>(Future<T> Function() call) async {
+    try {
+      return await call();
+    } on AgentException catch (e) {
+      final code = e.code ?? (jStr(e.body['error']).isEmpty ? null : jStr(e.body['error']));
+      final missing = e.statusCode == 405 || (e.statusCode == 404 && code != 'not_found' && code != 'driver_not_found');
+      if (missing) {
+        throw AgentException(e.message, statusCode: e.statusCode, code: kUnassignedUnsupported, body: e.body);
+      }
+      rethrow;
+    }
+  }
 
   /// The 2.2.1 routes answer `{"error": "<code>"}`: the code moves to
   /// [AgentException.code]. A missing route (405, or a 404 that isn't the
@@ -1063,8 +1138,15 @@ class AgentClient {
   /// and kitchen ticket with the saved settings on that printer (default:
   /// the receipt printer), no failover. 409 `test_in_progress`; 404
   /// `not_configured` for an unknown printer.
-  Future<List<PrinterTestResult>> printSample({String? printerId}) => _receiptRoute(() async {
-    final body = await _send('POST', '/api/printers/sample', body: {'printer_id': ?printerId}, timeout: printTimeout);
+  /// [kind] (Pi 2.4.0): `future_kitchen` / `future_receipt` = a future
+  /// order's early ticket (the switches' TEST PRINT); null = the sample.
+  Future<List<PrinterTestResult>> printSample({String? printerId, String? kind}) => _receiptRoute(() async {
+    final body = await _send(
+      'POST',
+      '/api/printers/sample',
+      body: {'printer_id': ?printerId, 'kind': ?kind},
+      timeout: printTimeout,
+    );
     return jList(jMap(body)['results'], PrinterTestResult.fromJson);
   });
 
@@ -1115,10 +1197,8 @@ class AgentClient {
   // --- Pi 2.3.0: finishing, terminal changes, the order callout ---------------
 
   /// `GET /api/settings/finishing` (an older Pi → [kSettingsUnsupported]).
-  Future<FinishingSettings> getFinishing() => _v210Route(
-    () async => FinishingSettings.fromJson(jMap(await _get('/api/settings/finishing'))),
-    settings: true,
-  );
+  Future<FinishingSettings> getFinishing() =>
+      _v210Route(() async => FinishingSettings.fromJson(jMap(await _get('/api/settings/finishing'))), settings: true);
 
   /// `PUT /api/settings/finishing` — 400 outside 0–240.
   Future<FinishingSettings> putFinishing(FinishingSettings f) => _v210Route(

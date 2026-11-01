@@ -24,7 +24,7 @@ const double kSendOutToastInset = 160;
 
 /// A pool / send-out named a delivery that came back (409 `came_back`).
 const String kCameBackFirst =
-    'A delivery in there came back — hold it under Came back to send it to Unassigned first. List refreshed.';
+    'A delivery in there came back — hold it under Came back to send it to Waiting first. List refreshed.';
 
 /// One stop a send-out takes: a pooled delivery, or an AUTO suggestion
 /// (yellow, still unassigned on the Pi) that rides along with it.
@@ -82,7 +82,7 @@ Future<bool?> confirmHold(BuildContext context, List<HeldStop> held, Map<String,
                 child: Text('${where(h)} — ${forWhom(h.heldFor)}'),
               ),
           Text(
-            'HOLD sends the rest now; ${one ? 'it goes' : 'they go'} back to Unassigned.',
+            'HOLD sends the rest now; ${one ? 'it goes' : 'they go'} back to Waiting.',
             style: QuiccType.text(QuiccType.label, color: ctx.palette.textSecondary),
           ),
         ],
@@ -136,7 +136,8 @@ Future<bool> sendOutDriver(
   // never blocks the send-out.
   var held = const <HeldStop>[];
   try {
-    held = await floor.sendCheck(d.id, [for (final s in stops) s.order.id]).timeout(const Duration(seconds: 4)) ??
+    held =
+        await floor.sendCheck(d.id, [for (final s in stops) s.order.id]).timeout(const Duration(seconds: 4)) ??
         const <HeldStop>[];
   } catch (_) {}
   final ids = {for (final s in stops) s.order.id};
@@ -174,7 +175,10 @@ Future<bool> sendOutDriver(
   // echo isn't taken for someone else's change.
   final hasYellow = stops.any((s) => s.suggested);
   final taken = hasYellow ? previews.takeRun(d.id) : const <String>[];
-  final include = [for (final id in taken) if (!exclude.contains(id)) id];
+  final include = [
+    for (final id in taken)
+      if (!exclude.contains(id)) id,
+  ];
   try {
     while (true) {
       try {
@@ -207,8 +211,8 @@ Future<bool> sendOutDriver(
         "${d.name} isn't available — clocked out or already out. List refreshed.",
       AgentException(code: 'driver_not_found') => '${d.name} was removed — list refreshed.',
       AgentException(code: 'bad_request') => "${d.name}'s pool is empty now — list refreshed.",
-      AgentException(code: 'invalid_state') || AgentException(code: 'not_ready') =>
-        "Something in ${d.name}'s pool changed — list refreshed.",
+      AgentException(code: 'invalid_state') ||
+      AgentException(code: 'not_ready') => "Something in ${d.name}'s pool changed — list refreshed.",
       AgentException(code: kPoolsUnsupported) => 'This Pi needs an update for driver pools.',
       AgentException(code: kCameBack) => kCameBackFirst,
       _ => null,

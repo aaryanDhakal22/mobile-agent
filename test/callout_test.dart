@@ -340,6 +340,9 @@ void main() {
       (c.read(floorProvider.notifier) as FakeFloor).push(floorOf([changed()]));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const ValueKey('change-alert')), findsOneWidget);
+      // 2.0.0: the accepted order's alert bubbles away first.
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.byType(NewOrderAlert), findsNothing);
       expect(find.byKey(const ValueKey('change-alert')), findsOneWidget);
       await tester.pumpWidget(const SizedBox());

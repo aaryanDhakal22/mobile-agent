@@ -271,6 +271,41 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 2.0.0 — the Drivers tab, Unassigned, READY without callout (with agent 2.4.0)
+
+- **READY**: a tap = READY (the callout speaks, as before; it fires when the
+  finger lifts); **held 1 s** = READY with **no callout** — a darker fill
+  sweeps across, then "NO CALLOUT". READY and ACCEPT are instant: the ticket
+  implodes (a squash, then a ✓ burst) and the others slide over springily,
+  the accepted order's alert bubbles away and its ticket pops in, while the
+  Pi is told in the background (retried ~15 s; if it doesn't land the ticket
+  comes back / the order rings again with why). READY on order details goes
+  back to Kitchen.
+- **Drivers tab** rebuilt: UNASSIGNED (amber with a count) and the
+  clocked-in drivers as big buttons in queue order on the right (hold and
+  drag = the queue), the clocked-out ones small and grey; the deliveries of
+  the one picked (delivered this batch + out) on the left. Tap = select, hold
+  = details; with a selection a driver's button takes it (an out one asks
+  first, nothing to a clocked-out driver, UNASSIGNED takes delivered ones
+  only), with UNDO. CLOCK IN / OUT and PRINT REPORT on top. Adding /
+  editing / removing drivers and SHIFTS moved to **Settings → Drivers**;
+  quick **CLOCK IN** chips on the driver button.
+- **MARK DELIVERED** on a delivery's details (no dialog, UNDO): delivered with
+  no driver → Drivers → Unassigned; BACK TO DELIVERIES while it is there.
+- **Deliveries**: the left column is **Waiting**; tap = select, hold =
+  details, no drag; a tap on a driver's box takes the selection, on Waiting
+  takes it out of its pool; ▲▼ with one pooled stop selected; SELECT ALL /
+  CLEAR. A cooking delivery past its time isn't dimmed ("time's up").
+- **History**: a delivery's street + apt under the name, and a search box
+  (name, address, phone, ticket #) over the batch shown.
+- **Future orders**: whole greyed tickets after the cooking ones (due, rings
+  at), tap = details to change the time; a future delivery starts the
+  store's delivery target before it is due; two switches in Settings →
+  Kitchen tickets (future kitchen ticket / receipt printed at ACCEPT) with
+  TEST PRINTs.
+- Settings → Receipt: **Expanded / Condensed** customer receipt. The blue
+  CHANGED alert shows a delivery's payment / total change.
+
 ## 1.9.3 — who changed a setting (with agent 2.3.11)
 
 - Developer mode → Logs has a **Settings changes** card: every setting

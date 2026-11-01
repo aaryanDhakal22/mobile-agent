@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../kitchen/ready_undo.dart';
+import '../home/home_nav.dart';
+import '../kitchen/ready_button.dart';
 import '../common/island.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
@@ -377,16 +378,41 @@ class _ActionsState extends ConsumerState<_Actions> {
     }
   }
 
-  /// READY, then the "#232 ready · UNDO" pill (1.9.2).
-  Future<void> _ready(StoredOrder so) async {
-    setState(() => _busy = true);
+  /// READY (2.0.0): instant, with the "#232 ready · UNDO" pill; the details
+  /// close and Kitchen shows (owner: READY from the details goes back to
+  /// Kitchen, where the ticket implodes). [callout] false = held.
+  void _ready(StoredOrder so, bool callout) {
+    readyNow(Island.maybeOf(context), ref.read(floorProvider.notifier), so, callout: callout);
+    ref.read(homeNavProvider.notifier).go(HomeDestination.kitchen);
+    Navigator.of(context).popUntil((r) => r.isFirst);
+  }
+
+  /// MARK DELIVERED (2.0.0): no dialog — it goes to Unassigned on the
+  /// Drivers tab at once, with an UNDO in the pill.
+  Future<void> _markDelivered(StoredOrder so) async {
     final island = Island.maybeOf(context);
     final floor = ref.read(floorProvider.notifier);
+    final n = so.displayNumber.startsWith('#') ? so.displayNumber : '#${so.displayNumber}';
+    setState(() => _busy = true);
     try {
-      await floor.ready(so.id);
-      showReadyUndo(island, floor, so);
+      await floor.markDelivered(so.id);
+      island?.show(
+        '$n delivered · Unassigned',
+        kind: IslandKind.success,
+        duration: const Duration(seconds: 10),
+        actions: [
+          IslandAction('UNDO', () async {
+            try {
+              await floor.undeliver(so.id);
+              island.show('$n back on Deliveries', kind: IslandKind.info);
+            } catch (_) {
+              island.show("Couldn't undo — $n stays delivered (Drivers → Unassigned)", kind: IslandKind.error);
+            }
+          }),
+        ],
+      );
     } catch (e) {
-      if (mounted) toastError(context, e, lead: 'Not marked ready', area: 'order');
+      if (mounted) toastError(context, e, lead: 'Not marked delivered', area: 'order');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -396,28 +422,17 @@ class _ActionsState extends ConsumerState<_Actions> {
   Widget build(BuildContext context) {
     final so = widget.order;
     final floor = ref.read(floorProvider.notifier);
-    final notDelivered =
-        canMarkNotDelivered(so, ref.watch(floorProvider.select((s) => s.currentBatchId))) &&
-        !ref.watch(notDeliveredUnsupportedProvider);
+    final batchId = ref.watch(floorProvider.select((s) => s.currentBatchId));
+    final notDelivered = canMarkNotDelivered(so, batchId) && !ref.watch(notDeliveredUnsupportedProvider);
+    final unassignedOff = ref.watch(unassignedUnsupportedProvider);
+    final markDelivered = so.canMarkDelivered && batchId != null && so.status.batchId == batchId && !unassignedOff;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (so.isCameBack) const _CameBackNote(),
         if (so.state == OrderState.arrived) AcceptControls(key: ValueKey('accept-${so.id}'), order: so),
         if (so.state == OrderState.scheduled) _LaterPanel(order: so),
-        if (so.state == OrderState.accepted)
-          SizedBox(
-            height: 60,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: QuiccColors.statusPaid,
-                foregroundColor: QuiccColors.brand900,
-              ),
-              onPressed: _busy ? null : () => _ready(so),
-              icon: const Icon(Icons.check_circle_outline),
-              label: const Text('READY'),
-            ),
-          ),
+        if (so.state == OrderState.accepted) ReadyButton(enabled: !_busy, onReady: (callout) => _ready(so, callout)),
         if (so.state != OrderState.arrived && so.state != OrderState.scheduled) ...[
           const SizedBox(height: 10),
           Row(
@@ -466,6 +481,33 @@ class _ActionsState extends ConsumerState<_Actions> {
             ],
           ),
         ],
+        // 2.0.0 (Pi 2.4.0): delivered with no driver, and back.
+        if (markDelivered) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 56,
+            child: OutlinedButton.icon(
+              key: const ValueKey('mark-delivered'),
+              onPressed: _busy ? null : () => _markDelivered(so),
+              icon: const Icon(Icons.where_to_vote_outlined),
+              label: const _OneLine('MARK DELIVERED'),
+            ),
+          ),
+        ],
+        if (so.isUnassigned && !unassignedOff) ...[
+          const SizedBox(height: 10),
+          const _UnassignedNote(),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 56,
+            child: OutlinedButton.icon(
+              key: const ValueKey('back-to-deliveries'),
+              onPressed: _busy ? null : () => _do(() => floor.undeliver(so.id), 'Back on Deliveries', 'Not moved back'),
+              icon: const Icon(Icons.undo),
+              label: const _OneLine('BACK TO DELIVERIES'),
+            ),
+          ),
+        ],
         if (notDelivered) ...[
           const SizedBox(height: 10),
           NotDeliveredButton(
@@ -479,6 +521,33 @@ class _ActionsState extends ConsumerState<_Actions> {
       ],
     );
   }
+}
+
+/// Delivered with no driver (2.0.0): where it waits.
+class _UnassignedNote extends StatelessWidget {
+  const _UnassignedNote();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey('unassigned-note'),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: QuiccColors.statusFiring.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(QuiccRadius.md),
+      border: Border.all(color: QuiccColors.statusFiring.withValues(alpha: 0.6)),
+    ),
+    child: const Row(
+      children: [
+        Icon(Icons.person_off_outlined, color: QuiccColors.statusFiring),
+        SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Delivered with no driver. It waits on Drivers → Unassigned: select it there and tap the driver who took it.',
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 /// A delivery that came back (1.7.1): where it is and how it goes out again.
@@ -501,7 +570,7 @@ class _CameBackNote extends StatelessWidget {
         SizedBox(width: 10),
         Expanded(
           child: Text(
-            'Came back with the driver. It waits on Deliveries under Came back — press and hold it there to send it to Unassigned.',
+            'Came back with the driver. It waits on Deliveries under Came back — press and hold it there to send it to Waiting.',
           ),
         ),
       ],
@@ -539,7 +608,8 @@ class _LaterPanel extends ConsumerWidget {
           ),
           if (ring != null)
             Text(
-              'Rings again at ${clock(ring)}${lead == null ? '' : ' ($lead min before)'}. Nothing has printed yet.',
+              'Rings again at ${clock(ring)}${lead == null ? '' : ' ($lead min before)'}. '
+              '${so.status.earlyKitchen || so.status.earlyReceipt ? 'The early ${[if (so.status.earlyKitchen) 'kitchen tickets', if (so.status.earlyReceipt) 'receipt'].join(' and ')} printed; the kitchen tickets print again then.' : 'Nothing has printed yet.'}',
               style: TextStyle(color: context.palette.textSecondary),
             ),
           const SizedBox(height: 12),
@@ -547,10 +617,10 @@ class _LaterPanel extends ConsumerWidget {
             height: 56,
             child: OutlinedButton.icon(
               onPressed: () async {
-                final times = ref.read(floorProvider).settings.times;
+                final fs = ref.read(floorProvider);
                 final next = await showLeadTimeDialog(
                   context,
-                  base: defaultMinutesFor(so, times),
+                  base: futureLeadFor(so, fs.settings.times, fs.floor?.deliveryTargetMinutes ?? 0),
                   current: lead,
                   subtitle: due == null ? null : 'Due ${clock(due)}',
                 );

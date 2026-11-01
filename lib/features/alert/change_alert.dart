@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/motion.dart';
 import '../../core/providers.dart';
@@ -140,6 +141,8 @@ class _ChangeAlertState extends ConsumerState<ChangeAlert> with SingleTickerProv
           const SizedBox(height: 18),
           for (final l in c.added) _Line(l, added: true),
           for (final l in c.removed) _Line(l, added: false),
+          // 2.0.0 (Pi 2.4.0): a delivery's total or payment changed.
+          if (c.money case final m?) _MoneyLine(m),
           const SizedBox(height: 24),
           if (_error != null) ...[
             Text(
@@ -232,6 +235,30 @@ class _Line extends StatelessWidget {
               style: QuiccType.text(QuiccType.body, weight: FontWeight.w600, color: const Color(0xFF64748B)),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// "CASH $38.40 → PAID" / "total $38.40 → $42.10" (2.0.0): a delivery's
+/// money changed at the terminal.
+class _MoneyLine extends StatelessWidget {
+  final MoneyChange change;
+  const _MoneyLine(this.change);
+
+  static String _pay(bool paid, int cash) => paid || cash <= 0 ? 'PAID' : 'CASH ${money(cash)}';
+
+  @override
+  Widget build(BuildContext context) {
+    final text = change.paymentChanged
+        ? '${_pay(change.fromPaid, change.fromCashCents)}  →  ${_pay(change.toPaid, change.toCashCents)}'
+        : 'Total ${money(change.fromTotalCents)}  →  ${money(change.toTotalCents)}';
+    return Padding(
+      key: const ValueKey('change-money'),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Text(
+        text,
+        style: QuiccType.text(QuiccType.title, weight: FontWeight.w800, color: QuiccColors.changeBlue),
       ),
     );
   }

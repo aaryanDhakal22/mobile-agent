@@ -3,9 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'ready_undo.dart';
+import 'ready_button.dart';
 import '../common/island.dart';
-import '../../core/api_client.dart';
 import '../../core/clock.dart';
 import '../../core/floor_state.dart';
 import '../../core/format.dart';
@@ -15,12 +14,10 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
-import '../common/squish.dart';
 import '../common/widgets.dart';
 import '../deliveries/lava_glow.dart';
 import '../maps/geo_format.dart';
 import '../order_detail/order_detail_screen.dart';
-import '../arrived/time_picker.dart';
 import 'resend_kitchen.dart';
 import 'ticket_motion.dart';
 
@@ -136,37 +133,16 @@ class KitchenPane extends ConsumerWidget {
   }
 }
 
-/// Future orders already scheduled, greyed at the end of Kitchen: when each
-/// is due and when it rings again. Tap one to change its lead time.
-class LaterStrip extends ConsumerWidget {
+/// Future orders already scheduled, at the end of Kitchen (2.0.0, owner:
+/// always fully viewable): each a whole greyed ticket — every item, when it
+/// is due and when it rings again. Tap one to open it (and change its time:
+/// the ring time moves with it).
+class LaterStrip extends StatelessWidget {
   final List<StoredOrder> orders;
   const LaterStrip({super.key, required this.orders});
 
-  Future<void> _edit(BuildContext context, WidgetRef ref, StoredOrder so) async {
-    final times = ref.read(floorProvider).settings.times;
-    final due = so.dueAt;
-    final lead = await showLeadTimeDialog(
-      context,
-      base: defaultMinutesFor(so, times),
-      current: so.status.scheduledLeadMinutes,
-      subtitle: due == null ? null : '${so.order.customerName} · due ${clock(due)}',
-    );
-    if (lead == null || !context.mounted || lead == so.status.scheduledLeadMinutes) return;
-    try {
-      await ref.read(floorProvider.notifier).schedule(so.id, lead);
-      if (context.mounted) {
-        toast(
-          context,
-          due == null ? 'Lead time $lead min' : 'Rings again at ${clock(due.subtract(Duration(minutes: lead)))}',
-        );
-      }
-    } catch (e) {
-      if (context.mounted) toastError(context, e, lead: 'Lead time not changed', area: 'kitchen');
-    }
-  }
-
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return Padding(
       key: const ValueKey('later-strip'),
       padding: const EdgeInsets.only(top: QuiccSpace.md),
@@ -177,11 +153,11 @@ class LaterStrip extends ConsumerWidget {
             children: [
               Icon(Icons.schedule, size: 18, color: context.palette.textMuted),
               QuiccSpace.gapSm,
-              Eyebrow('Later · ${orders.length}'),
+              Eyebrow('Future · ${orders.length}'),
               QuiccSpace.gapMd,
               Expanded(
                 child: Text(
-                  'They ring again when it is time to cook. Tap one to change its lead time.',
+                  'They ring again when it is time to cook. Tap one to change its time.',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: QuiccType.text(QuiccType.caption, color: context.palette.textMuted),
@@ -193,7 +169,8 @@ class LaterStrip extends ConsumerWidget {
           Wrap(
             spacing: kTicketGap,
             runSpacing: kTicketGap,
-            children: [for (final so in orders) _LaterTile(order: so, onTap: () => _edit(context, ref, so))],
+            crossAxisAlignment: WrapCrossAlignment.start,
+            children: [for (final so in orders) FutureTicket(order: so)],
           ),
         ],
       ),
@@ -201,61 +178,85 @@ class LaterStrip extends ConsumerWidget {
   }
 }
 
-class _LaterTile extends StatelessWidget {
+/// One waiting future order as a greyed kitchen ticket (2.0.0): "FUTURE ·
+/// DELIVERY · due 7:30 PM · rings 6:50", the number and heading, every item
+/// and the note. Tap = its details.
+class FutureTicket extends StatelessWidget {
   final StoredOrder order;
-  final VoidCallback onTap;
-  const _LaterTile({required this.order, required this.onTap});
+  const FutureTicket({super.key, required this.order});
 
   @override
   Widget build(BuildContext context) {
     final so = order;
+    final o = so.order;
     final due = so.dueAt;
     final ring =
         so.status.ringAt ??
         (due != null && so.status.scheduledLeadMinutes != null
             ? due.subtract(Duration(minutes: so.status.scheduledLeadMinutes!))
             : null);
-    final lead = so.status.scheduledLeadMinutes;
     return Opacity(
-      opacity: 0.6,
+      opacity: 0.55,
       child: SizedBox(
         width: kTicketWidth,
-        child: Material(
-          color: context.palette.bgElevated,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(QuiccRadius.md),
-            side: BorderSide(color: context.palette.borderSoft),
-          ),
-          child: InkWell(
-            key: ValueKey('later-${so.id}'),
-            borderRadius: BorderRadius.circular(QuiccRadius.md),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md, vertical: QuiccSpace.md),
+        child: Theme(
+          data: paperTheme(Theme.of(context)),
+          child: Material(
+            color: Colors.white,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(QuiccRadius.md),
+              side: const BorderSide(color: Color(0xFF94A3B8), width: 2),
+            ),
+            child: InkWell(
+              key: ValueKey('later-${so.id}'),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => OrderDetailScreen(orderId: so.id, initial: so),
+                ),
+              ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          due == null ? 'Later' : 'Due ${clock(due)}',
+                  Container(
+                    color: const Color(0xFF64748B),
+                    padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md, vertical: QuiccSpace.sm),
+                    child: Text(
+                      [
+                        'FUTURE',
+                        if (o.fulfillment.type != FulfillmentType.unknown) o.fulfillment.type.label.toUpperCase(),
+                        if (due != null) 'due ${clock(due)}',
+                        if (ring != null) 'rings ${clock(ring)}',
+                      ].join(' · '),
+                      style: QuiccType.text(QuiccType.label, weight: FontWeight.w800, color: Colors.white),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(QuiccSpace.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '${so.displayNumber} · ${ticketHeading(so)}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700),
                         ),
-                      ),
-                      FulfillmentTag(so.order.fulfillment.type, size: QuiccType.caption),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    [so.displayNumber, ticketHeading(so)].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
-                  ),
-                  Text(
-                    [if (ring != null) 'rings ${clock(ring)}', if (lead != null) '$lead min lead'].join(' · '),
-                    style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
+                        QuiccSpace.gapSm,
+                        ItemLines(o.items, fontSize: kTicketItemSize, removed: o.removedItems),
+                        if (o.notes.trim().isNotEmpty) ...[
+                          QuiccSpace.gapSm,
+                          Text(
+                            '“${o.notes.trim()}”',
+                            style: QuiccType.text(
+                              QuiccType.body,
+                              weight: FontWeight.w500,
+                              color: kPaperNoteColor,
+                            ).copyWith(fontStyle: FontStyle.italic),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -373,11 +374,7 @@ _CardTime _cardTimeFor(DateTime now, StoredOrder so, DateTime? arrived, bool wav
   final waitStart = so.waitingSince;
   final waitedRaw = waitStart == null ? Duration.zero : now.difference(waitStart);
   final waited = waitedRaw.isNegative ? Duration.zero : waitedRaw;
-  return (
-    toneStep: toneStep,
-    hot: wave && waited >= kWaitingEscalate,
-    changed: so.changedTag(now),
-  );
+  return (toneStep: toneStep, hot: wave && waited >= kWaitingEscalate, changed: so.changedTag(now));
 }
 
 /// One ticket on the Kitchen board: a coloured header bar (green → red by
@@ -395,7 +392,6 @@ class KitchenCard extends ConsumerStatefulWidget {
 }
 
 class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProviderStateMixin {
-  bool _busy = false;
   bool _reprinting = false;
   bool _resending = false;
 
@@ -425,25 +421,10 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
     }
   }
 
-  Future<void> _ready() async {
-    setState(() => _busy = true);
-    // Read before the call: this ticket leaves the board with it.
-    final island = Island.maybeOf(context);
-    final floor = ref.read(floorProvider.notifier);
-    try {
-      await floor.ready(widget.order.id);
-      showReadyUndo(island, floor, widget.order);
-    } catch (e) {
-      if (mounted) {
-        if (e is AgentException && e.isConflict) {
-          toast(context, 'Already moved on — the screen will refresh.', error: true);
-        } else {
-          toastError(context, e, lead: 'Not marked ready', area: 'kitchen');
-        }
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+  /// READY (2.0.0): instant — the ticket implodes now, the Pi is told in
+  /// the background; [callout] false = held, no callout.
+  void _ready(bool callout) {
+    readyNow(Island.maybeOf(context), ref.read(floorProvider.notifier), widget.order, callout: callout);
   }
 
   Future<void> _reprint() async {
@@ -507,9 +488,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
         _syncWave(wave && motion.full, motion.scale(hot ? kWaitingLavaHot : kWaitingLava));
         // 1.8.0: changed at the POS (pending, or OK'd < 10 min ago).
         final changed = so.changedTag(now);
-        final _Waiting? waiting = wave
-            ? (hot: hot, lava: motion.full ? _wave : null)
-            : null;
+        final _Waiting? waiting = wave ? (hot: hot, lava: motion.full ? _wave : null) : null;
         final body = Padding(
           padding: const EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.md, QuiccSpace.lg, QuiccSpace.lg),
           child: Column(
@@ -560,26 +539,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
                   ),
                   QuiccSpace.gapSm,
                   Expanded(
-                    child: Squish(
-                      enabled: !_busy,
-                      child: SizedBox(
-                        height: kTicketButtonHeight,
-                        child: FilledButton.icon(
-                          // The theme's big-button padding would clip the
-                          // label inside a ticket-height button.
-                          style: FilledButton.styleFrom(
-                            backgroundColor: QuiccColors.statusPaid,
-                            foregroundColor: QuiccColors.brand900,
-                            padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md),
-                            minimumSize: const Size(0, kTicketButtonHeight),
-                            textStyle: QuiccType.text(QuiccType.heading, weight: FontWeight.w700, height: 1),
-                          ),
-                          onPressed: _busy ? null : _ready,
-                          icon: const Icon(Icons.check_circle_outline, size: 24),
-                          label: Text(_busy ? '…' : 'READY'),
-                        ),
-                      ),
-                    ),
+                    child: ReadyButton(height: kTicketButtonHeight, onReady: _ready),
                   ),
                 ],
               ),
@@ -596,11 +556,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
           data: paperTheme(Theme.of(context)),
           child: Container(
             clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: radius,
-              border: outline,
-            ),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: radius, border: outline),
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
@@ -629,7 +585,9 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
             key: const ValueKey('changed-glow'),
             decoration: BoxDecoration(
               borderRadius: radius,
-              boxShadow: [BoxShadow(color: QuiccColors.changeBlue.withValues(alpha: 0.7), blurRadius: 16, spreadRadius: 3)],
+              boxShadow: [
+                BoxShadow(color: QuiccColors.changeBlue.withValues(alpha: 0.7), blurRadius: 16, spreadRadius: 3),
+              ],
             ),
             child: card,
           );

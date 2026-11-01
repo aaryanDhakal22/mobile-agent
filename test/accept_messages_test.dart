@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_agent/core/api_client.dart';
 import 'package:mobile_agent/core/models.dart';
 import 'package:mobile_agent/features/arrived/accept_controls.dart';
-import 'package:mobile_agent/features/drivers/drivers_pane.dart';
+import 'package:mobile_agent/features/settings/drivers_settings_card.dart';
 
 StoredOrder _inState(String state) => StoredOrder.fromJson({
   'order': {'id': 'o1'},

@@ -19,6 +19,16 @@ class HistoryPane extends ConsumerStatefulWidget {
 class _HistoryPaneState extends ConsumerState<HistoryPane> {
   int? _batchId; // null → current (open) batch
 
+  /// 2.0.0: the search box — filters the batch on screen.
+  String _query = '';
+  late final TextEditingController _searchText = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchText.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentId = ref.watch(floorProvider.select((s) => s.currentBatchId));
@@ -64,6 +74,29 @@ class _HistoryPaneState extends ConsumerState<HistoryPane> {
               ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: TextField(
+              key: const ValueKey('history-search'),
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: 'Search name, address, phone or ticket #',
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        key: const ValueKey('history-search-clear'),
+                        icon: const Icon(Icons.close),
+                        onPressed: () => setState(() {
+                          _query = '';
+                          _searchText.clear();
+                        }),
+                      ),
+              ),
+              controller: _searchText,
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async {
@@ -86,19 +119,24 @@ class _HistoryPaneState extends ConsumerState<HistoryPane> {
                     ),
                   ],
                 ),
-                data: (list) => list.isEmpty
-                    ? ListView(
-                        children: const [
-                          SizedBox(height: 80),
-                          EmptyState(icon: Icons.receipt_long_outlined, title: 'No orders in this batch'),
-                        ],
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.only(bottom: 32),
-                        itemCount: list.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 8),
-                        itemBuilder: (context, i) => HistoryRow(order: list[i]),
-                      ),
+                data: (all) {
+                  final list = searchHistory(all, _query);
+                  return list.isEmpty
+                      ? ListView(
+                          children: [
+                            const SizedBox(height: 80),
+                            all.isEmpty
+                                ? const EmptyState(icon: Icons.receipt_long_outlined, title: 'No orders in this batch')
+                                : EmptyState(icon: Icons.search_off, title: 'Nothing matches “${_query.trim()}”'),
+                          ],
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 32),
+                          itemCount: list.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (context, i) => HistoryRow(order: list[i]),
+                        );
+                },
               ),
             ),
           ),
@@ -139,6 +177,16 @@ class HistoryRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(o.customerName, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500)),
+                    // 2.0.0: a delivery's street + apt under the name (none
+                    // once a POS check's address was wiped at Close batch).
+                    if (historyAddress(order) case final a?)
+                      Text(
+                        a,
+                        key: ValueKey('history-address-${order.id}'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: context.palette.textSecondary),
+                      ),
                     const SizedBox(height: 2),
                     Text(
                       [
@@ -177,4 +225,42 @@ class HistoryRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A delivery's street + apt for its History row ("4108 Old Court Rd Apt
+/// 2B"); null for a pickup or when there is no address.
+String? historyAddress(StoredOrder so) {
+  if (!so.isDelivery) return null;
+  final a = so.order.fulfillment.address;
+  if (a == null) return null;
+  final line = [a.line1.trim(), a.line2.trim()].where((p) => p.isNotEmpty).join(' ');
+  return line.isEmpty ? null : line;
+}
+
+/// The orders whose name, address, phone or ticket number has every word of
+/// [query] (any case; a word with 3+ digits also matches the phone's digits,
+/// so "443-207" finds 4432077156).
+List<StoredOrder> searchHistory(List<StoredOrder> all, String query) {
+  final words = query.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+  if (words.isEmpty) return all;
+  String digits(String s) => s.replaceAll(RegExp(r'\D'), '');
+  return [
+    for (final so in all)
+      if (() {
+        final a = so.order.fulfillment.address;
+        final phone = digits(so.order.customer.phone);
+        final hay = [
+          so.order.customerName,
+          so.order.customer.phone,
+          so.displayNumber,
+          if (a != null) ...[a.line1, a.line2, a.city],
+        ].join(' ').toLowerCase();
+        return words.every((w) {
+          if (hay.contains(w)) return true;
+          final d = digits(w);
+          return d.length >= 3 && phone.contains(d);
+        });
+      }())
+        so,
+  ];
 }

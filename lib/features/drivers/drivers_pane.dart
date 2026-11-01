@@ -2,21 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/floor_state.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
-import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
+import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
 import '../common/info_button.dart';
+import '../common/island.dart';
 import '../common/widgets.dart';
-import 'driver_dialog.dart';
+import '../deliveries/delivery_widgets.dart';
+import '../maps/geo_format.dart';
+import '../maps/runs_map_pane.dart';
+import '../order_detail/order_detail_screen.dart';
 import 'drivers_texts.dart';
-
-/// The agent refuses (409 `driver_not_available`) to remove a driver who is
-/// out on a run.
-String removeDriverOutMessage(String name) =>
-    "Can't remove a driver who is out on a run — tap I HAVE RETURNED for $name on Deliveries first.";
 
 /// What PRINT REPORT says when the Pi refused (null = the generic error).
 String? driverReportErrorMessage(String name, Object e) => switch (e) {
@@ -33,9 +33,41 @@ String? driverReportErrorMessage(String name, Object e) => switch (e) {
 String clockedOutMessage(String name, {bool reportPrinting = false}) =>
     reportPrinting ? '$name clocked out — printing his report…' : '$name clocked out';
 
-/// Driver roster in queue order. Drivers clock in when they arrive (joining
-/// the back of the queue) and out when they leave; the first available
-/// driver is next up. Drag to reorder.
+/// A driver's deliveries of the open batch on the Drivers tab: delivered and
+/// out now, newest first ([driverId] null = Unassigned).
+List<StoredOrder> driverDeliveries(List<StoredOrder> batch, String? driverId) {
+  final list = [
+    for (final o in batch)
+      if (driverId == null
+          ? o.isUnassigned
+          : o.isDelivery &&
+                (o.state == OrderState.delivered || o.state == OrderState.onDelivery) &&
+                o.status.driverId == driverId)
+        o,
+  ];
+  DateTime at(StoredOrder o) =>
+      o.status.deliveredAt ?? o.status.markedDelivered?.at ?? o.status.outAt ?? o.placedTime ?? DateTime(2000);
+  list.sort((a, b) => at(b).compareTo(at(a)));
+  return list;
+}
+
+/// The Drivers tab (2.0.0, owner): who delivered what this batch, and the
+/// shift buttons.
+///
+///  * right: UNASSIGNED on top (amber with a count while it holds orders),
+///    then the clocked-in drivers as big buttons in queue order (NEXT first;
+///    hold and drag to reorder the queue), then every clocked-out driver as a
+///    small grey button;
+///  * left: the deliveries of the button picked — delivered this batch and
+///    out now (Unassigned: the ones marked delivered with no driver);
+///  * a tap on a delivery selects it, a hold opens it; with deliveries
+///    selected a tap on a driver's button moves them to that driver (a
+///    clocked-out one can't take any; an out one asks first; Unassigned
+///    takes delivered ones only), with UNDO; with nothing selected a tap on
+///    a button shows that driver;
+///  * on top, for the driver shown: CLOCK IN / CLOCK OUT and PRINT REPORT.
+///
+/// Adding, editing and removing drivers is in Settings → Drivers.
 class DriversPane extends ConsumerStatefulWidget {
   const DriversPane({super.key});
 
@@ -44,94 +76,114 @@ class DriversPane extends ConsumerStatefulWidget {
 }
 
 class _DriversPaneState extends ConsumerState<DriversPane> {
-  /// Drivers with a clock-in / clock-out in flight.
-  final Set<String> _busy = {};
-
-  /// Drivers whose report is printing.
-  final Set<String> _printing = {};
+  /// The driver shown (null = Unassigned — what the tab opens on).
+  String? _view;
+  final Set<String> _selected = {};
+  bool _busy = false;
+  bool _printing = false;
 
   FloorController get _floor => ref.read(floorProvider.notifier);
 
-  /// Runs [op]; on failure toasts [failure] and returns false.
-  Future<bool> _run(Future<void> Function() op, String failure) async {
-    try {
-      await op();
-      return true;
-    } catch (e) {
-      if (mounted) toastError(context, e, lead: failure, area: 'drivers');
-      return false;
-    }
-  }
+  void _toast(String msg, {bool error = false}) => toast(context, msg, error: error);
 
-  Future<void> _add() async {
-    final r = await driverDialog(context, title: 'Add driver', confirm: 'ADD');
-    if (r == null || r.name.isEmpty || !mounted) return;
-    final ok = await _run(
-      () => _floor.createDriver(
-        r.name,
-        posNumber: r.posNumber.isEmpty ? null : r.posNumber,
-        pushoverDevice: r.pushoverDevice.isEmpty ? null : r.pushoverDevice,
-      ),
-      'Could not add ${r.name}',
-    );
-    if (ok && mounted) toast(context, '${r.name} added — clock them in when they start');
-  }
+  void _open(StoredOrder o) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => OrderDetailScreen(orderId: o.id, initial: o),
+    ),
+  );
 
-  /// Name, Driver # (their SoftTouch Employee Number) and phone (Pushover
-  /// device, with SEND TEST); only what changed is sent.
-  Future<void> _edit(Driver d) async {
-    final r = await driverDialog(
-      context,
-      title: 'Edit driver',
-      name: d.name,
-      posNumber: d.posNumber ?? '',
-      pushoverDevice: d.pushoverDevice,
-      onSendTest: () => _floor.testRoute(d.id),
-    );
-    if (r == null || r.name.isEmpty || !mounted) return;
-    final name = r.name == d.name ? null : r.name;
-    final number = r.posNumber == (d.posNumber ?? '') ? null : r.posNumber;
-    final device = r.pushoverDevice == d.pushoverDevice ? null : r.pushoverDevice;
-    if (name == null && number == null && device == null) return;
-    await _run(
-      () => _floor.updateDriver(d.id, name: name, posNumber: number, pushoverDevice: device),
-      'Could not save ${d.name}',
-    );
-  }
+  void _toggle(String id) => setState(() => _selected.contains(id) ? _selected.remove(id) : _selected.add(id));
 
-  Future<void> _remove(Driver d) async {
-    if (d.isOut) {
-      toast(context, removeDriverOutMessage(d.name), error: true);
+  /// A driver's button (null = UNASSIGNED): moves the selection there, or
+  /// shows them when nothing is selected.
+  Future<void> _tapButton(Driver? d) async {
+    if (_selected.isEmpty) {
+      setState(() => _view = d?.id);
       return;
     }
-    final ok = await confirmDialog(
-      context,
-      title: 'Remove ${d.name}?',
-      message: 'They leave the roster. Past orders and shift records keep their name.',
-      confirm: 'REMOVE',
-      destructive: true,
-    );
-    if (!ok || !mounted) return;
+    final fs = ref.read(floorProvider);
+    final picked = [
+      for (final id in _selected)
+        if (fs.orders[id] != null) fs.orders[id]!,
+    ];
+    final moving = picked.where((o) => d == null ? !o.isUnassigned : o.status.driverId != d.id).toList();
+    if (moving.isEmpty) {
+      setState(_selected.clear);
+      return;
+    }
+    if (d != null && d.isOff) {
+      _toast('Clock ${d.name} in first — nothing moves to a clocked-out driver.', error: true);
+      return;
+    }
+    final out = moving.where((o) => o.state == OrderState.onDelivery).toList();
+    if (d == null && out.isNotEmpty) {
+      _toast(
+        '${numbersList([for (final o in out) orderNumber(o)])} ${out.length == 1 ? 'is' : 'are'} still out — only delivered ones go to Unassigned.',
+        error: true,
+      );
+      return;
+    }
+    if (out.isNotEmpty) {
+      final who = out.first.status.driverName ?? 'a driver';
+      final ok = await confirmDialog(
+        context,
+        title: out.length == 1
+            ? '${orderNumber(out.first)} is out with $who — move it to ${d!.name} anyway?'
+            : '${numbersList([for (final o in out) orderNumber(o)])} are out — move them to ${d!.name} anyway?',
+        message: 'They join ${d.name}\'s run${d.isAvailable ? ' (${d.name} goes out with them)' : ''}.',
+        confirm: 'MOVE',
+      );
+      if (!ok || !mounted) return;
+    }
+    await _move(moving, d);
+  }
+
+  Future<void> _move(List<StoredOrder> moving, Driver? to) async {
+    final island = Island.maybeOf(context);
+    final floor = _floor;
+    final from = <String?, List<String>>{};
+    for (final o in moving) {
+      from.putIfAbsent(o.isUnassigned ? null : o.status.driverId, () => []).add(o.id);
+    }
+    setState(_selected.clear);
+    final name = to?.name ?? 'Unassigned';
     try {
-      await _floor.removeDriver(d.id);
+      await floor.reassign([for (final o in moving) o.id], to?.id);
+      island?.show(
+        '${moving.length} moved to $name',
+        kind: IslandKind.success,
+        duration: const Duration(seconds: 10),
+        actions: [
+          IslandAction('UNDO', () async {
+            try {
+              for (final e in from.entries) {
+                await floor.reassign(e.value, e.key);
+              }
+              island.show('Moved back', kind: IslandKind.info);
+            } catch (_) {
+              island.show("Couldn't undo — move them back by hand", kind: IslandKind.error);
+            }
+          }),
+        ],
+      );
     } catch (e) {
       if (!mounted) return;
       final msg = switch (e) {
-        AgentException(code: 'driver_not_available') => removeDriverOutMessage(d.name),
-        AgentException(isNotFound: true) => '${d.name} was already removed.',
+        AgentException(code: kUnassignedUnsupported) => 'This Pi needs an update to move deliveries between drivers.',
+        AgentException(code: 'driver_not_available') => "$name isn't clocked in any more — list refreshed.",
+        AgentException(code: 'not_out_or_delivered') => 'One of them changed meanwhile — list refreshed.',
+        AgentException(code: 'invalid_state') => 'Only delivered ones go to Unassigned — list refreshed.',
         _ => null,
       };
-      msg == null
-          ? toastError(context, e, lead: 'Could not remove ${d.name}', area: 'drivers')
-          : toast(context, msg, error: true);
+      msg == null ? toastError(context, e, lead: 'Not moved', area: 'drivers') : _toast(msg, error: true);
     }
   }
 
   Future<void> _clockIn(Driver d) async {
-    setState(() => _busy.add(d.id));
+    setState(() => _busy = true);
     try {
       await _floor.clockIn(d.id);
-      if (mounted) toast(context, '${d.name} clocked in — back of the queue');
+      if (mounted) _toast('${d.name} clocked in — back of the queue');
     } catch (e) {
       if (!mounted) return;
       final msg = switch (e) {
@@ -141,234 +193,354 @@ class _DriversPaneState extends ConsumerState<DriversPane> {
       };
       msg == null
           ? toastError(context, e, lead: 'Could not clock ${d.name} in', area: 'drivers')
-          : toast(context, msg, error: true);
+          : _toast(msg, error: true);
     } finally {
-      if (mounted) setState(() => _busy.remove(d.id));
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _clockOut(Driver d) async {
-    setState(() => _busy.add(d.id));
+    setState(() => _busy = true);
     try {
       final r = await _floor.clockOut(d.id);
-      if (mounted) toast(context, clockedOutMessage(d.name, reportPrinting: r.reportPrinting));
+      if (mounted) _toast(clockedOutMessage(d.name, reportPrinting: r.reportPrinting));
     } catch (e) {
       if (!mounted) return;
       final msg = switch (e) {
         AgentException(code: 'driver_not_available') =>
           d.isOff
               ? '${d.name} is already clocked out.'
-              : '${d.name} is out on a run — tap I HAVE RETURNED on Deliveries first, then clock them out.',
+              : '${d.name} is out on a run — mark him returned first, then clock him out.',
         AgentException(isNotFound: true) => '${d.name} was removed from the roster.',
         _ => null,
       };
       msg == null
           ? toastError(context, e, lead: 'Could not clock ${d.name} out', area: 'drivers')
-          : toast(context, msg, error: true);
+          : _toast(msg, error: true);
     } finally {
-      if (mounted) setState(() => _busy.remove(d.id));
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   /// PRINT REPORT: this driver's report for the open batch so far, on the
   /// receipt printer (Pi 2.2.3).
   Future<void> _printReport(Driver d) async {
-    if (_printing.contains(d.id)) return;
-    setState(() => _printing.add(d.id));
+    if (_printing) return;
+    setState(() => _printing = true);
     try {
       final r = await _floor.printDriverReport(d.id);
       if (mounted) {
         final name = r.driverName.isEmpty ? d.name : r.driverName;
-        toast(context, driverReportPrintedMessage(name, printedOn: r.printedOn, reroutedFrom: r.reroutedFrom));
+        _toast(driverReportPrintedMessage(name, printedOn: r.printedOn, reroutedFrom: r.reroutedFrom));
       }
     } catch (e) {
       if (!mounted) return;
       final msg = driverReportErrorMessage(d.name, e);
       msg == null
           ? toastError(context, e, lead: "${d.name}'s report didn't print", area: 'drivers')
-          : toast(context, msg, error: true);
+          : _toast(msg, error: true);
     } finally {
-      if (mounted) setState(() => _printing.remove(d.id));
+      if (mounted) setState(() => _printing = false);
     }
   }
 
-  void _showShifts() {
-    showDialog<void>(context: context, builder: (_) => const _ShiftsDialog());
+  /// Hold and drag a clocked-in button: the queue. The clocked-out drivers
+  /// keep their places after them.
+  void _reorder(List<Driver> onShift, List<Driver> all, int oldIndex, int newIndex) {
+    if (newIndex > oldIndex) newIndex -= 1;
+    final list = [...onShift];
+    list.insert(newIndex, list.removeAt(oldIndex));
+    final ids = {for (final d in list) d.id};
+    _floor.reorderDrivers([...list, ...all.where((d) => !ids.contains(d.id))]).catchError((Object e) {
+      if (mounted) toastError(context, e, lead: 'Could not reorder', area: 'drivers');
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final drivers = ref.watch(floorProvider.select((s) => s.drivers));
-    final resetTime = ref.watch(floorProvider.select((s) => s.floor?.driverResetTime));
-    final inQueue = drivers.where((d) => d.isAvailable).length;
-    final out = drivers.where((d) => d.isOut).length;
-    final off = drivers.where((d) => d.isOff).length;
+    final fs = ref.watch(floorProvider);
+    final drivers = fs.drivers;
+    final batch = fs.currentBatchOrders;
+    var view = _view == null ? null : drivers.where((d) => d.id == _view).firstOrNull;
+    if (_view != null && view == null) _view = null; // removed meanwhile: back to Unassigned
+    final onShift = [
+      for (final d in drivers)
+        if (!d.isOff) d,
+    ];
+    final off = [
+      for (final d in drivers)
+        if (d.isOff) d,
+    ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final next = fs.nextDriver;
+    final unassigned = driverDeliveries(batch, null);
+    final shown = driverDeliveries(batch, view?.id);
+    _selected.retainAll({for (final o in shown) o.id});
 
-    // Queue rank among available drivers (1 = next up).
-    final rank = <String, int>{};
-    for (final d in drivers) {
-      if (d.isAvailable) rank[d.id] = rank.length + 1;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 32, 32, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          PaneHeader(
-            title: 'Drivers',
-            subtitle: '$inQueue in queue · $out out · $off off',
-            trailing: FilledButton.icon(
-              onPressed: _add,
-              icon: const Icon(Icons.person_add_alt_1),
-              label: const Text('ADD DRIVER'),
-            ),
-          ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Stack(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(QuiccSpace.pane, QuiccSpace.pane, QuiccSpace.pane, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              PaneHeader(
+                title: view?.name ?? 'Unassigned',
+                subtitle: view == null
+                    ? '${unassigned.length} delivered with no driver — select them and tap the driver who took them'
+                    : '${shown.length} deliver${shown.length == 1 ? 'y' : 'ies'} this batch · ${view.status.label.toLowerCase()}'
+                          '${view.clockedInAt != null && !view.isOff ? ' since ${clock(view.clockedInAt)}' : ''}',
+                trailing: view == null ? null : _topBar(view),
+              ),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      'Clock drivers in when they start — they join the back of the queue, and the first '
-                      'available driver is next up. Drag ≡ to reorder.',
-                      style: QuiccType.text(QuiccType.body, color: context.palette.textMuted),
-                    ),
-                    const Wrap(
-                      spacing: 16,
-                      children: [
-                        LabelWithInfo(label: Text('Clock in / out'), info: kClockInfo),
-                        LabelWithInfo(label: Text('The queue'), info: kQueueInfo),
-                        LabelWithInfo(label: Text('Remove'), info: kRemoveDriverInfo),
-                      ],
-                    ),
-                    if (resetTime != null && resetTime.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(Icons.schedule, size: 16, color: context.palette.textMuted),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              'Everyone is clocked out daily at ${wallTime(resetTime)} (set in the agent web UI).',
-                              style: QuiccType.text(QuiccType.label, color: context.palette.textMuted),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                    Expanded(flex: 3, child: _deliveries(context, shown, view)),
+                    QuiccSpace.gapLg,
+                    SizedBox(width: 300, child: _buttons(context, fs, onShift, off, next, unassigned.length, view)),
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
-              TextButton.icon(onPressed: _showShifts, icon: const Icon(Icons.history), label: const Text('SHIFTS')),
             ],
           ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: drivers.isEmpty
-                ? const EmptyState(
-                    icon: Icons.delivery_dining_outlined,
-                    title: 'No drivers yet',
-                    message: 'Add your drivers once, then clock them in when they start a shift.',
-                  )
-                : ReorderableListView.builder(
-                    buildDefaultDragHandles: false,
-                    padding: const EdgeInsets.only(bottom: 32),
-                    itemCount: drivers.length,
-                    onReorder: (oldIndex, newIndex) {
-                      if (newIndex > oldIndex) newIndex -= 1;
-                      final list = [...drivers];
-                      list.insert(newIndex, list.removeAt(oldIndex));
-                      _run(() => _floor.reorderDrivers(list), 'Could not reorder');
-                    },
-                    itemBuilder: (context, i) {
-                      final d = drivers[i];
-                      return Padding(
-                        key: ValueKey(d.id),
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _DriverRow(
-                          index: i,
-                          driver: d,
-                          rank: rank[d.id],
-                          busy: _busy.contains(d.id),
-                          printing: _printing.contains(d.id),
-                          onPrintReport: () => _printReport(d),
-                          onClockIn: () => _clockIn(d),
-                          onClockOut: () => _clockOut(d),
-                          onEdit: () => _edit(d),
-                          onRemove: () => _remove(d),
-                        ),
-                      );
-                    },
-                  ),
+        ),
+        if (_selected.isNotEmpty)
+          Positioned(left: QuiccSpace.pane, right: 340, bottom: QuiccSpace.lg, child: _selectBar(context, shown)),
+      ],
+    );
+  }
+
+  Widget _topBar(Driver d) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const LabelWithInfo(label: SizedBox.shrink(), info: kClockInfo),
+      QuiccSpace.gapSm,
+      SizedBox(
+        height: 48,
+        child: OutlinedButton.icon(
+          key: const ValueKey('print-report'),
+          onPressed: _printing ? null : () => _printReport(d),
+          icon: _printing ? const _Spinner() : const Icon(Icons.print_outlined),
+          label: const Text('PRINT REPORT'),
+        ),
+      ),
+      QuiccSpace.gapMd,
+      SizedBox(
+        width: 160,
+        height: 48,
+        child: d.isOff
+            ? FilledButton(
+                key: const ValueKey('clock-in'),
+                onPressed: _busy ? null : () => _clockIn(d),
+                child: _busy ? const _Spinner() : const Text('CLOCK IN'),
+              )
+            : OutlinedButton(
+                key: const ValueKey('clock-out'),
+                onPressed: _busy ? null : () => _clockOut(d),
+                child: _busy ? const _Spinner() : const Text('CLOCK OUT'),
+              ),
+      ),
+    ],
+  );
+
+  Widget _deliveries(BuildContext context, List<StoredOrder> shown, Driver? view) {
+    if (shown.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(top: QuiccSpace.xl),
+        child: EmptyState(
+          icon: view == null ? Icons.task_alt : Icons.delivery_dining_outlined,
+          title: view == null ? 'Nothing unassigned' : 'No deliveries for ${view.name} this batch',
+          message: view == null
+              ? 'A delivery marked delivered with no driver waits here until you give it to the driver who took it.'
+              : null,
+        ),
+      );
+    }
+    return ListView(
+      key: const ValueKey('driver-deliveries'),
+      padding: const EdgeInsets.only(bottom: 120),
+      children: [
+        for (final o in shown)
+          DriverDeliveryCard(
+            key: ValueKey('dd-${o.id}'),
+            order: o,
+            selected: _selected.contains(o.id),
+            selecting: _selected.isNotEmpty,
+            onTap: () => _toggle(o.id),
+            onLongPress: () => _open(o),
           ),
-        ],
+      ],
+    );
+  }
+
+  Widget _buttons(
+    BuildContext context,
+    FloorState fs,
+    List<Driver> onShift,
+    List<Driver> off,
+    Driver? next,
+    int unassigned,
+    Driver? view,
+  ) {
+    final batch = fs.currentBatchOrders;
+    int count(Driver d) => driverDeliveries(batch, d.id).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _UnassignedButton(count: unassigned, selected: view == null, onTap: () => _tapButton(null)),
+        QuiccSpace.gapMd,
+        Expanded(
+          child: CustomScrollView(
+            slivers: [
+              SliverReorderableList(
+                itemCount: onShift.length,
+                onReorder: (a, b) => _reorder(onShift, fs.drivers, a, b),
+                itemBuilder: (context, i) {
+                  final d = onShift[i];
+                  return ReorderableDelayedDragStartListener(
+                    key: ValueKey('driver-button-${d.id}'),
+                    index: i,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: QuiccSpace.sm),
+                      child: DriverButton(
+                        driver: d,
+                        color: driverColor(fs.drivers, d.id),
+                        count: count(d),
+                        next: next?.id == d.id,
+                        selected: view?.id == d.id,
+                        onTap: () => _tapButton(d),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              if (off.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: QuiccSpace.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Eyebrow('Clocked out'),
+                        QuiccSpace.gapSm,
+                        Wrap(
+                          spacing: QuiccSpace.sm,
+                          runSpacing: QuiccSpace.sm,
+                          children: [
+                            for (final d in off)
+                              _OffButton(
+                                key: ValueKey('off-button-${d.id}'),
+                                driver: d,
+                                count: count(d),
+                                selected: view?.id == d.id,
+                                onTap: () => _tapButton(d),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              const SliverToBoxAdapter(child: SizedBox(height: 96)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _selectBar(BuildContext context, List<StoredOrder> shown) {
+    final n = _selected.length;
+    final all = shown.every((o) => _selected.contains(o.id));
+    return Material(
+      key: const ValueKey('driver-select-bar'),
+      elevation: 6,
+      color: context.palette.bgElevated,
+      borderRadius: BorderRadius.circular(QuiccRadius.lg),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(QuiccSpace.lg, QuiccSpace.sm, QuiccSpace.sm, QuiccSpace.sm),
+        child: Row(
+          children: [
+            Text('$n selected', style: QuiccType.text(QuiccType.heading, weight: FontWeight.w700)),
+            QuiccSpace.gapMd,
+            Expanded(
+              child: Text(
+                'Tap a driver to move them there. Hold one to open it.',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
+              ),
+            ),
+            if (!all)
+              TextButton(
+                key: const ValueKey('driver-select-all'),
+                onPressed: () => setState(() => _selected.addAll(shown.map((o) => o.id))),
+                child: const Text('SELECT ALL'),
+              ),
+            TextButton(
+              key: const ValueKey('driver-select-clear'),
+              onPressed: () => setState(_selected.clear),
+              child: const Text('CLEAR'),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _DriverRow extends StatelessWidget {
-  final int index;
-  final Driver driver;
-
-  /// Position among available drivers (1 = next up); null if not in queue.
-  final int? rank;
-  final bool busy;
-
-  /// Their report is printing (PRINT REPORT shows a spinner).
-  final bool printing;
-  final VoidCallback onPrintReport;
-  final VoidCallback onClockIn;
-  final VoidCallback onClockOut;
-  final VoidCallback onEdit;
-  final VoidCallback onRemove;
-
-  const _DriverRow({
-    required this.index,
-    required this.driver,
-    required this.rank,
-    required this.busy,
-    required this.printing,
-    required this.onPrintReport,
-    required this.onClockIn,
-    required this.onClockOut,
-    required this.onEdit,
-    required this.onRemove,
+/// One delivery of the driver shown: number, street + apt, CASH $ / PAID,
+/// the tip; OUT while it is out. Tap = select, hold = details.
+class DriverDeliveryCard extends StatelessWidget {
+  final StoredOrder order;
+  final bool selected;
+  final bool selecting;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  const DriverDeliveryCard({
+    super.key,
+    required this.order,
+    required this.selected,
+    required this.selecting,
+    required this.onTap,
+    required this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
-    final d = driver;
-    final details = [
-      ?driverNumberLabel(d.posNumber),
-      if (d.isOff) 'Clocked out' else if (d.clockedInAt != null) 'In since ${clock(d.clockedInAt)}',
-      '${d.deliveries} run${d.deliveries == 1 ? '' : 's'} this batch',
-      if (d.lastReturnedAt != null && !d.isOff) 'back ${clock(d.lastReturnedAt)}',
-    ];
-
-    return Opacity(
-      opacity: d.isOff ? 0.7 : 1,
-      child: Card(
+    final a = order.order.fulfillment.address;
+    final street = a == null ? 'No address' : [a.line1.trim(), a.line2.trim()].where((p) => p.isNotEmpty).join(' ');
+    final cash = order.cashDueCents;
+    final tip = order.status.tipCents ?? order.order.money.tipCents;
+    final out = order.state == OrderState.onDelivery;
+    return Card(
+      margin: const EdgeInsets.only(bottom: QuiccSpace.sm),
+      color: selected ? QuiccColors.brand400.withValues(alpha: 0.14) : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(QuiccRadius.lg),
+        side: BorderSide(color: selected ? QuiccColors.brand400 : Colors.transparent, width: 2),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(QuiccRadius.lg),
+        onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.all(QuiccSpace.md),
           child: Row(
             children: [
-              ReorderableDragStartListener(
-                index: index,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Icon(Icons.drag_handle, color: context.palette.textMuted, size: 30),
+              if (selecting)
+                Padding(
+                  padding: const EdgeInsets.only(right: QuiccSpace.sm),
+                  child: Icon(
+                    selected ? Icons.check_box : Icons.check_box_outline_blank,
+                    color: selected ? QuiccColors.brand400 : context.palette.textMuted,
+                  ),
                 ),
-              ),
               SizedBox(
-                width: 44,
+                width: 76,
                 child: Text(
-                  rank == null ? '' : '$rank',
-                  style: QuiccType.number(QuiccType.heading + 2, weight: FontWeight.w700, color: context.palette.textMuted),
+                  order.displayNumber,
+                  style: QuiccType.number(QuiccType.heading, weight: FontWeight.w700, color: QuiccColors.brand400),
                 ),
               ),
               Expanded(
@@ -376,49 +548,98 @@ class _DriverRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      rank == 1 ? '${d.name} · NEXT' : d.name,
+                      street,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: QuiccType.text(QuiccType.heading, weight: FontWeight.w600),
+                      style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
                     ),
                     Text(
-                      details.join(' · '),
-                      overflow: TextOverflow.ellipsis,
-                      style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
+                      [cash > 0 ? 'CASH ${money(cash)}' : 'PAID', if (tip > 0) 'tip ${money(tip)}'].join(' · '),
+                      style: QuiccType.number(QuiccType.label, color: context.palette.textSecondary),
                     ),
                   ],
                 ),
               ),
-              _DriverStatusPill(d.status),
-              const SizedBox(width: 12),
-              SizedBox(
-                height: 48,
-                child: TextButton.icon(
-                  key: ValueKey('print-report-${d.id}'),
-                  onPressed: printing ? null : onPrintReport,
-                  icon: printing ? const _Spinner() : const Icon(Icons.print_outlined),
-                  label: const Text('PRINT REPORT'),
+              if (out) const GeoTag('OUT', color: QuiccColors.brand400),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A clocked-in driver's big button: their colour, name, NEXT / OUT /
+/// AVAILABLE and how many deliveries they have this batch.
+class DriverButton extends StatelessWidget {
+  final Driver driver;
+  final Color color;
+  final int count;
+  final bool next;
+  final bool selected;
+  final VoidCallback onTap;
+  const DriverButton({
+    super.key,
+    required this.driver,
+    required this.color,
+    required this.count,
+    required this.next,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final status = next ? 'NEXT' : (driver.isOut ? 'OUT' : 'AVAILABLE');
+    return Material(
+      color: selected ? color.withValues(alpha: 0.22) : context.palette.bgElevated,
+      borderRadius: BorderRadius.circular(QuiccRadius.lg),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(QuiccRadius.lg),
+        onTap: onTap,
+        child: Container(
+          height: 76,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(QuiccRadius.lg),
+            border: Border.all(color: selected ? color : context.palette.borderSoft, width: selected ? 3 : 1),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 10,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(QuiccRadius.lg)),
                 ),
               ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 150,
-                height: 48,
-                child: d.isOff
-                    ? FilledButton(
-                        onPressed: busy ? null : onClockIn,
-                        child: busy ? const _Spinner() : const Text('CLOCK IN'),
-                      )
-                    : OutlinedButton(
-                        onPressed: busy ? null : onClockOut,
-                        child: busy ? const _Spinner() : const Text('CLOCK OUT'),
-                      ),
+              QuiccSpace.gapMd,
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      driver.name.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: QuiccType.text(QuiccType.heading, weight: FontWeight.w800),
+                    ),
+                    Text(
+                      status,
+                      style: QuiccType.text(
+                        QuiccType.caption,
+                        weight: FontWeight.w700,
+                        color: next
+                            ? QuiccColors.statusPaid
+                            : (driver.isOut ? QuiccColors.brand400 : context.palette.textMuted),
+                      ).copyWith(letterSpacing: 1.2),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(width: 4),
-              IconButton(tooltip: 'Edit name / Driver #', onPressed: onEdit, icon: const Icon(Icons.edit_outlined)),
-              IconButton(
-                tooltip: 'Remove',
-                onPressed: onRemove,
-                icon: const Icon(Icons.delete_outline, color: QuiccColors.statusVoided),
+              Padding(
+                padding: const EdgeInsets.only(right: QuiccSpace.lg),
+                child: Text('$count', style: QuiccType.number(QuiccType.heading + 6, weight: FontWeight.w700)),
               ),
             ],
           ),
@@ -426,6 +647,83 @@ class _DriverRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// UNASSIGNED at the top of the buttons: amber with a count while it holds
+/// orders, grey when empty.
+class _UnassignedButton extends StatelessWidget {
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+  const _UnassignedButton({required this.count, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final amber = count > 0;
+    final c = amber ? QuiccColors.statusFiring : context.palette.textMuted;
+    return Material(
+      key: const ValueKey('unassigned-button'),
+      color: amber ? QuiccColors.statusFiring.withValues(alpha: selected ? 0.30 : 0.16) : context.palette.bgElevated,
+      borderRadius: BorderRadius.circular(QuiccRadius.lg),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(QuiccRadius.lg),
+        onTap: onTap,
+        child: Container(
+          height: 64,
+          padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.lg),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(QuiccRadius.lg),
+            border: Border.all(color: selected ? c : c.withValues(alpha: 0.5), width: selected ? 3 : 1),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.person_off_outlined, color: c),
+              QuiccSpace.gapMd,
+              Expanded(
+                child: Text(
+                  'UNASSIGNED',
+                  style: QuiccType.text(QuiccType.heading, weight: FontWeight.w800, color: c),
+                ),
+              ),
+              if (amber)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md, vertical: 4),
+                  decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(999)),
+                  child: Text(
+                    '$count',
+                    style: QuiccType.number(QuiccType.body, weight: FontWeight.w800, color: QuiccColors.brand900),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A clocked-out driver: small and grey — shows their deliveries; CLOCK IN
+/// on top. Nothing can be moved to them.
+class _OffButton extends StatelessWidget {
+  final Driver driver;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+  const _OffButton({super.key, required this.driver, required this.count, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => Opacity(
+    opacity: selected ? 1 : 0.6,
+    child: OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.md, vertical: QuiccSpace.sm),
+        side: BorderSide(color: selected ? QuiccColors.brand400 : context.palette.borderSoft, width: selected ? 2 : 1),
+        foregroundColor: context.palette.textSecondary,
+      ),
+      onPressed: onTap,
+      child: Text(count == 0 ? driver.name : '${driver.name} · $count'),
+    ),
+  );
 }
 
 class _Spinner extends StatelessWidget {
@@ -434,126 +732,4 @@ class _Spinner extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2));
-}
-
-class _DriverStatusPill extends StatelessWidget {
-  final DriverStatus status;
-  const _DriverStatusPill(this.status);
-
-  @override
-  Widget build(BuildContext context) {
-    final c = switch (status) {
-      DriverStatus.available => QuiccColors.statusPaid,
-      DriverStatus.out => QuiccColors.brand400,
-      DriverStatus.off => context.palette.textMuted,
-    };
-    return Container(
-      width: 104,
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(QuiccRadius.sm),
-        border: Border.all(color: c.withValues(alpha: 0.6)),
-      ),
-      child: Text(
-        status.label,
-        style: QuiccType.text(QuiccType.caption, weight: FontWeight.w700, color: c).copyWith(letterSpacing: 1.2),
-      ),
-    );
-  }
-}
-
-/// Shift records of the last 7 days (`GET /api/drivers/shifts?days=7`) — who
-/// worked when, for reports. Not wages.
-class _ShiftsDialog extends ConsumerWidget {
-  const _ShiftsDialog();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final shifts = ref.watch(driverShiftsProvider);
-    return AlertDialog(
-      title: const Text('Shifts — last 7 days'),
-      content: SizedBox(
-        width: 640,
-        height: 420,
-        child: shifts.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Align(
-            alignment: Alignment.topCenter,
-            child: InlineError.from(
-              e,
-              lead: 'Could not load shifts',
-              area: 'drivers',
-              onRetry: () => ref.invalidate(driverShiftsProvider),
-            ),
-          ),
-          data: (list) => list.isEmpty
-              ? Center(
-                  child: Text('No shifts in the last 7 days.', style: QuiccType.text(QuiccType.body, color: context.palette.textMuted)),
-                )
-              : ListView.separated(
-                  itemCount: list.length,
-                  separatorBuilder: (_, _) => Divider(height: 1, color: context.palette.borderSoft),
-                  itemBuilder: (context, i) => _ShiftRow(list[i]),
-                ),
-        ),
-      ),
-      actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('CLOSE'))],
-    );
-  }
-}
-
-class _ShiftRow extends StatelessWidget {
-  final Shift shift;
-  const _ShiftRow(this.shift);
-
-  @override
-  Widget build(BuildContext context) {
-    final s = shift;
-    final span = s.isOpen ? '${clock(s.clockIn)} – now' : '${clock(s.clockIn)} – ${clock(s.clockOut)}';
-    final len = s.length(timeNow());
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: Text(
-              s.driverName.isEmpty ? 'Driver' : s.driverName,
-              overflow: TextOverflow.ellipsis,
-              style: QuiccType.text(QuiccType.body, weight: FontWeight.w600),
-            ),
-          ),
-          Expanded(
-            flex: 5,
-            child: Text(
-              '${dateClock(s.clockIn).split(',').first} · $span',
-              style: QuiccType.text(QuiccType.label, color: context.palette.textSecondary),
-            ),
-          ),
-          SizedBox(
-            width: 110,
-            child: Text(
-              len == null ? '' : minutes(len),
-              textAlign: TextAlign.right,
-              style: QuiccType.number(QuiccType.label, weight: FontWeight.w500, color: context.palette.textSecondary),
-            ),
-          ),
-          SizedBox(
-            width: 90,
-            child: Text(
-              s.isOpen ? 'ON SHIFT' : (s.autoOut ? 'AUTO OUT' : ''),
-              textAlign: TextAlign.right,
-              style: QuiccType.text(
-                QuiccType.caption,
-                weight: FontWeight.w700,
-                color: s.isOpen ? QuiccColors.statusPaid : context.palette.textMuted,
-              ).copyWith(letterSpacing: 1.2),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

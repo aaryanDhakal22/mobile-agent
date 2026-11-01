@@ -36,6 +36,16 @@ const List<SwitchSpec> kTicketSwitches = [
   (key: 'online_cash_pickup', label: 'Online cash pickup', help: 'Only while the hub puts them into the old POS'),
   (key: 'online_cash_delivery', label: 'Online cash delivery', help: 'Tickets + receipt'),
   (key: 'online_card', label: 'Online card (paid)', help: 'Tickets + receipt'),
+  (
+    key: 'future_kitchen',
+    label: 'Print future order kitchen ticket',
+    help: 'On ACCEPT of a later order: its kitchen tickets now, marked DO NOT MAKE',
+  ),
+  (
+    key: 'future_receipt',
+    label: 'Print future order customer receipt',
+    help: 'On ACCEPT of a later order: its receipt now, marked FUTURE (not again later)',
+  ),
 ];
 
 /// A card of switches saved one by one: flips at once, goes back if the Pi
@@ -48,6 +58,9 @@ class _SwitchCard extends ConsumerStatefulWidget {
   final Map<String, bool> Function(FloorSettings) read;
   final Future<void> Function(FloorController floor, Map<String, bool> next) save;
 
+  /// Under the switches (the future tickets' TEST PRINT).
+  final List<Widget> footer;
+
   const _SwitchCard({
     required this.title,
     required this.subtitle,
@@ -55,6 +68,7 @@ class _SwitchCard extends ConsumerStatefulWidget {
     required this.switches,
     required this.read,
     required this.save,
+    this.footer = const [],
   });
 
   @override
@@ -109,6 +123,7 @@ class _SwitchCardState extends ConsumerState<_SwitchCard> {
               value: _pending[sw.key] ?? saved[sw.key] ?? false,
               onChanged: _pending.containsKey(sw.key) ? null : (on) => _flip(sw.key, on),
             ),
+        if (!_needsUpdate) ...widget.footer,
       ],
     );
   }
@@ -157,6 +172,68 @@ class KitchenTicketsSettingsCard extends StatelessWidget {
     switches: kTicketSwitches,
     read: (s) => s.tickets.toJson(),
     save: (floor, next) => floor.saveTickets(TicketToggles.fromJson(next)),
+    footer: const [FutureTestPrints()],
+  );
+}
+
+/// TEST PRINT of the two future-order tickets (2.0.0, Pi 2.4.0): the made-up
+/// sample order due an hour from now, on the receipt printer.
+class FutureTestPrints extends ConsumerStatefulWidget {
+  const FutureTestPrints({super.key});
+
+  @override
+  ConsumerState<FutureTestPrints> createState() => _FutureTestPrintsState();
+}
+
+class _FutureTestPrintsState extends ConsumerState<FutureTestPrints> {
+  String? _busy;
+
+  Future<void> _print(String kind, String what) async {
+    final client = ref.read(agentClientProvider);
+    if (client == null || _busy != null) return;
+    setState(() => _busy = kind);
+    try {
+      final results = await client.printSample(kind: kind);
+      if (!mounted) return;
+      final failed = results.where((r) => !r.ok).toList();
+      if (results.isEmpty) {
+        toast(context, 'No printers are set up — nothing printed', error: true);
+      } else if (failed.isEmpty) {
+        toast(context, 'Test $what printed on ${results.map((r) => r.name.isEmpty ? r.id : r.name).join(', ')}');
+      } else {
+        toast(context, 'Test $what not printed on ${failed.first.name}', error: true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      e is AgentException && (e.code == kReceiptUnsupported || e.statusCode == 400)
+          ? toast(context, 'This Pi needs an update for future order tickets.', error: true)
+          : toastError(context, e, lead: 'Test not printed', area: 'settings');
+    } finally {
+      if (mounted) setState(() => _busy = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: QuiccSpace.sm),
+    child: Wrap(
+      spacing: QuiccSpace.md,
+      runSpacing: QuiccSpace.sm,
+      children: [
+        OutlinedButton.icon(
+          key: const ValueKey('test-future-kitchen'),
+          onPressed: _busy != null ? null : () => _print('future_kitchen', 'future kitchen ticket'),
+          icon: const Icon(Icons.print_outlined),
+          label: const Text('TEST PRINT · FUTURE KITCHEN TICKET'),
+        ),
+        OutlinedButton.icon(
+          key: const ValueKey('test-future-receipt'),
+          onPressed: _busy != null ? null : () => _print('future_receipt', 'future receipt'),
+          icon: const Icon(Icons.print_outlined),
+          label: const Text('TEST PRINT · FUTURE RECEIPT'),
+        ),
+      ],
+    ),
   );
 }
 
@@ -220,9 +297,12 @@ class _DefaultTimesSettingsCardState extends ConsumerState<DefaultTimesSettingsC
       final now = ref.read(floorProvider).settings.times;
       final base = _base ?? now;
       final next = DefaultTimes(
-        defaultPickupMinutes: t.defaultPickupMinutes != base.defaultPickupMinutes ? t.defaultPickupMinutes : now.defaultPickupMinutes,
-        defaultDeliveryMinutes:
-            t.defaultDeliveryMinutes != base.defaultDeliveryMinutes ? t.defaultDeliveryMinutes : now.defaultDeliveryMinutes,
+        defaultPickupMinutes: t.defaultPickupMinutes != base.defaultPickupMinutes
+            ? t.defaultPickupMinutes
+            : now.defaultPickupMinutes,
+        defaultDeliveryMinutes: t.defaultDeliveryMinutes != base.defaultDeliveryMinutes
+            ? t.defaultDeliveryMinutes
+            : now.defaultDeliveryMinutes,
       );
       final saved = await ref.read(floorProvider.notifier).saveTimes(next);
       if (!mounted) return;

@@ -266,14 +266,14 @@ void main() {
   });
 
   group('Came back section', () {
-    testWidgets('below Unassigned under a rule, not draggable or selectable; absent when empty', (tester) async {
+    testWidgets('below Waiting under a rule, not draggable or selectable; absent when empty', (tester) async {
       final f = FakeDeliveryFloor(_floorWithCameBack());
       await _pumpPane(tester, f);
       expect(find.text('Came back · 1'), findsOneWidget);
       expect(find.byKey(const ValueKey('came-back-hr')), findsOneWidget);
       expect(find.textContaining('1 came back'), findsOneWidget);
       // The regular list is untouched and sits above the rule.
-      expect(find.text('Unassigned · 3'), findsOneWidget);
+      expect(find.text('Waiting · 3'), findsOneWidget);
       final row = find.byKey(const ValueKey('came-back-cb1'));
       expect(tester.getTopLeft(row).dy, greaterThan(tester.getTopLeft(find.byKey(const ValueKey('row-d1'))).dy));
       expect(tester.getTopLeft(row).dy, greaterThan(tester.getTopLeft(find.byKey(const ValueKey('came-back-hr'))).dy));
@@ -288,12 +288,11 @@ void main() {
       await tester.pump();
       expect(callsOf(f, 'pool'), isEmpty);
 
-      // Select mode: tapping it selects nothing (just the hint).
-      await tester.tap(find.byKey(const ValueKey('select')));
-      await tester.pump();
+      // 2.0.0: a tap selects nothing here (just the hint) — no select bar.
       await tester.tap(row);
       await tester.pump();
-      expect(find.text('0 selected'), findsOneWidget);
+      expect(find.byKey(const ValueKey('select-bar')), findsNothing);
+      await tester.pump(const Duration(seconds: 4)); // the hint pill
 
       f.push(deliveryFloor());
       await tester.pump();
@@ -302,7 +301,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a tap says how; letting go early empties the bar; a full hold sends it to Unassigned', (tester) async {
+    testWidgets('a tap says how; letting go early empties the bar; a full hold sends it to Waiting', (tester) async {
       final (client, calls, _) = _pi(
         (req) => _json(_cameBackJson()..['status'] = {...(_cameBackJson()['status'] as Map), 'came_back': false}),
       );
@@ -338,7 +337,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
       expect(find.byKey(const ValueKey('came-back-section')), findsNothing);
       expect(find.byKey(const ValueKey('row-cb1')), findsOneWidget);
-      expect(find.text('#1110 is back in Unassigned'), findsOneWidget);
+      expect(find.text('#1110 is back in Waiting'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -357,7 +356,7 @@ void main() {
       await tester.pump();
       expect(calls, hasLength(1));
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.text('#1110 is already back in Unassigned.'), findsOneWidget);
+      expect(find.text('#1110 is already back in Waiting.'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -710,7 +709,7 @@ void main() {
       expect(tester.state(kept), same(state));
       expect(tester.widget<RunsMapPane>(kept).active, isFalse);
       expect(TickerMode.valuesOf(tester.element(find.byType(FlutterMap, skipOffstage: false))).enabled, isFalse);
-      expect(find.text('Unassigned · 3'), findsOneWidget);
+      expect(find.text('Waiting · 3'), findsOneWidget);
 
       await go(tester, c, HomeDestination.map);
       expect(tester.state(kept), same(state));

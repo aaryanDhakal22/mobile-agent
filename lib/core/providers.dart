@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'accept_errors.dart';
 import 'alarm.dart';
 import 'alert_player.dart';
 import 'api_client.dart';
@@ -159,6 +161,20 @@ final sseClientFactoryProvider = Provider<http.Client Function()>((_) => http.Cl
 /// SSE reconnect backoff — overridden in tests.
 final sseBackoffProvider = Provider<Duration Function(int attempt)>((_) => sseBackoff);
 
+/// How long READY / ACCEPT keep trying the Pi in the background before the
+/// ticket goes back (2.0.0, owner: the screen never waits on the Pi).
+const Duration kOptimisticRetryFor = Duration(seconds: 15);
+
+/// The waits between those tries — overridden in tests.
+final optimisticBackoffProvider = Provider<Duration Function(int attempt)>(
+  (_) =>
+      (attempt) => Duration(milliseconds: math.min(4000, 500 << math.min(attempt, 4))),
+);
+
+/// Why an ACCEPT that already left the screen didn't land (order id → plain
+/// words): the order rings again and its accept controls show this.
+final acceptErrorsProvider = StateProvider<Map<String, String>>((_) => const {});
+
 class FloorController extends Notifier<FloorState> {
   AgentEventStream? _sse;
   Timer? _poll;
@@ -171,6 +187,13 @@ class FloorController extends Notifier<FloorState> {
   bool _refreshing = false;
   bool _refreshAgain = false;
   List<SseEvent>? _bufferedDuringRefresh;
+
+  /// READY / ACCEPT shown before the Pi answered (2.0.0): order id → the
+  /// change, applied again over a refresh that lands meanwhile.
+  final Map<String, StoredOrder Function(StoredOrder)> _pending = {};
+
+  /// A READY still on its way to the Pi (UNDO waits for it).
+  final Map<String, Future<void>> _pendingReady = {};
 
   @override
   FloorState build() {
@@ -304,6 +327,7 @@ class FloorController extends Notifier<FloorState> {
       for (final ev in _bufferedDuringRefresh ?? const <SseEvent>[]) {
         next = applySseEvent(next, ev).state;
       }
+      next = _withPending(next);
       _set(next);
     } catch (e) {
       if (gen == _gen && !_disposed) {
@@ -331,18 +355,96 @@ class FloorController extends Notifier<FloorState> {
 
   void _upsert(Iterable<StoredOrder> list) => _set(state.withOrders(list));
 
+  FloorState _withPending(FloorState s) {
+    if (_pending.isEmpty) return s;
+    return s.withOrders([
+      for (final e in _pending.entries)
+        if (s.orders[e.key] != null) e.value(s.orders[e.key]!),
+    ]);
+  }
+
+  /// Runs [call], again after a short wait while it fails on the network,
+  /// for at most [kOptimisticRetryFor]. [retried] is set once a second try
+  /// ran (a 409 then may mean the first one landed).
+  Future<T> _retrying<T>(Future<T> Function() call, void Function() retried) async {
+    final sw = Stopwatch()..start();
+    final backoff = ref.read(optimisticBackoffProvider);
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await call();
+      } on AgentException catch (e) {
+        final wait = backoff(attempt);
+        if (!e.isNetwork || _disposed || sw.elapsed + wait > kOptimisticRetryFor) rethrow;
+        await Future<void>.delayed(wait);
+        retried();
+      }
+    }
+  }
+
   // --- actions (errors propagate to the UI) ----------------------------------
 
+  /// ACCEPT at once (2.0.0): the order leaves the ring and its ticket is on
+  /// Kitchen now (the kitchen number guessed from the counter until the Pi
+  /// answers); the Pi is told in the background, retried for
+  /// [kOptimisticRetryFor]. Nothing printed (502) or no answer → the order
+  /// rings again with the reason in [acceptErrorsProvider]; taken elsewhere
+  /// (409) → refresh. Throws what went wrong.
   Future<StoredOrder> accept(String id, int? prepMinutes) async {
+    final before = state.orders[id];
+    final errors = ref.read(acceptErrorsProvider.notifier);
+    if (errors.state.containsKey(id)) errors.state = {...errors.state}..remove(id);
+    final at = timeNow().toUtc();
+    final number = before != null && before.status.displayNumber == null ? _guessKitchenNumber() : null;
+    StoredOrder show(StoredOrder o) => o.state != OrderState.arrived
+        ? o
+        : o.copyWith(
+            status: o.status.copyWith(
+              state: OrderState.accepted,
+              acceptedAt: at,
+              kitchenNumber: o.status.kitchenNumber ?? number,
+              prepMinutes: prepMinutes,
+              estimatedReadyAt: prepMinutes == null ? null : at.add(Duration(minutes: prepMinutes)),
+            ),
+          );
+    if (before != null) {
+      _pending[id] = show;
+      _upsert([show(before)]);
+    }
+    var retried = false;
     try {
-      final o = await _requireClient(ref).accept(id, prepMinutes: prepMinutes);
+      final o = await _retrying(() => _requireClient(ref).accept(id, prepMinutes: prepMinutes), () => retried = true);
+      _pending.remove(id);
       _upsert([o]);
       return o;
-    } on AgentException catch (e) {
+    } catch (e) {
+      _pending.remove(id);
+      if (e is AgentException && e.isConflict && retried) {
+        // Our first try landed and the answer was lost: the Pi has it.
+        unawaited(refresh());
+        rethrow;
+      }
+      if (e is AgentException && e.isNetwork) {
+        // The claim may have landed: read the order back before saying no.
+        final o = await recheck(id);
+        if (o != null && o.state != OrderState.arrived) rethrow;
+      }
+      if (before != null) _restore([before], (o) => o.state == OrderState.accepted && o.status.acceptedAt == at);
+      errors.state = {...errors.state, id: acceptErrorMessageFor(e)};
       // 409 taken elsewhere / 502 reverted / 404 gone: resync the truth.
-      if (!e.isNetwork) unawaited(refresh());
+      if (e is! AgentException || !e.isNetwork) unawaited(refresh());
       rethrow;
     }
+  }
+
+  /// The next kitchen number as this tablet sees it (the counter, or one
+  /// past the highest on the floor) — shown until the Pi's answer.
+  int? _guessKitchenNumber() {
+    var n = state.floor?.kitchenNext ?? 0;
+    for (final o in state.orders.values) {
+      final k = o.status.kitchenNumber;
+      if (k != null && o.status.batchId == state.currentBatchId && k >= n) n = k + 1;
+    }
+    return n > 0 ? n : null;
   }
 
   /// First confirm of a future order (or a new lead for a scheduled one):
@@ -420,17 +522,58 @@ class FloorController extends Notifier<FloorState> {
     }
   }
 
-  Future<void> ready(String id) async {
+  /// READY at once (2.0.0): the ticket leaves Kitchen now; the Pi is told
+  /// in the background, retried for [kOptimisticRetryFor]. A refusal or no
+  /// answer puts the ticket back and throws. [callout] false (READY held 1
+  /// s): the hub doesn't call it out.
+  Future<void> ready(String id, {bool callout = true}) {
+    final f = _ready(id, callout);
+    _pendingReady[id] = f;
+    return f.whenComplete(() {
+      if (identical(_pendingReady[id], f)) _pendingReady.remove(id);
+    });
+  }
+
+  Future<void> _ready(String id, bool callout) async {
+    final before = state.orders[id];
+    final at = timeNow().toUtc();
+    StoredOrder show(StoredOrder o) => o.state != OrderState.accepted
+        ? o
+        : o.copyWith(
+            status: o.status.copyWith(state: OrderState.ready, readyAt: at),
+          );
+    if (before != null) {
+      _pending[id] = show;
+      _upsert([show(before)]);
+    }
+    var retried = false;
     try {
-      _upsert([await _requireClient(ref).ready(id)]);
-    } on AgentException catch (e) {
-      if (e.isConflict || e.isNotFound) unawaited(refresh());
+      final o = await _retrying(() => _requireClient(ref).ready(id, callout: callout), () => retried = true);
+      _pending.remove(id);
+      _upsert([o]);
+    } catch (e) {
+      _pending.remove(id);
+      if (e is AgentException && e.isConflict && retried) {
+        unawaited(refresh()); // the first try landed
+        return;
+      }
+      if (before != null) _restore([before], (o) => o.state == OrderState.ready && o.status.readyAt == at);
+      if (e is AgentException && (e.isConflict || e.isNotFound)) unawaited(refresh());
       rethrow;
     }
   }
 
-  /// UNDO on the "ready" pill (1.9.2): back to cooking.
+  /// UNDO on the "ready" pill (1.9.2): back to cooking. A READY still on its
+  /// way to the Pi goes first (a failed one leaves nothing to undo).
   Future<void> undoReady(String id) async {
+    final pending = _pendingReady[id];
+    if (pending != null) {
+      try {
+        await pending;
+      } catch (_) {
+        return; // never marked ready: it is back on Kitchen already
+      }
+    }
     try {
       _upsert([await _requireClient(ref).undoReady(id)]);
     } on AgentException catch (e) {
@@ -560,8 +703,7 @@ class FloorController extends Notifier<FloorState> {
     }
   }
 
-  Future<PoolTrip> poolTrip(String driverId, List<String> orderIds) =>
-      _requireClient(ref).poolTrip(driverId, orderIds);
+  Future<PoolTrip> poolTrip(String driverId, List<String> orderIds) => _requireClient(ref).poolTrip(driverId, orderIds);
 
   /// Staff placed the address on the map; the route comes back later.
   Future<void> pinOrder(String orderId, double lat, double lng) => _requireClient(ref).pinOrder(orderId, lat, lng);
@@ -616,6 +758,83 @@ class FloorController extends Notifier<FloorState> {
     } on AgentException catch (e) {
       if (e.code == kNotDeliveredUnsupported) ref.read(notDeliveredUnsupportedProvider.notifier).state = true;
       if (e.isConflict || e.code == 'not_found') unawaited(refresh());
+      rethrow;
+    }
+  }
+
+  // --- Unassigned + the Drivers tab (2.0.0, Pi 2.4.0) -----------------------------
+
+  void _unassignedErr(Object e) {
+    if (e is! AgentException) return;
+    if (e.code == kUnassignedUnsupported) ref.read(unassignedUnsupportedProvider.notifier).state = true;
+    if (e.isConflict || e.isNotFound) unawaited(refresh());
+  }
+
+  /// MARK DELIVERED: [id] is delivered with no driver (Unassigned).
+  Future<StoredOrder> markDelivered(String id) async {
+    try {
+      final o = await _requireClient(ref).markDelivered(id);
+      _upsert([o]);
+      return o;
+    } catch (e) {
+      _unassignedErr(e);
+      rethrow;
+    }
+  }
+
+  /// Back to deliveries (and the MARK DELIVERED toast's UNDO).
+  Future<StoredOrder> undeliver(String id) async {
+    try {
+      final o = await _requireClient(ref).undeliver(id);
+      _upsert([o]);
+      return o;
+    } catch (e) {
+      _unassignedErr(e);
+      rethrow;
+    }
+  }
+
+  /// The Drivers tab: [orderIds] (delivered / out) move to [driverId] (null =
+  /// Unassigned). Optimistic: the lists change at once, the Pi's answer
+  /// replaces them, a refusal puts them back. The drivers reload after
+  /// (a move can send one out or bring one back).
+  Future<List<StoredOrder>> reassign(List<String> orderIds, String? driverId) async {
+    if (orderIds.isEmpty) return const [];
+    final before = <StoredOrder>[
+      for (final id in orderIds)
+        if (state.orders[id] != null) state.orders[id]!,
+    ];
+    final driver = driverId == null ? null : state.drivers.where((d) => d.id == driverId).firstOrNull;
+    final at = timeNow().toUtc();
+    _upsert([
+      for (final o in before)
+        o.copyWith(
+          status: driverId == null
+              ? o.status.copyWith(
+                  clearDriver: true,
+                  markedDelivered: MarkedDelivered(at: at, fromDriver: o.status.driverName ?? ''),
+                )
+              : o.status.copyWith(driverId: driverId, driverName: driver?.name),
+        ),
+    ]);
+    try {
+      final moved = await _requireClient(ref).reassign(orderIds, driverId: driverId);
+      _upsert(moved);
+      unawaited(_reloadDrivers());
+      return moved;
+    } catch (e) {
+      _restore(before, (o) => (o.status.driverId ?? '') == (driverId ?? ''));
+      _unassignedErr(e);
+      rethrow;
+    }
+  }
+
+  /// The ▲▼ arrows: [driverId]'s pool in [orderIds] order (first stop first).
+  Future<void> setPoolOrder(String driverId, List<String> orderIds) async {
+    try {
+      _upsert(await _requireClient(ref).setPoolOrder(driverId, orderIds));
+    } catch (e) {
+      _unassignedErr(e);
       rethrow;
     }
   }
@@ -718,8 +937,7 @@ class FloorController extends Notifier<FloorState> {
 
   /// Prints one driver's report for the open batch so far (Pi 2.2.3; an
   /// older Pi throws [kDriverReportUnsupported]).
-  Future<DriverReportPrint> printDriverReport(String driverId) =>
-      _requireClient(ref).printDriverReport(driverId);
+  Future<DriverReportPrint> printDriverReport(String driverId) => _requireClient(ref).printDriverReport(driverId);
 
   /// Optimistic: the list reorders at once, then the agent confirms.
   Future<void> reorderDrivers(List<Driver> ordered) async {
@@ -771,6 +989,14 @@ final lastReturnProvider = StateProvider<LastReturn?>((_) => null);
 /// driver button takes it (and clears it) when nothing is in the way — the
 /// full-screen ring or a dialog / screen on top.
 final fobPopProvider = StateProvider<AutoAssignment?>((_) => null);
+
+/// The paired Pi has no 2.4.0 routes (MARK DELIVERED, moving deliveries
+/// between drivers, the pool's stop order): those actions hide or say
+/// "update the Pi". Forgotten when the Pi changes.
+final unassignedUnsupportedProvider = StateProvider<bool>((ref) {
+  ref.watch(_agentLinkProvider);
+  return false;
+});
 
 /// The paired Pi answered NOT DELIVERED with "no such route" (≤ 2.2.0): the
 /// action hides. Forgotten when the Pi (address / key) changes.

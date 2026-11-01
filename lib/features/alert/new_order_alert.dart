@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
+import '../../core/models.dart';
+import '../../core/motion.dart';
 import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
@@ -47,7 +49,8 @@ class AlarmHost extends ConsumerWidget {
         const Positioned.fill(child: AutoAcceptBanner()),
         // The blue CHANGED alert (1.8.0) waits while a new order rings.
         const Positioned.fill(child: ChangeAlertHost()),
-        if (alarm.ringing && alarm.visible) const Positioned.fill(child: NewOrderAlert()),
+        // 2.0.0: an accepted order's alert bubbles down out of the way.
+        Positioned.fill(child: NewOrderAlertSlot(show: alarm.ringing && alarm.visible)),
       ],
     );
   }
@@ -88,10 +91,88 @@ class _RingingBanner extends ConsumerWidget {
   }
 }
 
+/// How long the alert takes to bubble away after ACCEPT (2.0.0).
+const Duration kAlertBubble = Duration(milliseconds: 420);
+
+/// The full-screen alert's place (2.0.0): one alert per ringing order, keyed
+/// by it, so when an order is accepted its alert squishes and bubbles down
+/// out of the way (the next one, if any, is already under it). Motion off: a
+/// fade. A leaving alert can't be touched.
+class NewOrderAlertSlot extends ConsumerWidget {
+  final bool show;
+  const NewOrderAlertSlot({super.key, required this.show});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final arrived = ref.watch(floorProvider.select((s) => s.arrived));
+    final first = show && arrived.isNotEmpty ? arrived.first : null;
+    final m = Motion.of(context, ref);
+    return AnimatedSwitcher(
+      duration: Duration.zero,
+      reverseDuration: m.full ? m.scale(kAlertBubble) : m.fade,
+      layoutBuilder: (current, previous) => Stack(fit: StackFit.expand, children: [...previous, ?current]),
+      transitionBuilder: (child, anim) => AlertBubble(animation: anim, full: m.full, child: child),
+      child: first == null
+          ? const SizedBox.shrink(key: ValueKey('no-alert'))
+          : NewOrderAlert(key: ValueKey('alert-${first.id}'), order: first),
+    );
+  }
+}
+
+/// An alert leaving after ACCEPT (the animation running back 1 → 0): a
+/// squish, then it shrinks and drops toward the board, fading. Coming in it
+/// shows at once. [full] false (Motion off): a fade only.
+class AlertBubble extends StatelessWidget {
+  final Animation<double> animation;
+  final bool full;
+  final Widget child;
+  const AlertBubble({super.key, required this.animation, required this.full, required this.child});
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: animation,
+    child: child,
+    builder: (context, child) {
+      final s = animation.status;
+      if (s != AnimationStatus.reverse && s != AnimationStatus.dismissed) return child!;
+      final t = 1 - animation.value; // 0 → 1 as it leaves
+      if (!full) {
+        return IgnorePointer(
+          child: Opacity(opacity: animation.value, child: child),
+        );
+      }
+      const squish = 0.2;
+      double sx, sy;
+      if (t < squish) {
+        final k = Curves.easeOut.transform(t / squish);
+        sx = 1 + 0.04 * k;
+        sy = 1 - 0.08 * k;
+      } else {
+        final k = Curves.easeInBack.transform((t - squish) / (1 - squish)).clamp(-0.2, 1.0);
+        sx = (1.04 * (1 - k)).clamp(0.05, 1.2);
+        sy = (0.92 * (1 - k)).clamp(0.05, 1.2);
+      }
+      final drop = Curves.easeIn.transform(t) * MediaQuery.sizeOf(context).height * 0.35;
+      return IgnorePointer(
+        child: Opacity(
+          opacity: (1 - t * t).clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset(0, drop),
+            child: Transform(alignment: Alignment.center, transform: Matrix4.diagonal3Values(sx, sy, 1), child: child),
+          ),
+        ),
+      );
+    },
+  );
+}
+
 /// Full-screen alarm. It cannot be tapped away: the sound stops only once
 /// every arrived order is accepted. HIDE just takes it off the screen.
+/// [order] (2.0.0): the order it shows (kept while it bubbles away); null =
+/// the first ringing one.
 class NewOrderAlert extends ConsumerStatefulWidget {
-  const NewOrderAlert({super.key});
+  final StoredOrder? order;
+  const NewOrderAlert({super.key, this.order});
 
   @override
   ConsumerState<NewOrderAlert> createState() => _NewOrderAlertState();
@@ -116,8 +197,8 @@ class _NewOrderAlertState extends ConsumerState<NewOrderAlert> with SingleTicker
   Widget build(BuildContext context) {
     final arrived = ref.watch(floorProvider.select((s) => s.arrived));
     final loud = ref.watch(alarmProvider.select((a) => a.loud));
-    if (arrived.isEmpty) return const SizedBox.shrink();
-    final first = arrived.first;
+    if (widget.order == null && arrived.isEmpty) return const SizedBox.shrink();
+    final first = widget.order ?? arrived.first;
     final o = first.order;
     const onBrand = QuiccColors.brand900;
     final bg = loud ? QuiccColors.statusFiring : QuiccColors.brand400;

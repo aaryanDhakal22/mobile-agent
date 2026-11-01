@@ -20,8 +20,9 @@ import 'package:mobile_agent/core/soft_chime.dart';
 import 'package:mobile_agent/core/sse.dart';
 import 'package:mobile_agent/features/arrived/accept_controls.dart';
 import 'package:mobile_agent/features/common/island.dart';
+import 'package:mobile_agent/features/common/widgets.dart' show ItemLines;
 import 'package:mobile_agent/features/deliveries/delivery_widgets.dart';
-import 'package:mobile_agent/features/drivers/drivers_pane.dart';
+import 'package:mobile_agent/features/settings/drivers_settings_card.dart';
 import 'package:mobile_agent/features/integration/integration_alerts.dart';
 import 'package:mobile_agent/features/kitchen/kitchen_pane.dart';
 import 'package:mobile_agent/features/maps/check_address_sheet.dart';
@@ -291,7 +292,9 @@ void main() {
   });
 
   group('Kitchen board', () {
-    testWidgets('the Later strip shows scheduled orders greyed with the due time; tap edits the lead', (tester) async {
+    testWidgets('2.0.0: a scheduled order is a whole greyed ticket (due, rings); tap opens it to change its time', (
+      tester,
+    ) async {
       final due = DateTime.now().add(const Duration(hours: 3)).toUtc();
       final m = _online(
         'l-1',
@@ -308,11 +311,16 @@ void main() {
       await _pump(tester, agent, _floorState([so]), const Scaffold(body: KitchenPane()));
 
       expect(find.byKey(const ValueKey('later-strip')), findsOneWidget);
-      expect(find.text('Due ${_clock(due)}'), findsOneWidget);
-      expect(find.textContaining('20 min lead'), findsOneWidget);
+      expect(find.byType(FutureTicket), findsOneWidget);
+      expect(find.textContaining('due ${_clock(due)}'), findsOneWidget);
+      expect(find.textContaining('rings ${_clock(due.subtract(const Duration(minutes: 20)))}'), findsOneWidget);
+      expect(find.byType(ItemLines), findsOneWidget, reason: 'every item shows');
       expect(find.byType(KitchenCard), findsNothing, reason: 'not cooking yet');
 
       await tester.tap(find.byKey(const ValueKey('later-l-1')));
+      await _settle(tester);
+      expect(find.byType(OrderDetailScreen), findsOneWidget);
+      await tester.tap(find.text('CHANGE LEAD TIME'));
       await _settle(tester);
       await tester.tap(find.byKey(const ValueKey('pick-x10')));
       await tester.pump();
@@ -544,7 +552,7 @@ void main() {
         }
         return _json({'id': 'd-new', 'name': 'Bo', 'pos_number': '12'});
       });
-      await _pump(tester, agent, _floorState(const [], drivers: const [ana]), const Scaffold(body: DriversPane()));
+      await _pump(tester, agent, _floorState(const [], drivers: const [ana]), const Scaffold(body: SingleChildScrollView(child: DriversSettingsCard())));
 
       await tester.tap(find.text('ADD DRIVER'));
       await _settle(tester);
@@ -554,7 +562,7 @@ void main() {
       await _settle(tester);
       expect(agent.bodyOf('POST /api/drivers'), {'name': 'Bo', 'pos_number': '12'}, reason: 'digits only');
 
-      await tester.tap(find.byTooltip('Edit name / Driver #'));
+      await tester.tap(find.byTooltip('Edit'));
       await _settle(tester);
       await tester.enterText(find.byKey(const ValueKey('driver-pos-number')), '7');
       await tester.tap(find.byKey(const ValueKey('driver-save')));
