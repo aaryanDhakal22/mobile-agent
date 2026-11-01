@@ -271,6 +271,13 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 2.0.1 — the address leads on Deliveries
+
+- **Waiting** and **Came back** rows show the delivery address first, big and
+  bold (it may wrap to two lines); the customer's name is small under it.
+- Those rows are raised off the column — a lighter fill, a purple edge (amber
+  on Came back) and a shadow — so they don't blend together.
+
 ## 2.0.0 — the Drivers tab, Unassigned, READY without callout (with agent 2.4.0)
 
 - **READY**: a tap = READY (the callout speaks, as before; it fires when the
