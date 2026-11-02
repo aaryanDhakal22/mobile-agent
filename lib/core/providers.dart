@@ -859,6 +859,18 @@ class FloorController extends Notifier<FloorState> {
     }
   }
 
+  /// Bring a driver who is out back with his run (Pi 2.4.1): his orders are
+  /// back in his pool, ready; SEND OUT sends him again.
+  Future<void> recallDriver(String driverId) async {
+    try {
+      _upsert(await _requireClient(ref).recallDriver(driverId));
+      unawaited(_reloadDrivers());
+    } on AgentException catch (e) {
+      if (e.isConflict || e.isNotFound) unawaited(refresh());
+      rethrow;
+    }
+  }
+
   /// Undo the latest "returned" (the driver is out again). Clears the undo
   /// slot either way.
   Future<Driver> undoReturn(String driverId) async {

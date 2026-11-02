@@ -164,6 +164,45 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     }
   }
 
+  /// The Pi doesn't know recall (older than 2.4.1): the ↺ buttons hide.
+  bool _recallMissing = false;
+
+  /// ↺: bring a driver who is out back with his run (Pi 2.4.1) — his
+  /// deliveries go back to his pool, ready; he's next in the queue.
+  Future<void> _recall(Driver d, int stops) async {
+    final ok = await confirmDialog(
+      context,
+      title: 'Bring ${d.name} back?',
+      message: stops == 1
+          ? 'His delivery stays with him, ready to go again. You can add more before SEND OUT.'
+          : 'His $stops deliveries stay with him, ready to go again. You can add more before SEND OUT.',
+      confirm: 'BRING BACK',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _returning.add(d.id));
+    try {
+      await _floor.recallDriver(d.id);
+      _toast('${d.name} is back with his deliveries — next in the queue');
+    } catch (e) {
+      if (!mounted) return;
+      if (e is AgentException && e.isMissingRoute && e.code != 'driver_not_found') {
+        setState(() => _recallMissing = true);
+        _toast('Update the Pi to bring drivers back with their run.', error: true);
+        return;
+      }
+      final msg = switch (e) {
+        AgentException(code: 'driver_not_out') => "${d.name} isn't out any more.",
+        AgentException(isNotFound: true) => '${d.name} was removed from the roster.',
+        _ => null,
+      };
+      msg == null
+          ? toastError(context, e, lead: 'Could not bring ${d.name} back', area: 'deliveries', rightInset: _toastInset)
+          : _toast(msg, error: true);
+    } finally {
+      if (mounted) setState(() => _returning.remove(d.id));
+    }
+  }
+
   Future<void> _returned(Driver d) async {
     setState(() => _returning.add(d.id));
     try {
@@ -485,6 +524,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                   color: driverColor(fs.drivers, run.driver?.id ?? ''),
                   busy: run.driver != null && _returning.contains(run.driver!.id),
                   onReturned: run.driver == null ? null : () => _returned(run.driver!),
+                  onRecall: run.driver == null || _recallMissing ? null : () => _recall(run.driver!, run.orders.length),
                   onOpen: _open,
                 ),
             ],

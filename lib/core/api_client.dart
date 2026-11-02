@@ -817,6 +817,12 @@ class AgentClient {
   Future<ReturnedResult> driverReturned(String driverId) async =>
       ReturnedResult.fromJson(await _send('POST', '/api/drivers/${Uri.encodeComponent(driverId)}/returned?v=2'));
 
+  /// `POST /api/drivers/{id}/recall` (Pi 2.4.1) — a driver who is out comes
+  /// back with his run: the orders still out go back to his pool (ready), he
+  /// is next in the queue. 409 `driver_not_out`; an older Pi: missing route.
+  Future<List<StoredOrder>> recallDriver(String driverId) async =>
+      jList(await _send('POST', '/api/drivers/${Uri.encodeComponent(driverId)}/recall'), StoredOrder.fromJson);
+
   /// `POST /api/drivers/{id}/undo-return` — the latest return (≤10 min) is
   /// undone: the driver is out again. 409 invalid_state otherwise.
   Future<Driver> undoReturn(String driverId) async =>

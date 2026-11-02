@@ -410,6 +410,50 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  group('Out section: ↺ bring back with the run (Pi 2.4.1)', () {
+    testWidgets('asks first, then recalls the driver', (tester) async {
+      final (_, f) = await pumpPane(tester);
+      expect(find.byKey(const ValueKey('recall-driver')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('recall-driver')));
+      await tester.pumpAndSettle();
+      expect(find.text('Bring Sam back?'), findsOneWidget);
+      await tester.tap(find.text('CANCEL'));
+      await tester.pumpAndSettle();
+      expect(callsOf(f, 'recall'), isEmpty);
+
+      await tester.tap(find.byKey(const ValueKey('recall-driver')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('BRING BACK'));
+      await tester.pump();
+      expect(callsOf(f, 'recall').single.driver, 'd-sam');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an older Pi hides the button', (tester) async {
+      final (_, f) = await pumpPane(tester);
+      f.recallError = const AgentException('Not found', statusCode: 405);
+      await tester.tap(find.byKey(const ValueKey('recall-driver')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('BRING BACK'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('recall-driver')), findsNothing);
+      expect(find.text('I HAVE RETURNED'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a driver who is back already: a message, the button stays', (tester) async {
+      final (_, f) = await pumpPane(tester);
+      f.recallError = const AgentException('x', statusCode: 409, code: 'driver_not_out');
+      await tester.tap(find.byKey(const ValueKey('recall-driver')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('BRING BACK'));
+      await tester.pump();
+      expect(find.textContaining("isn't out any more"), findsOneWidget);
+      expect(find.byKey(const ValueKey('recall-driver')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   testWidgets('no driver clocked in → hint to clock in on the Drivers tab', (tester) async {
     final s = deliveryFloor();
     final off = s.drivers.map((d) => Driver(id: d.id, name: d.name, status: DriverStatus.off)).toList();

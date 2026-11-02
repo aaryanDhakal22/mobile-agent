@@ -271,6 +271,14 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 2.0.2 — bring a driver back with his run (with agent 2.4.1)
+
+- **Out** on Deliveries: a **↺** button beside I HAVE RETURNED brings the
+  driver back without finishing the run. After a confirm, his deliveries go
+  back to his box, ready, he's next in the queue, and his phone is told the run
+  is on hold. Add stops, then SEND OUT sends him again with one fresh route.
+- On a Pi older than 2.4.1 the button hides itself after the first try.
+
 ## 2.0.1 — the address leads on Deliveries
 
 - **Waiting** and **Came back** rows show the delivery address first, big and

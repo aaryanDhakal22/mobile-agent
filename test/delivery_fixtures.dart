@@ -215,6 +215,17 @@ class FakeDeliveryFloor extends FloorController {
     calls.add((op: 'returned', ids: const [], driver: driverId, extra: const {}));
   }
 
+  /// The next recall throws this (then is cleared).
+  AgentException? recallError;
+
+  @override
+  Future<void> recallDriver(String driverId) async {
+    calls.add((op: 'recall', ids: const [], driver: driverId, extra: const {}));
+    final e = recallError;
+    recallError = null;
+    if (e != null) throw e;
+  }
+
   // 2.0.0 (Pi 2.4.0): the stop order, the Drivers tab's moves, MARK
   // DELIVERED / back.
   @override
