@@ -452,8 +452,8 @@ class NextBadge extends StatelessWidget {
 }
 
 /// A driver out on a run: name, time out, his stops in stop order — a pin in
-/// his map colour and the street (1.7.1; tap = the order) — and I HAVE
-/// RETURNED.
+/// his map colour and the street (1.7.1; tap = the order) — ↺ (2.0.2: bring
+/// him back with the run) and I HAVE RETURNED.
 class OutRunCard extends StatelessWidget {
   final String name;
   final DateTime? outAt;
@@ -461,6 +461,10 @@ class OutRunCard extends StatelessWidget {
   final Color color;
   final bool busy;
   final VoidCallback? onReturned;
+
+  /// Bring him back with his run (null hides the button: removed driver or a
+  /// Pi older than 2.4.1).
+  final VoidCallback? onRecall;
   final void Function(StoredOrder) onOpen;
   const OutRunCard({
     super.key,
@@ -470,6 +474,7 @@ class OutRunCard extends StatelessWidget {
     this.color = QuiccColors.brand400,
     required this.busy,
     required this.onReturned,
+    this.onRecall,
     required this.onOpen,
   });
 
@@ -530,6 +535,26 @@ class OutRunCard extends StatelessWidget {
               ),
             ),
             QuiccSpace.gapMd,
+            if (onRecall != null) ...[
+              SizedBox(
+                width: 56,
+                height: 56,
+                child: Tooltip(
+                  message: 'Bring back with the run',
+                  child: OutlinedButton(
+                    key: const ValueKey('recall-driver'),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      foregroundColor: context.palette.textPrimary,
+                      side: BorderSide(color: context.palette.textSecondary, width: 1.5),
+                    ),
+                    onPressed: busy ? null : onRecall,
+                    child: const Icon(Icons.replay, size: 28),
+                  ),
+                ),
+              ),
+              QuiccSpace.gapSm,
+            ],
             SizedBox(
               height: 56,
               child: FilledButton.icon(
