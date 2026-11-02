@@ -271,6 +271,16 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 2.0.3 — join the Pi with the manager login (with agent 2.4.2)
+
+- A reinstalled tablet on an already set-up Pi could only join with a code
+  from another working tablet — with no other tablet, the store was stuck.
+  The join screen now has **Use the manager login instead** (the store manager
+  username and password), and names the Pi's web page
+  (`http://quiccpos-pi` → Settings → Tablets) as the other way to get a code.
+- On a Pi older than 2.4.2 the manager login says the Pi needs an update and
+  points at the web page.
+
 ## 2.0.2 — bring a driver back with his run (with agent 2.4.1)
 
 - **Out** on Deliveries: a **↺** button beside I HAVE RETURNED brings the

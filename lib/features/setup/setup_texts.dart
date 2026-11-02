@@ -36,7 +36,9 @@ class SetupInfo {
   static const pairingCode = InfoText(
     'Where do I get a code?',
     'On a tablet that already works: Settings → Pair another tablet. The code is 6 digits and '
-        'works for 5 minutes. It lets this tablet join the same Pi.',
+        'works for 5 minutes. It lets this tablet join the same Pi. No other tablet? Open '
+        'http://quiccpos-pi on a phone on the store Wi-Fi, sign in with the manager login, then '
+        'Settings → Tablets — or tap "Use the manager login instead".',
   );
 
   static const tabletName = InfoText(

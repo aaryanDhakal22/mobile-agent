@@ -149,7 +149,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a set-up Pi asks for a code only', (tester) async {
+  testWidgets('a set-up Pi asks for a code; the manager login is the way out (2.0.3)', (tester) async {
     await _pump(
       tester,
       SetupProgress.start(
@@ -160,7 +160,23 @@ void main() {
     );
     expect(find.text("Join Lombardi's"), findsOneWidget);
     expect(find.byKey(const ValueKey('pair-code')), findsOneWidget);
-    expect(find.text('I have a pairing code instead'), findsNothing);
+    expect(find.byKey(const ValueKey('link-user')), findsNothing);
+    expect(find.textContaining('http://quiccpos-pi'), findsOneWidget, reason: 'the Pi web page is named');
+
+    // No tablet to give a code: the manager login joins it instead.
+    await tester.tap(find.byKey(const ValueKey('join-with-manager')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('link-user')), findsOneWidget);
+    expect(find.byKey(const ValueKey('link-pass')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pair-code')), findsNothing);
+    expect(find.text('Sign in with the store manager login to join this Pi.'), findsOneWidget);
+    expect(find.text('JOIN'), findsOneWidget);
+    expect(find.text('SET UP PI'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('join-with-manager')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('pair-code')), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('find the Pi lists discovered Pis and picking one goes to sign in', (tester) async {

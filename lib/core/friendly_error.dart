@@ -85,6 +85,13 @@ class FriendlyError {
         return f('This Pi is not set up yet', 'Set it up with the manager login', GuideId.piSwap);
       case 'invalid_code':
         return f('That code is wrong or expired', 'Get a new code and type it again');
+      case 'bad_login':
+        return f('Wrong username or password', 'Use the store manager login (the one for the Quicc website)');
+      case 'manager_login_unavailable':
+        return f(
+          "This Pi doesn't use the manager login",
+          'Get a pairing code on the Pi\'s web page: http://quiccpos-pi → Settings → Tablets',
+        );
       case 'name_required':
         return f('Give this tablet a name', 'For example "Counter tablet"');
       case 'credentials_required':
