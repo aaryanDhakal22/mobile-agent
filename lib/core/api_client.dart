@@ -335,6 +335,40 @@ class AgentClient {
     }
   }
 
+  /// `POST /api/pair/manager {username, password, tablet_name}` (Pi 2.4.2) —
+  /// join an already set-up Pi with the store manager login, when there is no
+  /// working tablet to get a code from. 401 `bad_login`, 429
+  /// `too_many_attempts`; an older Pi: missing route (405).
+  static Future<PairResult> pairWithManager({
+    required String address,
+    required String username,
+    required String password,
+    required String name,
+    http.Client? client,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final c = client ?? http.Client();
+    try {
+      final resp = await c
+          .post(
+            Uri.parse('${normalizeAgentAddress(address)}/api/pair/manager'),
+            headers: {'Content-Type': 'application/json', ...quibaseVersionHeaders(QuibaseVersion.current)},
+            body: jsonEncode({'username': username.trim(), 'password': password, 'tablet_name': name.trim()}),
+          )
+          .timeout(timeout);
+      _check(resp);
+      final r = PairResult.fromJson(jMap(jsonDecode(resp.body)));
+      if (r.key.isEmpty) throw const AgentException('Agent did not return a device key');
+      return r;
+    } on AgentException {
+      rethrow;
+    } catch (e) {
+      throw AgentException(_networkMessage(e), cause: e);
+    } finally {
+      if (client == null) c.close();
+    }
+  }
+
   /// `GET /api/session` (open) — is the Pi at [address] new (unconfigured)?
   static Future<AgentProbe> probe({
     required String address,

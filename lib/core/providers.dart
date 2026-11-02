@@ -54,6 +54,27 @@ class PairingNotifier extends Notifier<Pairing?> {
     state = p;
   }
 
+  /// An already set-up Pi, no tablet to give a code: join it with the store
+  /// manager login (Pi 2.4.2) and persist the key.
+  Future<void> pairWithManager({
+    required String address,
+    required String username,
+    required String password,
+    required String name,
+  }) async {
+    final base = normalizeAgentAddress(address);
+    final r = await AgentClient.pairWithManager(address: base, username: username, password: password, name: name);
+    final p = Pairing(
+      address: base,
+      deviceKey: r.key,
+      deviceName: r.name.isEmpty ? name.trim() : r.name,
+      deviceId: r.deviceId,
+    );
+    await ref.read(storageProvider).writePairing(p);
+    lastUnpairReason = null;
+    state = p;
+  }
+
   /// A new Pi: link it with the store manager login (the agent pairs this
   /// tablet in the same call) and persist the key.
   Future<LinkResult> link({

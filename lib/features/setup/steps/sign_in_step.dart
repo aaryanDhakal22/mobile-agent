@@ -21,7 +21,8 @@ const Duration kLinkRetryEvery = Duration(seconds: 15);
 /// "Sign in": a **new Pi** is set up with the store manager login (the Pi
 /// links to the restaurant, restores the open batch and pairs this tablet in
 /// one go); an already set-up Pi is joined with a 6-digit code from another
-/// tablet (Settings → Pair another tablet) or the Pi's web page.
+/// tablet (Settings → Pair another tablet) or the Pi's web page — or (2.0.3,
+/// Pi 2.4.2) with the manager login, when no working tablet is left.
 class SignInStep extends ConsumerStatefulWidget {
   const SignInStep({super.key});
 
@@ -38,6 +39,9 @@ class _SignInStepState extends ConsumerState<SignInStep> {
   bool _busy = false;
   FriendlyError? _error;
   bool _forceCode = false;
+
+  /// An already set-up Pi joined with the manager login instead of a code.
+  bool _managerJoin = false;
 
   /// The Pi has no internet yet: retrying the link automatically.
   Timer? _retry;
@@ -107,6 +111,34 @@ class _SignInStepState extends ConsumerState<SignInStep> {
     }
   }
 
+  Future<void> _pairManager() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(pairingProvider.notifier)
+          .pairWithManager(address: _p.piAddress, username: _user.text, password: _pass.text, name: _name.text);
+      ref.read(setupProvider.notifier).paired(store: _p.piStore);
+    } on AgentException catch (e) {
+      if (!mounted) return;
+      ref.read(localLogProvider).warn('setup', 'pair (manager): ${FriendlyError.from(e).details}');
+      setState(
+        () => _error = e.isMissingRoute
+            ? FriendlyError(
+                'This Pi needs an update to join with the manager login',
+                whatToDo: 'Get a pairing code on the Pi\'s web page: http://quiccpos-pi → Settings → Tablets',
+                details: FriendlyError.from(e).details,
+              )
+            : FriendlyError.from(e),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _startRetry() {
     _retry?.cancel();
     _retryIn = kLinkRetryEvery.inSeconds;
@@ -131,10 +163,11 @@ class _SignInStepState extends ConsumerState<SignInStep> {
     final p = ref.watch(setupProvider);
     final isNew = p?.piIsNew ?? false;
     final login = isNew && !_forceCode;
+    final managerJoin = !isNew && _managerJoin;
     final where = (p?.piStore ?? '').isNotEmpty ? p!.piStore : 'this Pi';
 
     final fields = <Widget>[
-      if (login) ...[
+      if (login || managerJoin) ...[
         _label('Manager username', SetupInfo.managerLogin),
         TextFormField(
           key: const ValueKey('link-user'),
@@ -154,7 +187,7 @@ class _SignInStepState extends ConsumerState<SignInStep> {
           textInputAction: TextInputAction.done,
           style: const TextStyle(fontSize: 20),
           validator: (v) => (v == null || v.isEmpty) ? 'Type the password' : null,
-          onFieldSubmitted: (_) => _link(),
+          onFieldSubmitted: (_) => login ? _link() : _pairManager(),
         ),
       ] else ...[
         _label('Pairing code', SetupInfo.pairingCode),
@@ -169,7 +202,9 @@ class _SignInStepState extends ConsumerState<SignInStep> {
           validator: (v) => (v == null || v.trim().length != 6) ? 'The code has 6 digits' : null,
         ),
         Text(
-          'Get a code on a tablet that already works: Settings → Pair another tablet.',
+          'Get a code on a tablet that already works: Settings → Pair another tablet. '
+          'No other tablet? Open http://quiccpos-pi on a phone on the store Wi-Fi → Settings → Tablets, '
+          'or use the manager login below.',
           style: TextStyle(fontSize: 15, color: context.palette.textSecondary),
         ),
       ],
@@ -201,6 +236,23 @@ class _SignInStepState extends ConsumerState<SignInStep> {
             ],
           ),
         ),
+      if (!isNew)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            key: const ValueKey('join-with-manager'),
+            onPressed: _busy
+                ? null
+                : () => setState(() {
+                    _managerJoin = !_managerJoin;
+                    _error = null;
+                  }),
+            child: Text(
+              _managerJoin ? 'I have a pairing code instead' : 'Use the manager login instead',
+              style: const TextStyle(fontSize: 16),
+            ),
+          ),
+        ),
       if (isNew)
         Align(
           alignment: Alignment.centerLeft,
@@ -224,8 +276,10 @@ class _SignInStepState extends ConsumerState<SignInStep> {
       title: login ? 'This Pi is new' : 'Join $where',
       subtitle: login
           ? "Sign in with the store manager login. Today's orders, drivers and settings come back by themselves."
+          : managerJoin
+          ? 'Sign in with the store manager login to join this Pi.'
           : 'Type the 6-digit code from another tablet.',
-      info: login ? SetupInfo.managerLogin : SetupInfo.pairingCode,
+      info: (login || managerJoin) ? SetupInfo.managerLogin : SetupInfo.pairingCode,
       body: Form(
         key: _formKey,
         child: ListView(
@@ -241,7 +295,7 @@ class _SignInStepState extends ConsumerState<SignInStep> {
         login ? (_busy ? 'SETTING UP…' : 'SET UP PI') : 'JOIN',
         icon: login ? Icons.login : Icons.link,
         busy: _busy,
-        onPressed: () => _loginMode ? _link() : _pair(),
+        onPressed: () => _loginMode ? _link() : (managerJoin ? _pairManager() : _pair()),
       ),
     );
   }
