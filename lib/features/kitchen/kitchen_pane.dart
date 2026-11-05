@@ -18,6 +18,7 @@ import '../common/widgets.dart';
 import '../deliveries/lava_glow.dart';
 import '../maps/geo_format.dart';
 import '../order_detail/order_detail_screen.dart';
+import 'kitchen_view.dart';
 import 'resend_kitchen.dart';
 import 'ticket_motion.dart';
 
@@ -65,16 +66,31 @@ class KitchenPane extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // 1.9.0: compared order by order (identical instances), so a refresh
     // or an event that changed nothing on the board doesn't rebuild it.
-    var kitchen = ref.watch(floorProvider.select((s) => SameOrders(s.kitchenByUrgency))).orders;
-    final later = ref.watch(floorProvider.select((s) => SameOrders(s.later))).orders;
+    final board = ref.watch(floorProvider.select((s) => SameOrders(s.kitchenByUrgency))).orders;
+    final allLater = ref.watch(floorProvider.select((s) => SameOrders(s.later))).orders;
     final greenTill = ref.watch(floorProvider.select((s) => s.floor?.greenTillMinutes ?? kDefaultGreenTillMinutes));
     final wave = ref.watch(floorProvider.select((s) => s.settings.features.paidWave));
-    // 1.7.1: customers waiting on a paid ticket go first (most urgent order
+    final view = ref.watch(kitchenViewProvider);
+    final loaded = ref.watch(floorProvider.select((s) => s.loaded));
+    // 2.0.4: new tickets the filter hides make their button blink.
+    final hidden = ref.read(kitchenHiddenNewProvider);
+    if (!hidden.seeded && loaded) hidden.seed(board.map((o) => o.id));
+    final blink = hidden.update(board, view.filter);
+    final counts = {
+      KitchenFilter.all: board.length,
+      KitchenFilter.delivery: board.where((o) => o.isDelivery).length,
+      KitchenFilter.pickup: board.where((o) => !o.isDelivery).length,
+    };
+    // 2.0.4: the filter and the order picked on this tablet.
+    var kitchen = board.where((o) => kitchenShows(view.filter, o)).toList();
+    if (view.sort == KitchenSort.received) kitchen = byReceived(kitchen);
+    final later = allLater.where((o) => kitchenShows(view.filter, o)).toList();
+    // 1.7.1: customers waiting on a paid ticket go first (the chosen order
     // kept within each part).
     if (wave) kitchen = [...kitchen.where((o) => o.paidNotReady), ...kitchen.where((o) => !o.paidNotReady)];
     // 1.9.0: what's on the board when the floor first loads never pops in.
     final seen = ref.read(kitchenSeenProvider);
-    if (!seen.seeded && ref.watch(floorProvider.select((s) => s.loaded))) seen.seed(kitchen.map((o) => o.id));
+    if (!seen.seeded && loaded) seen.seed(kitchen.map((o) => o.id));
     return RefreshIndicator(
       onRefresh: () => ref.read(floorProvider.notifier).refresh(),
       child: LayoutBuilder(
@@ -89,15 +105,22 @@ class KitchenPane extends ConsumerWidget {
               children: [
                 PaneHeader(
                   title: 'Kitchen',
-                  subtitle: kitchen.isEmpty ? null : '${kitchen.length} cooking · most urgent first',
+                  subtitle: kitchen.isEmpty ? null : '${kitchen.length} cooking · ${_orderText(view.sort)}',
                 ),
+                KitchenFilterRow(counts: counts, blink: blink),
                 if (kitchen.isEmpty && later.isEmpty)
                   SizedBox(
-                    height: (box.maxHeight - 200).clamp(200, 2000),
-                    child: const EmptyState(
+                    height: (box.maxHeight - 260).clamp(200, 2000),
+                    child: EmptyState(
                       icon: Icons.soup_kitchen_outlined,
-                      title: 'Nothing cooking',
-                      message: 'Accepted orders show here until they are marked ready.',
+                      title: switch (view.filter) {
+                        KitchenFilter.all => 'Nothing cooking',
+                        KitchenFilter.delivery => 'No deliveries cooking',
+                        KitchenFilter.pickup => 'No pickups cooking',
+                      },
+                      message: view.filter == KitchenFilter.all
+                          ? 'Accepted orders show here until they are marked ready.'
+                          : 'Tap All to see every order.',
                     ),
                   )
                 else if (kitchen.isEmpty)
@@ -121,6 +144,7 @@ class KitchenPane extends ConsumerWidget {
                       order: so,
                       greenTill: greenTill,
                       paidWave: wave,
+                      condensed: view.condensed,
                     ),
                   ),
                 if (later.isNotEmpty) LaterStrip(orders: later),
@@ -132,6 +156,11 @@ class KitchenPane extends ConsumerWidget {
     );
   }
 }
+
+String _orderText(KitchenSort sort) => switch (sort) {
+  KitchenSort.urgency => 'most urgent first',
+  KitchenSort.received => 'by ticket number',
+};
 
 /// Future orders already scheduled, at the end of Kitchen (2.0.0, owner:
 /// always fully viewable): each a whole greyed ticket — every item, when it
@@ -385,7 +414,17 @@ class KitchenCard extends ConsumerStatefulWidget {
   final StoredOrder order;
   final int greenTill;
   final bool paidWave;
-  const KitchenCard({super.key, required this.order, this.greenTill = kDefaultGreenTillMinutes, this.paidWave = true});
+
+  /// 2.0.4: the name and the item names only — no modifiers, item notes or
+  /// the order note (tap the ticket for the full order).
+  final bool condensed;
+  const KitchenCard({
+    super.key,
+    required this.order,
+    this.greenTill = kDefaultGreenTillMinutes,
+    this.paidWave = true,
+    this.condensed = false,
+  });
 
   @override
   ConsumerState<KitchenCard> createState() => _KitchenCardState();
@@ -473,7 +512,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
   Widget build(BuildContext context) {
     final so = widget.order;
     final o = so.order;
-    final arrived = so.status.sentAt ?? so.status.arrivalDate ?? o.receivedAt ?? so.status.acceptedAt;
+    final arrived = ticketArrival(so);
     final wave = widget.paidWave && so.paidNotReady;
     final motion = Motion.of(context, ref);
     final radius = BorderRadius.circular(QuiccRadius.md);
@@ -509,8 +548,8 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
               ],
               if (changed) ...[QuiccSpace.gapSm, ChangedTag(change: so.status.posChange!)],
               QuiccSpace.gapSm,
-              ItemLines(o.items, fontSize: kTicketItemSize, removed: o.removedItems),
-              if (o.notes.trim().isNotEmpty) ...[
+              ItemLines(o.items, fontSize: kTicketItemSize, removed: o.removedItems, details: !widget.condensed),
+              if (!widget.condensed && o.notes.trim().isNotEmpty) ...[
                 QuiccSpace.gapSm,
                 Text(
                   '“${o.notes.trim()}”',
