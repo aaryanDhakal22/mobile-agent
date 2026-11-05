@@ -188,6 +188,10 @@ class ItemLines extends StatelessWidget {
 
   /// Mark ADDED lines (rung at the terminal later) with a blue band.
   final bool marks;
+
+  /// Modifiers and item notes under each line (2.0.4: off on a condensed
+  /// kitchen ticket).
+  final bool details;
   const ItemLines(
     this.items, {
     super.key,
@@ -196,6 +200,7 @@ class ItemLines extends StatelessWidget {
     this.color,
     this.removed = const [],
     this.marks = true,
+    this.details = true,
   });
 
   @override
@@ -245,15 +250,16 @@ class ItemLines extends StatelessWidget {
       children: [
         for (final i in shown) ...[
           line(i),
-          for (final c in i.children)
-            Padding(
-              padding: const EdgeInsets.only(left: 16),
-              child: Text(
-                '+ ${itemTitle(c)}',
-                style: TextStyle(fontSize: fontSize - 2, color: color ?? muted),
+          if (details)
+            for (final c in i.children)
+              Padding(
+                padding: const EdgeInsets.only(left: 16),
+                child: Text(
+                  '+ ${itemTitle(c)}',
+                  style: TextStyle(fontSize: fontSize - 2, color: color ?? muted),
+                ),
               ),
-            ),
-          if (i.notes.trim().isNotEmpty)
+          if (details && i.notes.trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(left: 16),
               child: Text(

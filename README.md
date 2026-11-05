@@ -271,6 +271,26 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 2.0.4 — Kitchen filter, condensed tickets, ticket-number order
+
+- Kitchen has **All · Delivery · Pickup** buttons with live counts. Pickup is
+  everything that isn't a delivery (counter orders too). The filter also
+  applies to the Future strip, and each tablet keeps its choice until it is
+  changed, across restarts (`kitchen_filter` in SharedPreferences).
+- A new ticket the filter hides makes its button (and All) blink until that
+  button is tapped, or the ticket leaves the board. With Motion off it is a
+  solid amber highlight instead.
+- The gear on the right opens **Kitchen view**:
+  - **Tickets: Expanded / Condensed.** Condensed shows the name and the item
+    names, with no modifiers, item notes or order note. Tap a ticket for the
+    full order.
+  - **Order: Urgency / Ticket number.** Ticket number is the order received,
+    online and POS together, because their numbers come from different
+    counters. A paid ticket whose customer is waiting still goes first.
+  (`kitchen_condensed`, `kitchen_sort`; `lib/features/kitchen/kitchen_view.dart`.)
+- With hub 0.3.4, an online delivery that a cashier keyed into SoftTouch shows
+  its check as "POS #" on the ticket.
+
 ## 2.0.3 — join the Pi with the manager login (with agent 2.4.2)
 
 - A reinstalled tablet on an already set-up Pi could only join with a code

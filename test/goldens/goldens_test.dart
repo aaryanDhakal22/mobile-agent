@@ -50,7 +50,8 @@ Future<void> _loadFonts() async {
   for (final f in ['Barlow', 'BarlowCondensed', 'BarlowSemiCondensed']) {
     await _loadFont(f, [for (final x in w) 'assets/fonts/$f-$x.ttf']);
   }
-  final root = Platform.environment['FLUTTER_ROOT'] ?? File(Platform.resolvedExecutable).parent.parent.parent.parent.parent.path;
+  final root =
+      Platform.environment['FLUTTER_ROOT'] ?? File(Platform.resolvedExecutable).parent.parent.parent.parent.parent.path;
   final mf = '$root/bin/cache/artifacts/material_fonts';
   await _loadFont('MaterialIcons', ['$mf/MaterialIcons-Regular.otf']);
   await _loadFont('Roboto', ['$mf/Roboto-Regular.ttf', '$mf/Roboto-Medium.ttf', '$mf/Roboto-Bold.ttf']);
@@ -174,10 +175,21 @@ StoredOrder _changedPos({bool acked = false}) {
 /// The delivery floor plus a few pickups cooking, and [arrived] ringing.
 /// Ana (NEXT) has #1103 in her box; d2 and d5 sit in Joe's, so one delivery
 /// waits and NEXT can send her out.
-FloorState _floor({List<StoredOrder> arrived = const [], bool quiet = false, bool cameBack = false, StoredOrder? extra}) {
+FloorState _floor({
+  List<StoredOrder> arrived = const [],
+  bool quiet = false,
+  bool cameBack = false,
+  StoredOrder? extra,
+}) {
   final base = deliveryFloor();
   if (quiet) {
-    return base.withSnapshot(floor: base.floor!, current: const [], arrived: const [], drivers: base.drivers, at: clock.now());
+    return base.withSnapshot(
+      floor: base.floor!,
+      current: const [],
+      arrived: const [],
+      drivers: base.drivers,
+      at: clock.now(),
+    );
   }
   final current = [
     for (final o in base.orders.values)
@@ -193,7 +205,13 @@ FloorState _floor({List<StoredOrder> arrived = const [], bool quiet = false, boo
     if (cameBack) ...[_cameBack('cb1', 1100, '18 Linden Terrace', backMin: 9), _cameBack('cb2', 1104, '5 Elm Ct')],
     ?extra,
   ];
-  return base.withSnapshot(floor: base.floor!, current: current, arrived: arrived, drivers: base.drivers, at: clock.now());
+  return base.withSnapshot(
+    floor: base.floor!,
+    current: current,
+    arrived: arrived,
+    drivers: base.drivers,
+    at: clock.now(),
+  );
 }
 
 Future<ProviderContainer> _pump(
@@ -206,6 +224,7 @@ Future<ProviderContainer> _pump(
   StoredOrder? extra,
   UpdateState? update,
   bool island = false,
+  Map<String, Object> prefs = const {},
 }) async {
   tester.view.physicalSize = const Size(1280, 800);
   tester.view.devicePixelRatio = 1;
@@ -213,11 +232,12 @@ Future<ProviderContainer> _pump(
   final fake = FakeDeliveryFloor(_floor(arrived: arrived, quiet: quiet, cameBack: cameBack, extra: extra));
   final c = await deliveryContainer(
     fake,
-    prefs: const {
+    prefs: {
       'agent_address': 'http://192.168.1.219:8080',
       'device_key': 'qagt_test',
       'device_name': 'Counter tablet',
       'device_id': 'dev-1',
+      ...prefs,
     },
     extra: [
       agentClientProvider.overrideWith((ref) => null),
@@ -279,6 +299,17 @@ void main() {
     golden('kitchen', (tester) async {
       await _pump(tester, dark: dark);
       await _golden(tester, 'kitchen_$theme');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    // 2.0.4: condensed tickets by ticket number, Pickup only.
+    golden('kitchen condensed', (tester) async {
+      await _pump(
+        tester,
+        dark: dark,
+        prefs: const {'kitchen_condensed': true, 'kitchen_sort': 'received', 'kitchen_filter': 'pickup'},
+      );
+      await _golden(tester, 'kitchen_condensed_$theme');
       await tester.pumpWidget(const SizedBox());
     });
 
