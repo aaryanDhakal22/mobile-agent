@@ -458,7 +458,9 @@ class OutRunCard extends StatelessWidget {
   final String name;
   final DateTime? outAt;
   final List<StoredOrder> orders;
-  final Color color;
+
+  /// null = the accent.
+  final Color? color;
   final bool busy;
   final VoidCallback? onReturned;
 
@@ -471,7 +473,7 @@ class OutRunCard extends StatelessWidget {
     required this.name,
     required this.outAt,
     required this.orders,
-    this.color = QuiccColors.brand400,
+    this.color,
     required this.busy,
     required this.onReturned,
     this.onRecall,
@@ -492,7 +494,7 @@ class OutRunCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.delivery_dining, color: QuiccColors.brand400, size: 24),
+                      Icon(Icons.delivery_dining, color: QuiccColors.brand400, size: 24),
                       QuiccSpace.gapSm,
                       Flexible(
                         child: Text(
@@ -528,7 +530,7 @@ class OutRunCard extends StatelessWidget {
                       StopAddressLine(
                         key: ValueKey('out-stop-${o.id}'),
                         order: o,
-                        color: color,
+                        color: color ?? QuiccColors.brand400,
                         onTap: () => onOpen(o),
                       ),
                 ],

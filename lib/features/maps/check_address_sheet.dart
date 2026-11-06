@@ -199,7 +199,7 @@ class _CandidateListState extends ConsumerState<CandidateList> {
           child: ListTile(
             key: ValueKey('candidate-$i'),
             minVerticalPadding: 14,
-            leading: const Icon(Icons.place_outlined, color: QuiccColors.brand400, size: 30),
+            leading: Icon(Icons.place_outlined, color: QuiccColors.brand400, size: 30),
             title: Text(c.title, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600)),
             trailing: _sending == i
                 ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 3))

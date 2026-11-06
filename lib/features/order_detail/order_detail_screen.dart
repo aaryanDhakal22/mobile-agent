@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../home/home_nav.dart';
 import '../kitchen/ready_button.dart';
 import '../common/island.dart';
+import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/providers.dart';
+import '../../core/time.dart';
 import '../../theme/quicc_colors.dart';
 import '../arrived/accept_controls.dart';
 import '../arrived/time_picker.dart';
@@ -14,6 +16,7 @@ import '../common/widgets.dart';
 import '../kitchen/resend_kitchen.dart';
 import '../maps/check_address_sheet.dart';
 import '../maps/delivery_map.dart';
+import 'future_actions.dart';
 import 'not_delivered.dart';
 
 /// Full order: items (size / modifiers / notes), customer, address, kitchen
@@ -38,7 +41,7 @@ class OrderDetailScreen extends ConsumerWidget {
           children: [
             Text(
               so.displayNumber,
-              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
             ),
             if (so.isPos) ...[const SizedBox(width: 10), const PosTag(size: 14)],
             const SizedBox(width: 16),
@@ -223,7 +226,7 @@ class _ItemBlock extends StatelessWidget {
                 width: 44,
                 child: Text(
                   '${item.quantity}×',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: QuiccColors.brand400),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: QuiccColors.brand400),
                 ),
               ),
               Expanded(
@@ -388,7 +391,7 @@ class _ActionsState extends ConsumerState<_Actions> {
   }
 
   /// MARK DELIVERED (2.0.0): no dialog — it goes to Unassigned on the
-  /// Drivers tab at once, with an UNDO in the pill.
+  /// Drivers tab at once, with an UNDO in the pill; 2.0.5: the details close.
   Future<void> _markDelivered(StoredOrder so) async {
     final island = Island.maybeOf(context);
     final floor = ref.read(floorProvider.notifier);
@@ -396,6 +399,8 @@ class _ActionsState extends ConsumerState<_Actions> {
     setState(() => _busy = true);
     try {
       await floor.markDelivered(so.id);
+      // 2.0.5 (owner): done here — back to where it was opened from, like READY.
+      if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
       island?.show(
         '$n delivered · Unassigned',
         kind: IslandKind.success,
@@ -432,6 +437,12 @@ class _ActionsState extends ConsumerState<_Actions> {
         if (so.isCameBack) const _CameBackNote(),
         if (so.state == OrderState.arrived) AcceptControls(key: ValueKey('accept-${so.id}'), order: so),
         if (so.state == OrderState.scheduled) _LaterPanel(order: so),
+        // 2.0.5: a future order still ringing can be made now / moved /
+        // printed / cancelled from here too.
+        if (so.state == OrderState.arrived && so.status.future) ...[
+          const SizedBox(height: 12),
+          _LaterPanel(order: so),
+        ],
         if (so.state == OrderState.accepted) ReadyButton(enabled: !_busy, onReady: (callout) => _ready(so, callout)),
         if (so.state != OrderState.arrived && so.state != OrderState.scheduled) ...[
           const SizedBox(height: 10),
@@ -578,19 +589,176 @@ class _CameBackNote extends StatelessWidget {
   );
 }
 
-/// A scheduled future order: when it is due, when it rings again, and
-/// CHANGE LEAD TIME (the same picker).
-class _LaterPanel extends ConsumerWidget {
+/// A waiting future order: when it is due, when it rings again, and its
+/// actions (2.0.5, Pi 2.4.3) — MAKE NOW, CHANGE DUE TIME, PRINT NOW, CHANGE
+/// LEAD TIME and CANCEL ORDER. An older Pi has only CHANGE LEAD TIME.
+class _LaterPanel extends ConsumerStatefulWidget {
   final StoredOrder order;
   const _LaterPanel({required this.order});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final so = order;
+  ConsumerState<_LaterPanel> createState() => _LaterPanelState();
+}
+
+class _LaterPanelState extends ConsumerState<_LaterPanel> {
+  String? _busy;
+
+  Future<void> _run(String what, Future<void> Function() action) async {
+    if (_busy != null) return;
+    setState(() => _busy = what);
+    try {
+      await action();
+    } finally {
+      if (mounted) setState(() => _busy = null);
+    }
+  }
+
+  void _error(Object e, String lead) {
+    if (!mounted) return;
+    if (e is AgentException && e.code == kFutureActionsUnsupported) {
+      toast(context, 'This Pi needs an update for that.', error: true);
+      return;
+    }
+    toastError(context, e, lead: lead, area: 'order');
+  }
+
+  Future<void> _makeNow(StoredOrder so) async {
+    final fs = ref.read(floorProvider);
+    final due = so.dueAt;
+    final minutes = await showMakeNowDialog(
+      context,
+      base: defaultMinutesFor(so, fs.settings.times),
+      subtitle: due == null ? null : 'Due ${dayClock(due)}',
+    );
+    if (minutes == null || !mounted) return;
+    final island = Island.maybeOf(context);
+    await _run('make', () async {
+      try {
+        final o = await ref.read(floorProvider.notifier).makeNow(so.id, minutes);
+        island?.show('${o.displayNumber} is cooking · $minutes min', kind: IslandKind.success);
+        if (mounted) {
+          ref.read(homeNavProvider.notifier).go(HomeDestination.kitchen);
+          Navigator.of(context).popUntil((r) => r.isFirst);
+        }
+      } catch (e) {
+        _error(e, 'Not made now');
+      }
+    });
+  }
+
+  Future<void> _changeDue(StoredOrder so) async {
+    final next = await showDuePicker(
+      context,
+      current: so.dueAt ?? timeNow(),
+      leadMinutes: so.status.scheduledLeadMinutes,
+    );
+    if (next == null || !mounted) return;
+    await _run('due', () async {
+      try {
+        await ref.read(floorProvider.notifier).changeDue(so.id, next);
+        if (mounted) toast(context, 'Due ${dayClock(next)}');
+      } catch (e) {
+        _error(e, 'Due time not changed');
+      }
+    });
+  }
+
+  Future<void> _printNow(StoredOrder so) async {
+    final what = await showPrintNowDialog(context);
+    if (what == null || !mounted) return;
+    await _run('print', () async {
+      try {
+        final r = await ref
+            .read(floorProvider.notifier)
+            .printNow(so.id, kitchen: what.withKitchen, receipt: what.withReceipt);
+        if (!mounted) return;
+        final where = r.printed.isEmpty ? '' : ' — ${r.printed.join(', ')}';
+        toast(
+          context,
+          '${what.label} printed$where${r.failed.isEmpty ? '' : '. Not printed: ${r.failed.join(', ')}'}',
+          error: r.failed.isNotEmpty && r.printed.isEmpty,
+        );
+      } catch (e) {
+        _error(e, 'Nothing printed');
+      }
+    });
+  }
+
+  Future<void> _cancel(StoredOrder so) async {
+    if (!await confirmCancelFuture(context, so) || !mounted) return;
+    final island = Island.maybeOf(context);
+    await _run('cancel', () async {
+      try {
+        await ref.read(floorProvider.notifier).cancelFuture(so.id);
+        island?.show('${so.displayNumber} cancelled', kind: IslandKind.info);
+        if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+      } catch (e) {
+        _error(e, 'Not cancelled');
+      }
+    });
+  }
+
+  Future<void> _changeLead(StoredOrder so) async {
+    final fs = ref.read(floorProvider);
     final due = so.dueAt;
     final lead = so.status.scheduledLeadMinutes;
-    final ring = so.status.ringAt ?? (due != null && lead != null ? due.subtract(Duration(minutes: lead)) : null);
+    final next = await showLeadTimeDialog(
+      context,
+      base: futureLeadFor(so, fs.settings.times, fs.floor?.deliveryTargetMinutes ?? 0),
+      current: lead,
+      subtitle: due == null ? null : 'Due ${dayClock(due)}',
+    );
+    if (next == null || next == lead || !mounted) return;
+    try {
+      await ref.read(floorProvider.notifier).schedule(so.id, next);
+      if (mounted) toast(context, 'Lead time $next min');
+    } catch (e) {
+      if (mounted) toastError(context, e, lead: 'Lead time not changed', area: 'order');
+    }
+  }
+
+  Widget _button(String key, String label, IconData icon, VoidCallback onPressed, {bool filled = false, Color? color}) {
+    final busy = _busy == key;
+    final child = busy
+        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3))
+        : Icon(icon);
+    final text = _OneLine(label);
+    return SizedBox(
+      height: 56,
+      child: filled
+          ? FilledButton.icon(
+              key: ValueKey('future-$key'),
+              onPressed: _busy == null ? onPressed : null,
+              icon: child,
+              label: text,
+            )
+          : OutlinedButton.icon(
+              key: ValueKey('future-$key'),
+              style: color == null
+                  ? null
+                  : OutlinedButton.styleFrom(
+                      foregroundColor: color,
+                      side: BorderSide(color: color, width: 1.5),
+                    ),
+              onPressed: _busy == null ? onPressed : null,
+              icon: child,
+              label: text,
+            ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final so = widget.order;
+    final due = so.dueAt;
+    final lead = so.status.scheduledLeadMinutes;
+    final ring = so.state != OrderState.scheduled
+        ? null
+        : so.status.ringAt ?? (due != null && lead != null ? due.subtract(Duration(minutes: lead)) : null);
+    final actionsOff = ref.watch(futureActionsUnsupportedProvider);
+    final moved = so.status.dueMovedFrom;
     return Container(
+      key: const ValueKey('later-panel'),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: context.palette.bgElevated,
@@ -603,9 +771,15 @@ class _LaterPanel extends ConsumerWidget {
           const Eyebrow('Later order'),
           const SizedBox(height: 6),
           Text(
-            due == null ? 'Waiting for its time' : 'Due ${clock(due)}',
+            due == null ? 'Waiting for its time' : 'Due ${dayClock(due)}',
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
           ),
+          if (moved != null)
+            Text(
+              'Moved here — the customer asked for ${dayClock(moved)}.',
+              key: const ValueKey('due-moved'),
+              style: TextStyle(color: context.palette.textSecondary),
+            ),
           if (ring != null)
             Text(
               'Rings again at ${clock(ring)}${lead == null ? '' : ' ($lead min before)'}. '
@@ -613,29 +787,42 @@ class _LaterPanel extends ConsumerWidget {
               style: TextStyle(color: context.palette.textSecondary),
             ),
           const SizedBox(height: 12),
-          SizedBox(
-            height: 56,
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                final fs = ref.read(floorProvider);
-                final next = await showLeadTimeDialog(
-                  context,
-                  base: futureLeadFor(so, fs.settings.times, fs.floor?.deliveryTargetMinutes ?? 0),
-                  current: lead,
-                  subtitle: due == null ? null : 'Due ${clock(due)}',
-                );
-                if (next == null || next == lead || !context.mounted) return;
-                try {
-                  await ref.read(floorProvider.notifier).schedule(so.id, next);
-                  if (context.mounted) toast(context, 'Lead time $next min');
-                } catch (e) {
-                  if (context.mounted) toastError(context, e, lead: 'Lead time not changed', area: 'order');
-                }
-              },
-              icon: const Icon(Icons.schedule),
-              label: const Text('CHANGE LEAD TIME'),
+          if (!actionsOff) ...[
+            _button('make-now', 'MAKE NOW', Icons.local_fire_department, () => _makeNow(so), filled: true),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(child: _button('due', 'CHANGE DUE TIME', Icons.event, () => _changeDue(so))),
+                const SizedBox(width: 10),
+                Expanded(child: _button('print', 'PRINT NOW', Icons.print_outlined, () => _printNow(so))),
+              ],
             ),
+            const SizedBox(height: 10),
+          ],
+          Row(
+            children: [
+              if (so.state == OrderState.scheduled)
+                Expanded(child: _button('lead', 'CHANGE LEAD TIME', Icons.schedule, () => _changeLead(so))),
+              if (so.state == OrderState.scheduled && !actionsOff) const SizedBox(width: 10),
+              if (!actionsOff)
+                Expanded(
+                  child: _button(
+                    'cancel',
+                    'CANCEL ORDER',
+                    Icons.cancel_outlined,
+                    () => _cancel(so),
+                    color: QuiccColors.statusVoided,
+                  ),
+                ),
+            ],
           ),
+          if (actionsOff) ...[
+            const SizedBox(height: 8),
+            Text(
+              'This Pi needs an update to make it now, move it, print it or cancel it.',
+              style: TextStyle(color: context.palette.textMuted),
+            ),
+          ],
         ],
       ),
     );

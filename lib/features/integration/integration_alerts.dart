@@ -42,14 +42,14 @@ class IntegrationBanner extends ConsumerWidget {
             color: QuiccColors.statusVoided,
             child: Row(
               children: [
-                const Icon(Icons.link_off, color: QuiccColors.brand900, size: 26),
+                Icon(Icons.link_off, color: QuiccColors.brand900, size: 26),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     p.text,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: QuiccColors.brand900),
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: QuiccColors.brand900),
                   ),
                 ),
               ],

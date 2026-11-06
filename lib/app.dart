@@ -18,6 +18,7 @@ import 'features/setup/setup_controller.dart';
 import 'features/setup/setup_entry.dart';
 import 'features/setup/setup_wizard.dart';
 import 'features/update/update_prompt.dart';
+import 'theme/quicc_colors.dart';
 import 'theme/quicc_theme.dart';
 
 class MobileAgentApp extends ConsumerStatefulWidget {
@@ -98,6 +99,11 @@ class _MobileAgentAppState extends ConsumerState<MobileAgentApp> {
     final paired = ref.watch(pairingProvider.select((p) => p != null));
     final setup = ref.watch(setupActiveProvider);
     final themeMode = ref.watch(themeModeProvider);
+    // 2.0.5: the store's accent. The brand colours are read straight from
+    // QuiccColors all over the app, so a change rebuilds every widget once.
+    if (QuiccColors.setAccent(ref.watch(storeLookProvider.select((l) => l.accent)))) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => rebuildAllWidgets());
+    }
     return MaterialApp(
       title: 'Quibase',
       // Developer Config → Performance overlay (1.9.0).
@@ -138,3 +144,15 @@ Widget pairedOverlays(Widget child, {Key? islandKey, GlobalKey<NavigatorState>? 
     child: IntegrationIslandFeed(child: UpdatePrompt(child: child)),
   ),
 );
+
+/// Marks every element dirty (after the store's accent changed): the next
+/// frame rebuilds the whole tree, keeping all state.
+void rebuildAllWidgets() {
+  void mark(Element e) {
+    e.markNeedsBuild();
+    e.visitChildren(mark);
+  }
+
+  final root = WidgetsBinding.instance.rootElement;
+  if (root != null) mark(root);
+}

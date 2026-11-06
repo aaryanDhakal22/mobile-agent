@@ -95,7 +95,7 @@ class _Card extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.bolt, size: 36, color: QuiccColors.brand900),
+                  Icon(Icons.bolt, size: 36, color: QuiccColors.brand900),
                   QuiccSpace.gapMd,
                   Flexible(
                     child: Column(

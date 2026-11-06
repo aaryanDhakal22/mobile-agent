@@ -16,13 +16,14 @@ class QuiccNavDestination {
 
   /// Count shown as a dot on the icon (hidden when 0).
   final int badge;
-  final Color badgeColor;
+  /// null = the accent.
+  final Color? badgeColor;
   const QuiccNavDestination({
     required this.icon,
     required this.selectedIcon,
     required this.label,
     this.badge = 0,
-    this.badgeColor = QuiccColors.brand400,
+    this.badgeColor,
   });
 }
 
@@ -381,7 +382,7 @@ class _NavItem extends StatelessWidget {
         children: [
           Badge(
             isLabelVisible: destination.badge > 0,
-            backgroundColor: destination.badgeColor,
+            backgroundColor: destination.badgeColor ?? QuiccColors.brand400,
             textColor: QuiccColors.brand900,
             offset: const Offset(4, -4),
             label: Text('${destination.badge}', style: QuiccType.number(QuiccType.caption, weight: FontWeight.w800)),

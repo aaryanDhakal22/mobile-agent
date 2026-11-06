@@ -273,7 +273,7 @@ class _CameBackRowState extends ConsumerState<CameBackRow> with SingleTickerProv
                       key: ValueKey('came-back-progress-${so.id}'),
                       widthFactor: _hold.value,
                       heightFactor: 1,
-                      child: const ColoredBox(color: QuiccColors.brand400),
+                      child: ColoredBox(color: QuiccColors.brand400),
                     ),
                   ),
                 ),

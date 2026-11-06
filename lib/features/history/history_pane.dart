@@ -169,7 +169,7 @@ class HistoryRow extends StatelessWidget {
                 width: 96,
                 child: Text(
                   order.displayNumber,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: QuiccColors.brand400),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: QuiccColors.brand400),
                 ),
               ),
               Expanded(

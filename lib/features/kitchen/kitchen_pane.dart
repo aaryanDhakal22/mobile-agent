@@ -27,6 +27,9 @@ import 'ticket_motion.dart';
 const double kTicketWidth = 340;
 const double kTicketGap = QuiccSpace.lg;
 
+/// Text on [bg]: the deep accent on a light colour, white on a dark one.
+Color inkOn(Color bg) => bg.computeLuminance() > 0.4 ? QuiccColors.brand900 : Colors.white;
+
 /// How late a ticket looks: green until [greenTill] minutes after the order
 /// arrived, then amber, fully red at twice [greenTill].
 Color lateColor(Duration sinceArrival, int greenTill) {
@@ -139,6 +142,8 @@ class KitchenPane extends ConsumerWidget {
                     columns: cols,
                     gap: kTicketGap,
                     deal: dealIntoColumns,
+                    stillOnBoard: {for (final o in board) o.id},
+                    view: view.filter,
                     itemBuilder: (context, so, ghost) => KitchenCard(
                       key: ValueKey(ghost ? 'ghost-${so.id}' : so.id),
                       order: so,
@@ -370,7 +375,7 @@ ThemeData paperTheme(ThemeData base) {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: QuiccColors.brand700,
-        side: const BorderSide(color: QuiccColors.brand200, width: 1.5),
+        side: BorderSide(color: QuiccColors.brand200, width: 1.5),
       ),
     ),
   );
@@ -523,6 +528,9 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
       select: (now) => _cardTime(now, so, arrived, wave),
       builder: (context, t, now) {
         final tone = lateColor(_sinceArrived(now, arrived), widget.greenTill);
+        // 2.0.5: the bar and outline in the store's colour for the type; the
+        // timer keeps green → red.
+        final bar = ref.watch(storeLookProvider).ticketFor(so);
         final hot = t.hot;
         _syncWave(wave && motion.full, motion.scale(hot ? kWaitingLavaHot : kWaitingLava));
         // 1.8.0: changed at the POS (pending, or OK'd < 10 min ago).
@@ -588,7 +596,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
         final outline = changed
             ? Border.all(color: QuiccColors.changeBlue, width: 4)
             : !wave
-            ? Border.all(color: tone, width: 2)
+            ? Border.all(color: bar, width: 2)
             // Motion off: the thick red outline stands in for the halo.
             : Border.all(color: hot ? kWaitingRedHot : kWaitingRed, width: motion.full ? 2 : 4);
         final card = Theme(
@@ -610,7 +618,7 @@ class _KitchenCardState extends ConsumerState<KitchenCard> with SingleTickerProv
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _CardBar(order: so, tone: tone, waiting: waiting),
+                    _CardBar(order: so, tone: bar, waiting: waiting),
                     body,
                   ],
                 ),
@@ -665,8 +673,9 @@ class ChangedTag extends StatelessWidget {
   }
 }
 
-/// The ticket's header bar in the urgency colour: the number (the POS check
-/// # with a POS tag for a POS order), PAID, and the order type.
+/// The ticket's header bar in the store's colour for its type (2.0.5; was
+/// the urgency colour): the number (the POS check # with a POS tag for a POS
+/// order), PAID, and the order type.
 class _CardBar extends StatelessWidget {
   final StoredOrder order;
   final Color tone;
@@ -680,7 +689,7 @@ class _CardBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final so = order;
     final w = waiting;
-    final ink = w == null ? QuiccColors.brand900 : Colors.white;
+    final ink = w == null ? inkOn(tone) : Colors.white;
     final posCheck = so.status.posCheckNumber;
     // Each side shrinks rather than overflow on a narrow ticket.
     final row = Row(
@@ -795,7 +804,8 @@ class _CardBar extends StatelessWidget {
 }
 
 /// "12:03" — the ticket's one timer (1.9.2): time since the order was
-/// placed (sent to the kitchen), coloured like the ticket.
+/// placed (sent to the kitchen). 2.0.5: a pill in the lateness colour
+/// (green → amber → red), now that the bar shows the order type.
 class _TimerLine extends StatelessWidget {
   final DateTime? arrived;
   final Color tone;
@@ -805,15 +815,14 @@ class _TimerLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return Align(
       alignment: Alignment.centerLeft,
-      child: ClockText(
-        (now) => duration(_sinceArrived(now, arrived)),
-        textKey: const ValueKey('ticket-timer'),
-        style: QuiccType.number(
-          QuiccType.title,
-          weight: FontWeight.w700,
-          // Darker than the bar so it reads on the white ticket.
-          color: Color.lerp(tone, Colors.black, 0.35),
-          height: 1.1,
+      child: Container(
+        key: const ValueKey('ticket-timer-pill'),
+        padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.sm, vertical: 2),
+        decoration: BoxDecoration(color: tone, borderRadius: BorderRadius.circular(QuiccRadius.sm)),
+        child: ClockText(
+          (now) => duration(_sinceArrived(now, arrived)),
+          textKey: const ValueKey('ticket-timer'),
+          style: QuiccType.number(QuiccType.title, weight: FontWeight.w700, color: inkOn(tone), height: 1.1),
         ),
       ),
     );

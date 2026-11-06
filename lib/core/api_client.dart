@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:isolate';
 import 'dart:typed_data';
+import 'dart:ui' show Color;
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
@@ -235,6 +236,10 @@ const String kNotDeliveredUnsupported = 'not_delivered_unsupported';
 /// Pi 2.4.0 routes missing (an older Pi): MARK DELIVERED / Back to
 /// deliveries, moving deliveries between drivers, the pool's stop order.
 const String kUnassignedUnsupported = 'unassigned_unsupported';
+
+/// Pi 2.4.3 routes missing (an older Pi): a future order's MAKE NOW /
+/// CHANGE DUE TIME / PRINT NOW / CANCEL, and the store's colours.
+const String kFutureActionsUnsupported = 'future_actions_unsupported';
 
 /// [AgentException.code] for SEARCH ADDRESS (1.7.2) on a Pi or main without
 /// the search (404 / 405 / 501): "This Pi needs an update".
@@ -504,6 +509,93 @@ class AgentClient {
     );
     return body is Map ? StoredOrder.fromJson(jMap(body)) : null;
   });
+
+  // --- a waiting future order's actions (Pi 2.4.3) -------------------------------
+
+  /// `POST /api/orders/{id}/make-now {prep_minutes}` — MAKE NOW: out of the
+  /// future and accepted at once (kitchen #, tickets + receipt). 502
+  /// `nothing_printed` = not accepted (it rings as a new order).
+  Future<StoredOrder> makeNow(String id, int prepMinutes) => _futureRoute(
+    () async => StoredOrder.fromJson(
+      jMap(
+        await _send(
+          'POST',
+          '/api/orders/${Uri.encodeComponent(id)}/make-now',
+          body: {'prep_minutes': prepMinutes},
+          timeout: printTimeout,
+          mayRevoke: false,
+        ),
+      ),
+    ),
+  );
+
+  /// `POST /api/orders/{id}/due {promised_at}` — CHANGE DUE TIME on the Pi
+  /// (main keeps the online ordering company's time); the ring time follows.
+  Future<StoredOrder> changeDue(String id, DateTime due) => _futureRoute(
+    () async => StoredOrder.fromJson(
+      jMap(
+        await _send(
+          'POST',
+          '/api/orders/${Uri.encodeComponent(id)}/due',
+          body: {'promised_at': due.toUtc().toIso8601String()},
+          mayRevoke: false,
+        ),
+      ),
+    ),
+  );
+
+  /// `POST /api/orders/{id}/print-now {kitchen, receipt}` — PRINT NOW: the
+  /// early tickets (DO NOT MAKE / FUTURE) of a waiting future order.
+  Future<KitchenResend> printNow(String id, {required bool kitchen, required bool receipt}) => _futureRoute(() async {
+    final body = await _send(
+      'POST',
+      '/api/orders/${Uri.encodeComponent(id)}/print-now',
+      body: {'kitchen': kitchen, 'receipt': receipt},
+      timeout: printTimeout,
+      mayRevoke: false,
+    );
+    return body is Map ? KitchenResend.fromJson(jMap(body)) : const KitchenResend();
+  });
+
+  /// `POST /api/orders/{id}/cancel` — CANCEL a waiting future order.
+  Future<StoredOrder> cancelFuture(String id) => _futureRoute(
+    () async => StoredOrder.fromJson(
+      jMap(await _send('POST', '/api/orders/${Uri.encodeComponent(id)}/cancel', mayRevoke: false)),
+    ),
+  );
+
+  /// `PUT /api/settings/look` — the store's colours (any subset).
+  Future<StoreLook> setLook({Color? accent, Color? delivery, Color? pickup, Color? counter}) => _futureRoute(() async {
+    final tickets = {
+      if (delivery != null) 'delivery': hexOfColor(delivery),
+      if (pickup != null) 'pickup': hexOfColor(pickup),
+      if (counter != null) 'counter': hexOfColor(counter),
+    };
+    final body = await _send(
+      'PUT',
+      '/api/settings/look',
+      body: {if (accent != null) 'accent': hexOfColor(accent), if (tickets.isNotEmpty) 'tickets': tickets},
+      mayRevoke: false,
+    );
+    return StoreLook.fromJson(jMap(body));
+  });
+
+  /// A missing 2.4.3 route (405, or a 404 that isn't the route's own
+  /// `not_found`) is [kFutureActionsUnsupported]; `{"code"}` / `{"error"}`
+  /// moves to [AgentException.code].
+  static Future<T> _futureRoute<T>(Future<T> Function() call) async {
+    try {
+      return await call();
+    } on AgentException catch (e) {
+      final code = e.code ?? (jStr(e.body['code']).isNotEmpty ? jStr(e.body['code']) : null);
+      final missing = e.statusCode == 405 || (e.statusCode == 404 && code != 'not_found');
+      if (missing) {
+        throw AgentException(e.message, statusCode: e.statusCode, code: kFutureActionsUnsupported, body: e.body);
+      }
+      if (code != e.code) throw AgentException(e.message, statusCode: e.statusCode, code: code, body: e.body);
+      rethrow;
+    }
+  }
 
   /// `POST /api/orders/{id}/geo/choose {index}` — staff picked candidate
   /// [index] of an ambiguous address; main's answer arrives later as an

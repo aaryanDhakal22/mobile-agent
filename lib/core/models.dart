@@ -2,6 +2,8 @@
 // canonical order snapshot inside it (contract/main.md §10.1). All parsing is
 // defensive — see json.dart.
 
+import 'dart:ui' show Color;
+
 import 'callout_models.dart';
 import 'delivery_models.dart';
 import 'json.dart';
@@ -342,6 +344,13 @@ class OrderStatus {
   final bool earlyKitchen;
   final bool earlyReceipt;
 
+  /// Pi 2.4.3: MAKE NOW took a future order out of the future.
+  final bool madeNow;
+
+  /// Pi 2.4.3: the due time was moved on the Pi (CHANGE DUE TIME); this is
+  /// the online ordering company's own time.
+  final DateTime? dueMovedFrom;
+
   const OrderStatus({
     required this.state,
     this.arrivalDate,
@@ -387,6 +396,8 @@ class OrderStatus {
     this.markedDelivered,
     this.earlyKitchen = false,
     this.earlyReceipt = false,
+    this.madeNow = false,
+    this.dueMovedFrom,
   });
 
   factory OrderStatus.fromJson(Map<String, dynamic> json) => OrderStatus(
@@ -434,6 +445,8 @@ class OrderStatus {
     markedDelivered: MarkedDelivered.fromJson(json['marked_delivered']),
     earlyKitchen: jBool(json['early_kitchen']),
     earlyReceipt: jBool(json['early_receipt']),
+    madeNow: jBool(json['made_now']),
+    dueMovedFrom: jDate(json['due_moved_from']),
   );
 
   /// The same status in [driverId]'s pool (null = unassigned) — the
@@ -484,6 +497,8 @@ class OrderStatus {
     markedDelivered: markedDelivered,
     earlyKitchen: earlyKitchen,
     earlyReceipt: earlyReceipt,
+    madeNow: madeNow,
+    dueMovedFrom: dueMovedFrom,
   );
 
   /// The optimistic copy of a floor step shown before the Pi answers
@@ -548,6 +563,8 @@ class OrderStatus {
     markedDelivered: markedDelivered ?? this.markedDelivered,
     earlyKitchen: earlyKitchen,
     earlyReceipt: earlyReceipt,
+    madeNow: madeNow,
+    dueMovedFrom: dueMovedFrom,
   );
 }
 
@@ -1546,12 +1563,16 @@ class FloorSettings {
   final FinishingSettings finishing;
   final CalloutSettings callout;
 
+  /// Pi 2.4.3: the store's colours (null on an older Pi).
+  final StoreLook? look;
+
   const FloorSettings({
     this.features = const FeatureToggles(),
     this.tickets = const TicketToggles(),
     this.times = const DefaultTimes(),
     this.finishing = const FinishingSettings(),
     this.callout = const CalloutSettings(),
+    this.look,
   });
 
   factory FloorSettings.fromJson(Map<String, dynamic> j) => FloorSettings(
@@ -1560,6 +1581,7 @@ class FloorSettings {
     times: DefaultTimes.fromJson(jMap(j['times'])),
     finishing: FinishingSettings.fromJson(jMap(j['finishing'])),
     callout: CalloutSettings.fromJson(jMap(j['callout'])),
+    look: j['look'] is Map ? StoreLook.fromJson(jMap(j['look'])) : null,
   );
 
   FloorSettings copyWith({
@@ -1568,14 +1590,80 @@ class FloorSettings {
     DefaultTimes? times,
     FinishingSettings? finishing,
     CalloutSettings? callout,
+    StoreLook? look,
   }) => FloorSettings(
     features: features ?? this.features,
     tickets: tickets ?? this.tickets,
     times: times ?? this.times,
     finishing: finishing ?? this.finishing,
     callout: callout ?? this.callout,
+    look: look ?? this.look,
   );
 }
+
+/// Pi 2.4.3: the store's colours - the accent every tablet (and the Pi's
+/// web page) is drawn in, and each Kitchen ticket type's bar colour.
+class StoreLook {
+  static const defaultAccent = Color(0xFFAC94F4);
+  static const defaultTicket = Color(0xFF3B82F6);
+
+  final Color accent;
+  final Color delivery;
+  final Color pickup;
+  final Color counter;
+
+  const StoreLook({
+    this.accent = defaultAccent,
+    this.delivery = defaultTicket,
+    this.pickup = defaultTicket,
+    this.counter = defaultTicket,
+  });
+
+  factory StoreLook.fromJson(Map<String, dynamic> j) {
+    final t = jMap(j['tickets']);
+    return StoreLook(
+      accent: parseHexColor(j['accent']) ?? defaultAccent,
+      delivery: parseHexColor(t['delivery']) ?? defaultTicket,
+      pickup: parseHexColor(t['pickup']) ?? defaultTicket,
+      counter: parseHexColor(t['counter']) ?? defaultTicket,
+    );
+  }
+
+  StoreLook copyWith({Color? accent, Color? delivery, Color? pickup, Color? counter}) => StoreLook(
+    accent: accent ?? this.accent,
+    delivery: delivery ?? this.delivery,
+    pickup: pickup ?? this.pickup,
+    counter: counter ?? this.counter,
+  );
+
+  /// A Kitchen ticket's bar colour by its type (counter = dine-in / counter).
+  Color ticketFor(StoredOrder so) => so.isDelivery
+      ? delivery
+      : so.order.fulfillment.type == FulfillmentType.pickup
+      ? pickup
+      : counter;
+
+  @override
+  bool operator ==(Object other) =>
+      other is StoreLook &&
+      other.accent == accent &&
+      other.delivery == delivery &&
+      other.pickup == pickup &&
+      other.counter == counter;
+
+  @override
+  int get hashCode => Object.hash(accent, delivery, pickup, counter);
+}
+
+/// '#RRGGBB' -> an opaque colour (null when it isn't one).
+Color? parseHexColor(Object? v) {
+  final s = v is String ? v.trim() : '';
+  if (!RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(s)) return null;
+  return Color(0xFF000000 | int.parse(s.substring(1), radix: 16));
+}
+
+/// An opaque colour -> '#RRGGBB'.
+String hexOfColor(Color c) => '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
 
 /// One problem the store hub reported (`integration.problems[]`).
 class IntegrationProblem {

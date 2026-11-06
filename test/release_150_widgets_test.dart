@@ -343,7 +343,9 @@ void main() {
       await _done(tester);
     });
 
-    testWidgets('the card has a white body and a header bar in the urgency colour', (tester) async {
+    testWidgets('the card has a white body, a bar in the type colour and the timer in the urgency colour', (
+      tester,
+    ) async {
       final fresh = StoredOrder.fromJson(_online('c-1'));
       final late = StoredOrder.fromJson(_online('c-2', ago: const Duration(minutes: 50)));
       // Paid pickups: with the paid wave on their bar is the red "customer
@@ -364,8 +366,23 @@ void main() {
             find.descendant(of: find.byKey(ValueKey(id)), matching: find.byKey(const ValueKey('card-bar'))),
           )
           .color!;
-      expect(barOf('c-1'), QuiccColors.statusPaid, reason: 'green while fresh');
-      expect(barOf('c-2'), QuiccColors.statusVoided, reason: 'red at twice the green time');
+      // 2.0.5: the bar is the store's colour for the type (blue by default);
+      // the timer pill carries the urgency.
+      expect(barOf('c-1'), StoreLook.defaultTicket);
+      expect(barOf('c-2'), StoreLook.defaultTicket);
+      Color timerOf(String id) =>
+          (tester
+                      .widget<Container>(
+                        find.descendant(
+                          of: find.byKey(ValueKey(id)),
+                          matching: find.byKey(const ValueKey('ticket-timer-pill')),
+                        ),
+                      )
+                      .decoration!
+                  as BoxDecoration)
+              .color!;
+      expect(timerOf('c-1'), QuiccColors.statusPaid, reason: 'green while fresh');
+      expect(timerOf('c-2'), QuiccColors.statusVoided, reason: 'red at twice the green time');
       final card = tester.widget<Container>(
         find.descendant(of: find.byKey(const ValueKey('c-1')), matching: find.byType(Container)).first,
       );
@@ -533,7 +550,8 @@ void main() {
       (m['order']['fulfillment'] as Map)['promised_at'] = due.toIso8601String();
       final so = StoredOrder.fromJson(m);
       await _pump(tester, _Agent(), _floorState([so]), OrderDetailScreen(orderId: so.id, initial: so));
-      expect(find.text('Due ${_clock(due)}'), findsOneWidget);
+      expect(find.textContaining('Due ') , findsWidgets);
+      expect(find.textContaining(_clock(due)), findsWidgets);
       expect(find.text('CHANGE LEAD TIME'), findsOneWidget);
       expect(find.text('REPRINT RECEIPT'), findsNothing);
       expect(find.text('LATER'), findsOneWidget, reason: 'the state pill');

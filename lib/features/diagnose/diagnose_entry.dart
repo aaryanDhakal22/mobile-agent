@@ -178,7 +178,7 @@ class ResumeGuideBanner extends StatelessWidget {
     ),
     child: Row(
       children: [
-        const Icon(Icons.play_circle_outline, color: QuiccColors.brand400, size: 30),
+        Icon(Icons.play_circle_outline, color: QuiccColors.brand400, size: 30),
         const SizedBox(width: 12),
         Expanded(
           child: Text('Unfinished: $name', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),

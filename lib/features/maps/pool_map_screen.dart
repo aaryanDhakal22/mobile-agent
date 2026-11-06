@@ -112,7 +112,7 @@ class _PoolMapScreenState extends ConsumerState<PoolMapScreen> {
         toolbarHeight: 72,
         title: Row(
           children: [
-            const Icon(Icons.route, color: QuiccColors.brand400, size: 28),
+            Icon(Icons.route, color: QuiccColors.brand400, size: 28),
             const SizedBox(width: 12),
             Flexible(
               child: Text(
@@ -220,7 +220,7 @@ class _PoolMapScreenState extends ConsumerState<PoolMapScreen> {
               elevation: 2,
               child: IconButton(
                 tooltip: 'Recenter',
-                icon: const Icon(Icons.center_focus_strong, color: QuiccColors.brand400),
+                icon: Icon(Icons.center_focus_strong, color: QuiccColors.brand400),
                 onPressed: () => _ctrl.fitCamera(fit),
               ),
             ),
@@ -316,7 +316,7 @@ class _StopTile extends StatelessWidget {
               const SizedBox(width: 12),
               Text(
                 order.displayNumber,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
               ),
               const SizedBox(width: 12),
               Expanded(
