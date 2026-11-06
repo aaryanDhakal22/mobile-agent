@@ -106,7 +106,7 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
                         contentPadding: EdgeInsets.zero,
                         leading: Text(
                           o.displayNumber,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
                             color: QuiccColors.brand400,
@@ -186,7 +186,7 @@ class _BatchPaneState extends ConsumerState<BatchPane> {
                       const SizedBox(height: 8),
                       Text(
                         '#${floor.batch.id}',
-                        style: const TextStyle(fontSize: 56, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
+                        style: TextStyle(fontSize: 56, fontWeight: FontWeight.w800, color: QuiccColors.brand400),
                       ),
                       const SizedBox(height: 8),
                       Wrap(

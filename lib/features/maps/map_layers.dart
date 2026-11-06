@@ -193,7 +193,7 @@ Marker storeMarker(GeoPoint p) => Marker(
   point: ll(p),
   width: 40,
   height: 40,
-  child: const _Pin(icon: Icons.storefront, color: QuiccColors.brand600),
+  child: _Pin(icon: Icons.storefront, color: QuiccColors.brand600),
 );
 
 /// The customer's door ([approx] = amber).

@@ -410,23 +410,24 @@ void main() {
         ),
       );
       await tester.pump();
-      final list = find.byType(Scrollable).first;
-      for (final key in [
-        'group-deliveries',
-        'coming-radius',
-        'coming-nearby',
-        'coming-auto-assign',
-        'group-times',
-        'group-tickets',
-        'group-receipts',
-        'group-look',
-      ]) {
-        await tester.scrollUntilVisible(find.byKey(ValueKey(key)), 200, scrollable: list);
+      // 2.0.5: the groups are rows; Deliveries opens its page.
+      for (final key in ['group-deliveries', 'group-times', 'group-tickets', 'group-receipts', 'group-look']) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
-        if (key == 'coming-nearby') expect(find.text('Coming with the next Pi update'), findsAtLeastNWidgets(2));
       }
       expect(find.text('THE PI'), findsNothing, reason: 'the Pi moved to developer mode');
       expect(find.text('FEATURES'), findsNothing, reason: 'features moved to developer mode');
+      await tester.tap(find.byKey(const ValueKey('group-deliveries')));
+      await tester.pump(const Duration(milliseconds: 300));
+      for (final key in ['coming-radius', 'coming-nearby', 'coming-auto-assign']) {
+        await tester.scrollUntilVisible(find.byKey(ValueKey(key)), 200, scrollable: find.byType(Scrollable).first);
+        expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
+      }
+      expect(find.text('Coming with the next Pi update'), findsAtLeastNWidgets(2));
+      await tester.tap(find.byKey(const ValueKey('settings-back')));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.byKey(const ValueKey('group-look')));
+      await tester.pump(const Duration(milliseconds: 300));
+      final list = find.byType(Scrollable).first;
 
       await tester.scrollUntilVisible(find.byKey(const ValueKey('motion-speed')), 200, scrollable: list);
       await tester.pump();

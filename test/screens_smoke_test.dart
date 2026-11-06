@@ -441,13 +441,27 @@ void main() {
     testWidgets('store settings render every group', (tester) async {
       await pumpSettings(tester, body: const StoreSettingsScreen());
       expect(tester.takeException(), isNull);
-      // The list is lazy: check each thing once it is scrolled to.
-      for (final t in ['RECEIPTS', 'TEST CALLOUT', 'ORDER CHIME', 'LIGHT OR DARK', 'System', 'MOTION']) {
-        await tester.scrollUntilVisible(find.text(t), 200, scrollable: find.byType(Scrollable).first);
-        expect(find.text(t), findsOneWidget, reason: t);
+      // 2.0.5: a list of groups; each opens its own page (back = the list).
+      for (final g in kStoreSettingsGroups) {
+        expect(find.byKey(ValueKey('group-${g.id}')), findsOneWidget, reason: g.id);
       }
-      // PREVIEW: the callout voice's and the chime's.
-      expect(find.text('PREVIEW'), findsWidgets);
+      for (final (group, texts) in [
+        ('receipts', ['RECEIPTS']),
+        ('callout', ['TEST CALLOUT']),
+        ('colors', ['COLORS']),
+        ('look', ['ORDER CHIME', 'LIGHT OR DARK', 'System', 'MOTION']),
+      ]) {
+        await tester.tap(find.byKey(ValueKey('group-$group')));
+        await tester.pump(const Duration(milliseconds: 300));
+        for (final t in texts) {
+          await tester.scrollUntilVisible(find.text(t), 200, scrollable: find.byType(Scrollable).first);
+          expect(find.text(t), findsOneWidget, reason: t);
+        }
+        // PREVIEW: the chime's.
+        if (group == 'look') expect(find.text('PREVIEW'), findsWidgets);
+        await tester.tap(find.byKey(const ValueKey('settings-back')));
+        await tester.pump(const Duration(milliseconds: 300));
+      }
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -554,6 +568,8 @@ void main() {
     testWidgets('the theme picker saves the choice', (tester) async {
       final c = await pumpSettings(tester, body: const StoreSettingsScreen());
       expect(c.read(themeModeProvider), ThemeMode.dark, reason: 'dark by default');
+      await tester.tap(find.byKey(const ValueKey('group-look')));
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.scrollUntilVisible(find.text('Light'), 200, scrollable: find.byType(Scrollable).first);
       await tester.ensureVisible(find.text('Light'));
       await tester.pump();

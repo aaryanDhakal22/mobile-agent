@@ -86,7 +86,7 @@ class _Prompt extends ConsumerWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.system_update, size: 48, color: QuiccColors.brand400),
+                  Icon(Icons.system_update, size: 48, color: QuiccColors.brand400),
                   QuiccSpace.gapLg,
                   Text(title, style: QuiccType.text(QuiccType.title, weight: FontWeight.w700)),
                   QuiccSpace.gapSm,

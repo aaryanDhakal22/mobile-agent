@@ -74,7 +74,7 @@ class _RingingBanner extends ConsumerWidget {
             padding: const EdgeInsets.symmetric(horizontal: QuiccSpace.xl, vertical: QuiccSpace.md),
             child: Row(
               children: [
-                const Icon(Icons.notifications_active, color: QuiccColors.brand900),
+                Icon(Icons.notifications_active, color: QuiccColors.brand900),
                 QuiccSpace.gapMd,
                 Expanded(
                   child: Text(
@@ -200,7 +200,7 @@ class _NewOrderAlertState extends ConsumerState<NewOrderAlert> with SingleTicker
     if (widget.order == null && arrived.isEmpty) return const SizedBox.shrink();
     final first = widget.order ?? arrived.first;
     final o = first.order;
-    const onBrand = QuiccColors.brand900;
+    final onBrand = QuiccColors.brand900;
     final bg = loud ? QuiccColors.statusFiring : QuiccColors.brand400;
 
     final address = o.fulfillment.address;
@@ -259,7 +259,7 @@ class _NewOrderAlertState extends ConsumerState<NewOrderAlert> with SingleTicker
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: onBrand,
-                      side: const BorderSide(color: onBrand, width: 2),
+                      side: BorderSide(color: onBrand, width: 2),
                       textStyle: QuiccType.text(QuiccType.label, weight: FontWeight.w600),
                     ),
                     onPressed: () => ref.read(alarmProvider.notifier).hide(),

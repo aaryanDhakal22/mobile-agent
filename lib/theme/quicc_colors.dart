@@ -5,16 +5,29 @@ import 'package:flutter/material.dart';
 /// surfaces") and the semantic order-state colors. For theme-swappable
 /// tokens (surfaces, text), use [QuiccPalette] via `context.palette.*`.
 class QuiccColors {
-  // Brand — lavender ramp
-  static const brand50 = Color(0xFFF4F1FB);
-  static const brand100 = Color(0xFFE4DFF1);
-  static const brand200 = Color(0xFFCFC4EE);
-  static const brand400 = Color(0xFFAC94F4); // anchor
-  static const brand500 = Color(0xFF8A6FE0);
-  static const brand600 = Color(0xFF6D4FD4);
-  static const brand700 = Color(0xFF533AA4);
-  static const brand800 = Color(0xFF3B2974);
-  static const brand900 = Color(0xFF241B47);
+  // Brand — lavender ramp by default; 2.0.5: the store's accent (Settings →
+  // Sound & look → Colors, saved on the Pi) swaps the whole ramp at runtime
+  // ([setAccent]), so these are getters, not consts.
+  static BrandRamp _ramp = BrandRamp.lavender;
+  static BrandRamp get ramp => _ramp;
+  static Color get brand50 => _ramp.c50;
+  static Color get brand100 => _ramp.c100;
+  static Color get brand200 => _ramp.c200;
+  static Color get brand400 => _ramp.c400; // anchor
+  static Color get brand500 => _ramp.c500;
+  static Color get brand600 => _ramp.c600;
+  static Color get brand700 => _ramp.c700;
+  static Color get brand800 => _ramp.c800;
+  static Color get brand900 => _ramp.c900;
+
+  /// Draws the app in [accent] from now on (the lavender ramp for the
+  /// default). True when it changed — the caller rebuilds every widget.
+  static bool setAccent(Color accent) {
+    final next = BrandRamp.from(accent);
+    if (next.c400 == _ramp.c400) return false;
+    _ramp = next;
+    return true;
+  }
 
   // Semantic — order states. Stay the same in both themes; the surrounding
   // surface provides enough contrast in either.
@@ -31,6 +44,47 @@ class QuiccColors {
 
   /// A removed (voided) line: struck through in this red.
   static const removedRed = Color(0xFFDC2626);
+}
+
+/// The nine shades the app is drawn in, from one anchor (the 400).
+@immutable
+class BrandRamp {
+  final Color c50, c100, c200, c400, c500, c600, c700, c800, c900;
+  const BrandRamp(this.c50, this.c100, this.c200, this.c400, this.c500, this.c600, this.c700, this.c800, this.c900);
+
+  /// The brand guidelines' lavender (exact, so the goldens never move).
+  static const lavender = BrandRamp(
+    Color(0xFFF4F1FB),
+    Color(0xFFE4DFF1),
+    Color(0xFFCFC4EE),
+    Color(0xFFAC94F4),
+    Color(0xFF8A6FE0),
+    Color(0xFF6D4FD4),
+    Color(0xFF533AA4),
+    Color(0xFF3B2974),
+    Color(0xFF241B47),
+  );
+
+  /// A ramp around [anchor] at the lavender's lightness steps: the light
+  /// shades washed out, the deep ones dark enough for text on the anchor.
+  factory BrandRamp.from(Color anchor) {
+    final a = anchor.withValues(alpha: 1);
+    if (a.toARGB32() == lavender.c400.toARGB32()) return lavender;
+    final h = HSLColor.fromColor(a);
+    Color at(double sat, double light) =>
+        h.withSaturation((h.saturation * sat).clamp(0.0, 1.0)).withLightness(light).toColor();
+    return BrandRamp(
+      at(0.45, 0.96),
+      at(0.4, 0.91),
+      at(0.6, 0.85),
+      a,
+      at(0.85, (h.lightness - 0.11).clamp(0.3, 0.7)),
+      at(0.75, (h.lightness - 0.2).clamp(0.25, 0.6)),
+      at(0.55, 0.43),
+      at(0.5, 0.31),
+      at(0.45, 0.19),
+    );
+  }
 }
 
 class QuiccRadius {

@@ -381,7 +381,7 @@ class _DriverFabState extends ConsumerState<DriverFab> with TickerProviderStateM
                           semantics: out.isEmpty
                               ? 'Driver button. No drivers out'
                               : 'Driver button. ${out.length} driver${out.length == 1 ? '' : 's'} out',
-                          child: const Icon(Icons.local_shipping_outlined, color: QuiccColors.brand900, size: 30),
+                          child: Icon(Icons.local_shipping_outlined, color: QuiccColors.brand900, size: 30),
                         ),
                 ),
               ],
@@ -517,7 +517,7 @@ class _CloseUndoButton extends StatelessWidget {
                 strokeWidth: ringStroke,
                 strokeCap: StrokeCap.round,
                 backgroundColor: Colors.transparent,
-                valueColor: const AlwaysStoppedAnimation(QuiccColors.brand900),
+                valueColor: AlwaysStoppedAnimation(QuiccColors.brand900),
               ),
             ),
           ),
@@ -526,7 +526,7 @@ class _CloseUndoButton extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.close, color: QuiccColors.brand900, size: 28),
+          Icon(Icons.close, color: QuiccColors.brand900, size: 28),
           if (canUndo)
             Text(
               'hold: undo',
@@ -734,7 +734,7 @@ class _DriverPill extends StatelessWidget {
               Container(
                 width: 28,
                 height: 28,
-                decoration: const BoxDecoration(color: QuiccColors.brand400, shape: BoxShape.circle),
+                decoration: BoxDecoration(color: QuiccColors.brand400, shape: BoxShape.circle),
                 alignment: Alignment.center,
                 child: Text(
                   driver.name.isEmpty ? '?' : driver.name.characters.first.toUpperCase(),

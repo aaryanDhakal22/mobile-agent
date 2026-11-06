@@ -560,7 +560,7 @@ class DriverDeliveryCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (out) const GeoTag('OUT', color: QuiccColors.brand400),
+              if (out) GeoTag('OUT', color: QuiccColors.brand400),
             ],
           ),
         ),

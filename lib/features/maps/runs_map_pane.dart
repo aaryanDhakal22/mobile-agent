@@ -155,7 +155,7 @@ class _RunsMapPaneState extends ConsumerState<RunsMapPane> {
                               child: IconButton(
                                 key: const ValueKey('map-refresh'),
                                 tooltip: 'Reload the map',
-                                icon: const Icon(Icons.refresh, color: QuiccColors.brand400),
+                                icon: Icon(Icons.refresh, color: QuiccColors.brand400),
                                 onPressed: _refresh,
                               ),
                             ),

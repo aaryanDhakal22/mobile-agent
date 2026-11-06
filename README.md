@@ -271,6 +271,30 @@ for a delivery). Taps pass through the banner.
 
 The screen is kept on with `wakelock_plus`.
 
+## 2.0.5 — Future-order actions, store colours, Settings list (Pi 2.4.3)
+
+- A waiting future order's details (tap it in the Future strip, or open one
+  still ringing) have **MAKE NOW** (accept now with a prep time: the store
+  default for its type, −5 / +5), **CHANGE DUE TIME** (Today / Tomorrow / a
+  date within 14 days, then a 5-minute wheel; the ring time follows; only the
+  Pi knows the new time), **PRINT NOW** (kitchen tickets, receipt or both,
+  early) and **CANCEL ORDER** (a red confirm with the total; card orders say
+  to refund with the online ordering company), next to CHANGE LEAD TIME. An
+  older Pi keeps only CHANGE LEAD TIME and says it needs an update.
+- Deliveries: selecting no longer pushes the Waiting rows down (the hint line
+  is gone); the select bar has **MARK DELIVERED · N** for every selected
+  delivery, with one UNDO. MARK DELIVERED on an order's details closes them.
+- Kitchen: switching All / Delivery / Pickup just hides tickets — the READY
+  implosion and ✓ are for READY only, and the board doesn't glide.
+- **Settings** is a list like Android's: tap a group to open its page; the
+  back arrow (or Android back) returns.
+- **Colors** (saved on the Pi, every tablet and the Pi's web page): the
+  accent (ten swatches; the whole brand ramp is built from it —
+  `QuiccColors.brand*` are getters now, `QuiccColors.setAccent`, and the app
+  rebuilds every widget once on a change) and a colour per ticket type
+  (delivery / pickup / counter, blue by default) for each Kitchen ticket's
+  bar. The timer is now a pill that keeps green → amber → red.
+
 ## 2.0.4 — Kitchen filter, condensed tickets, ticket-number order
 
 - Kitchen has **All · Delivery · Pickup** buttons with live counts. Pickup is

@@ -71,7 +71,7 @@ class QuiccTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(QuiccRadius.md),
-          borderSide: const BorderSide(color: QuiccColors.brand400, width: 2),
+          borderSide: BorderSide(color: QuiccColors.brand400, width: 2),
         ),
       ),
     );

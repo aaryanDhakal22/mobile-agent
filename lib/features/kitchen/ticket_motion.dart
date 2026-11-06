@@ -334,6 +334,15 @@ class AnimatedKitchenGrid extends ConsumerStatefulWidget {
   /// Deals [orders] into columns (kitchen_pane's [dealIntoColumns]).
   final List<List<StoredOrder>> Function(List<StoredOrder> orders, int columns) deal;
 
+  /// 2.0.5: the tickets still on the board behind the filter (All ·
+  /// Delivery · Pickup). One that only left [orders] because the filter hides
+  /// it just disappears — no READY implosion.
+  final Set<String> stillOnBoard;
+
+  /// 2.0.5: the filter. When it changes the board is laid out again at once
+  /// (no glide) and nothing that left implodes.
+  final Object? view;
+
   const AnimatedKitchenGrid({
     super.key,
     required this.orders,
@@ -341,6 +350,8 @@ class AnimatedKitchenGrid extends ConsumerStatefulWidget {
     required this.gap,
     required this.itemBuilder,
     required this.deal,
+    this.stillOnBoard = const {},
+    this.view,
   });
 
   @override
@@ -352,6 +363,9 @@ class AnimatedKitchenGridState extends ConsumerState<AnimatedKitchenGrid> with T
   final Map<String, _Ghost> _ghosts = {};
   Motion _motion = const Motion(full: true, speed: 1);
 
+  /// The frame after a filter switch: lay out with no glide.
+  bool _snap = false;
+
   /// The leaving tickets still on screen (tests).
   @visibleForTesting
   Iterable<String> get ghosts => _ghosts.keys;
@@ -361,10 +375,20 @@ class AnimatedKitchenGridState extends ConsumerState<AnimatedKitchenGrid> with T
     super.didUpdateWidget(oldWidget);
     final old = oldWidget;
     final now = {for (final o in widget.orders) o.id};
+    final viewChanged = widget.view != old.view;
+    if (viewChanged) {
+      // A filter switch: everything snaps to its new place.
+      _snap = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _snap = false;
+      });
+    }
     for (final o in old.orders) {
       if (now.contains(o.id)) continue;
       final rect = flip.rectOf(o.id);
       flip.forget(o.id);
+      // Hidden by the filter (still cooking): it just goes.
+      if (viewChanged || widget.stillOnBoard.contains(o.id)) continue;
       if (rect == null || rect.isEmpty || _ghosts.containsKey(o.id)) continue;
       final c = AnimationController(vsync: this, duration: _motion.full ? _motion.scale(kTicketExit) : _motion.fade);
       final g = _Ghost(o, rect, c);
@@ -445,7 +469,7 @@ class AnimatedKitchenGridState extends ConsumerState<AnimatedKitchenGrid> with T
   Widget build(BuildContext context) {
     _motion = Motion.of(context, ref);
     flip
-      ..enabled = _motion.full
+      ..enabled = _motion.full && !_snap
       ..duration = _motion.scale(kTicketGlide);
     // Seeded by the Kitchen pane on the first load (nothing pops before).
     final seen = ref.read(kitchenSeenProvider);

@@ -110,7 +110,7 @@ class _GuideCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(useWhen, style: TextStyle(fontSize: 16, height: 1.35, color: palette.textSecondary)),
                     const SizedBox(height: 12),
-                    const Row(
+                    Row(
                       children: [
                         Text(
                           'START',

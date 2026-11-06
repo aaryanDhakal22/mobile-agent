@@ -26,6 +26,7 @@ import 'package:mobile_agent/features/common/widgets.dart';
 import 'package:mobile_agent/features/dev/dev_gate.dart';
 import 'package:mobile_agent/features/home/home_nav.dart';
 import 'package:mobile_agent/features/home/home_screen.dart';
+import 'package:mobile_agent/features/order_detail/order_detail_screen.dart';
 import 'package:mobile_agent/features/update/update_prompt.dart';
 import 'package:mobile_agent/features/update/updater.dart';
 import 'package:mobile_agent/theme/quicc_theme.dart';
@@ -409,6 +410,49 @@ void main() {
       c.read(homeNavProvider.notifier).go(HomeDestination.settings);
       await _settle(tester);
       await _golden(tester, 'store_settings_$theme');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    golden('settings colors', (tester) async {
+      final c = await _pump(tester, dark: dark);
+      final f = c.read(floorProvider.notifier) as FakeDeliveryFloor;
+      final st = f.state;
+      f.push(
+        st.copyWith(
+          floor: st.floor!.copyWith(
+            settings: st.settings.copyWith(look: const StoreLook().copyWith(delivery: const Color(0xFF8B5CF6))),
+          ),
+        ),
+      );
+      c.read(homeNavProvider.notifier).go(HomeDestination.settings);
+      await _settle(tester);
+      await tester.tap(find.byKey(const ValueKey('group-colors')));
+      await _settle(tester);
+      await _golden(tester, 'settings_colors_$theme');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    golden('future order details', (tester) async {
+      final due = _now.add(const Duration(hours: 26));
+      final m = jsonDecode(onDeliveryJson) as Map<String, dynamic>;
+      final o = m['order'] as Map;
+      o['id'] = 'fut-1';
+      (o['fulfillment'] as Map)['promised_at'] = due.toIso8601String();
+      m['status'] = {
+        'state': 'scheduled',
+        'future': true,
+        'batch_id': 7,
+        'arrival_date': _now.toIso8601String(),
+        'scheduled_lead_minutes': 45,
+        'ring_at': due.subtract(const Duration(minutes: 45)).toIso8601String(),
+      };
+      final so = StoredOrder.fromJson(m);
+      await _pump(tester, dark: dark, extra: so);
+      tester
+          .state<NavigatorState>(find.byType(Navigator).first)
+          .push(MaterialPageRoute<void>(builder: (_) => OrderDetailScreen(orderId: so.id, initial: so)));
+      await _settle(tester);
+      await _golden(tester, 'future_detail_$theme');
       await tester.pumpWidget(const SizedBox());
     });
 

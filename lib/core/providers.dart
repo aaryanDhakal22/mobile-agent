@@ -484,6 +484,39 @@ class FloorController extends Notifier<FloorState> {
     }
   }
 
+  // --- a waiting future order's actions (2.0.5, Pi 2.4.3) -------------------------
+
+  void _futureErr(Object e) {
+    if (e is! AgentException) return;
+    if (e.code == kFutureActionsUnsupported) ref.read(futureActionsUnsupportedProvider.notifier).state = true;
+    if (e.isConflict || e.isNotFound || e.isPrinterFailure) unawaited(refresh());
+  }
+
+  Future<T> _future<T>(Future<T> Function(AgentClient c) call, StoredOrder? Function(T) order) async {
+    try {
+      final r = await call(_requireClient(ref));
+      final o = order(r);
+      if (o != null && o.id.isNotEmpty) _upsert([o]);
+      return r;
+    } catch (e) {
+      _futureErr(e);
+      rethrow;
+    }
+  }
+
+  /// MAKE NOW: out of the future and accepted with [prepMinutes].
+  Future<StoredOrder> makeNow(String id, int prepMinutes) => _future((c) => c.makeNow(id, prepMinutes), (o) => o);
+
+  /// CHANGE DUE TIME (on the Pi only).
+  Future<StoredOrder> changeDue(String id, DateTime due) => _future((c) => c.changeDue(id, due), (o) => o);
+
+  /// PRINT NOW: the early kitchen tickets and / or receipt.
+  Future<KitchenResend> printNow(String id, {required bool kitchen, required bool receipt}) =>
+      _future((c) => c.printNow(id, kitchen: kitchen, receipt: receipt), (r) => r.order);
+
+  /// CANCEL a waiting future order.
+  Future<StoredOrder> cancelFuture(String id) => _future((c) => c.cancelFuture(id), (o) => o);
+
   /// Staff picked candidate [index] of an ambiguous address; the located
   /// address arrives later as an order update.
   Future<void> chooseGeo(String orderId, int index) => _requireClient(ref).chooseGeo(orderId, index);
@@ -521,6 +554,20 @@ class FloorController extends Notifier<FloorState> {
     final saved = await _requireClient(ref).putFinishing(next);
     _setSettings((s) => s.copyWith(finishing: saved));
     return saved;
+  }
+
+  /// The store's colours (Pi 2.4.3); shown at once, saved for every tablet.
+  Future<StoreLook> saveLook({Color? accent, Color? delivery, Color? pickup, Color? counter}) async {
+    try {
+      final saved = await _requireClient(
+        ref,
+      ).setLook(accent: accent, delivery: delivery, pickup: pickup, counter: counter);
+      _setSettings((s) => s.copyWith(look: saved));
+      return saved;
+    } catch (e) {
+      _futureErr(e);
+      rethrow;
+    }
   }
 
   Future<CalloutSettings> saveCallout(CalloutSettings next) async {
@@ -1027,6 +1074,20 @@ final fobPopProvider = StateProvider<AutoAssignment?>((_) => null);
 /// between drivers, the pool's stop order): those actions hide or say
 /// "update the Pi". Forgotten when the Pi changes.
 final unassignedUnsupportedProvider = StateProvider<bool>((ref) {
+  ref.watch(_agentLinkProvider);
+  return false;
+});
+
+/// The store's colours (Pi 2.4.3; the defaults on an older Pi or before the
+/// floor loads): the accent the app is drawn in, each ticket type's bar.
+final storeLookProvider = Provider<StoreLook>(
+  (ref) => ref.watch(floorProvider.select((s) => s.floor?.settings.look)) ?? const StoreLook(),
+);
+
+/// The paired Pi has no 2.4.3 routes (a future order's MAKE NOW / CHANGE DUE
+/// TIME / PRINT NOW / CANCEL, the store's colours): those hide and say "This
+/// Pi needs an update". Forgotten when the Pi changes.
+final futureActionsUnsupportedProvider = StateProvider<bool>((ref) {
   ref.watch(_agentLinkProvider);
   return false;
 });

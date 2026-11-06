@@ -11,6 +11,7 @@ import '../../core/providers.dart';
 import '../../theme/quicc_colors.dart';
 import '../../theme/quicc_spacing.dart';
 import '../../theme/quicc_type.dart';
+import '../common/island.dart';
 import '../common/widgets.dart';
 import '../home/home_nav.dart';
 import '../maps/pool_map_screen.dart';
@@ -413,14 +414,9 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                   ],
                 ),
               ),
-              if (moveHere)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(QuiccSpace.sm, 0, QuiccSpace.sm, QuiccSpace.sm),
-                  child: Text(
-                    'Tap here to take the selected out of their pools',
-                    style: QuiccType.text(QuiccType.label, color: context.palette.textMuted),
-                  ),
-                ),
+              // 2.0.5 (owner): no hint line here any more — it pushed every
+              // row down while staff were still picking. The column's border
+              // says it is a tap target; the select bar says the rest.
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () => _floor.refresh(),
@@ -628,7 +624,7 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                   ),
                   IconButton(
                     tooltip: 'Show the run on the map',
-                    icon: const Icon(Icons.map_outlined, color: QuiccColors.brand400),
+                    icon: Icon(Icons.map_outlined, color: QuiccColors.brand400),
                     onPressed: stops == 0
                         ? null
                         : () => _openPoolMap(d, [for (final c in chips) c.order.id], yellowIds.toSet()),
@@ -751,6 +747,14 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
     final run = pool == null ? const <StoredOrder>[] : fs.poolFor(pool);
     final at = one == null ? -1 : run.indexWhere((o) => o.id == one.id);
     final left = fs.unassignedDeliveries.map((o) => o.id).toSet();
+    // 2.0.5: MARK DELIVERED for every selected delivery that can be.
+    final batchId = fs.currentBatchId;
+    final markable = ref.watch(unassignedUnsupportedProvider) || batchId == null
+        ? const <StoredOrder>[]
+        : [
+            for (final o in _selected.map((id) => fs.orders[id]).nonNulls)
+              if (o.canMarkDelivered && o.status.batchId == batchId) o,
+          ];
     return Material(
       key: const ValueKey('select-bar'),
       elevation: 6,
@@ -784,6 +788,15 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
                 onPressed: at == run.length - 1 ? null : () => _moveStop(pool!, run, at, at + 1),
               ),
             ],
+            if (markable.isNotEmpty) ...[
+              FilledButton.icon(
+                key: const ValueKey('mark-delivered-selected'),
+                onPressed: _marking ? null : () => _markDelivered(markable),
+                icon: const Icon(Icons.task_alt),
+                label: Text('MARK DELIVERED · ${markable.length}'),
+              ),
+              QuiccSpace.gapSm,
+            ],
             if (!left.every(_selected.contains))
               TextButton(
                 key: const ValueKey('select-all'),
@@ -795,6 +808,58 @@ class _DeliveriesPaneState extends ConsumerState<DeliveriesPane> {
         ),
       ),
     );
+  }
+
+  bool _marking = false;
+
+  /// MARK DELIVERED on the selection (2.0.5): each goes to Unassigned on the
+  /// Drivers tab; one pill with UNDO for all of them. The ones that didn't
+  /// go stay selected.
+  Future<void> _markDelivered(List<StoredOrder> orders) async {
+    final island = Island.maybeOf(context);
+    setState(() => _marking = true);
+    final done = <StoredOrder>[];
+    Object? firstError;
+    for (final o in orders) {
+      try {
+        await _floor.markDelivered(o.id);
+        done.add(o);
+      } catch (e) {
+        firstError ??= e;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _marking = false;
+      _selected.removeAll(done.map((o) => o.id));
+    });
+    if (done.isNotEmpty) {
+      final failed = orders.length - done.length;
+      island?.show(
+        '${done.length} delivered · Unassigned${failed > 0 ? ' · $failed not marked' : ''}',
+        kind: failed > 0 ? IslandKind.info : IslandKind.success,
+        duration: const Duration(seconds: 10),
+        actions: [
+          IslandAction('UNDO', () async {
+            var back = 0;
+            for (final o in done) {
+              try {
+                await _floor.undeliver(o.id);
+                back++;
+              } catch (_) {}
+            }
+            island.show(
+              back == done.length
+                  ? '${done.length} back on Deliveries'
+                  : "Couldn't undo ${done.length - back} — they stay delivered (Drivers → Unassigned)",
+              kind: back == done.length ? IslandKind.info : IslandKind.error,
+            );
+          }),
+        ],
+      );
+    } else if (firstError != null) {
+      toastError(context, firstError, lead: 'Not marked delivered', area: 'deliveries', rightInset: _toastInset);
+    }
   }
 
   /// ▲ / ▼: the stop at [from] moves to [to] in [driverId]'s pool.
